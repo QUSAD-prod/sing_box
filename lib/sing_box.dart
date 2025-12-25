@@ -251,10 +251,10 @@ class SingBox {
 
   /// Save settings
   /// [settings] - settings object to save
-  Future<bool> saveSingBoxSettings(SingBoxSettings settings) async {
+  Future<bool> saveSettings(SingBoxSettings settings) async {
     _observer.info('Saving settings');
     try {
-      final result = await SingBoxPlatform.instance.saveSingBoxSettings(settings);
+      final result = await SingBoxPlatform.instance.saveSettings(settings);
       if (result) {
         _observer.info('SingBoxSettings saved successfully');
       } else {
@@ -268,8 +268,8 @@ class SingBox {
   }
 
   /// Load settings
-  Future<SingBoxSettings> loadSingBoxSettings() {
-    return SingBoxPlatform.instance.loadSingBoxSettings();
+  Future<SingBoxSettings> loadSettings() {
+    return SingBoxPlatform.instance.loadSettings();
   }
 
   /// Get current settings
@@ -351,10 +351,10 @@ class SingBox {
 
   /// Set active server configuration
   /// [configId] - configuration identifier
-  Future<bool> setActiveSingBoxServerConfig(String configId) async {
+  Future<bool> setActiveServerConfig(String configId) async {
     _observer.onActiveServerConfigChanged(configId);
     try {
-      final result = await SingBoxPlatform.instance.setActiveSingBoxServerConfig(configId);
+      final result = await SingBoxPlatform.instance.setActiveServerConfig(configId);
       if (result) {
         _observer.info('Active server config changed', {'id': configId});
       }

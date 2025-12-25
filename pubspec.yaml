@@ -20,4 +20,9 @@ dev_dependencies:
 
 flutter:
   plugin:
-    platforms: {}
+    platforms:
+      android:
+        package: com.qusadprod.sing_box
+        pluginClass: SingBoxPlugin
+      ios:
+        pluginClass: SingBoxPlugin

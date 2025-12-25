@@ -308,9 +308,9 @@ class MethodChannelSingBox extends SingBoxPlatform {
   }
 
   @override
-  Future<bool> saveSingBoxSettings(SingBoxSettings settings) async {
+  Future<bool> saveSettings(SingBoxSettings settings) async {
     try {
-      final result = await methodChannel.invokeMethod<bool>('saveSingBoxSettings', {
+      final result = await methodChannel.invokeMethod<bool>('saveSettings', {
         'settings': settings.toMap(),
       });
       return result ?? false;
@@ -321,9 +321,9 @@ class MethodChannelSingBox extends SingBoxPlatform {
   }
 
   @override
-  Future<SingBoxSettings> loadSingBoxSettings() async {
+  Future<SingBoxSettings> loadSettings() async {
     try {
-      final settingsMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('loadSingBoxSettings');
+      final settingsMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('loadSettings');
       if (settingsMap != null) {
         return SingBoxSettings.fromMap(settingsMap);
       }
@@ -432,9 +432,9 @@ class MethodChannelSingBox extends SingBoxPlatform {
   }
 
   @override
-  Future<bool> setActiveSingBoxServerConfig(String configId) async {
+  Future<bool> setActiveServerConfig(String configId) async {
     try {
-      final result = await methodChannel.invokeMethod<bool>('setActiveSingBoxServerConfig', {
+      final result = await methodChannel.invokeMethod<bool>('setActiveServerConfig', {
         'configId': configId,
       });
       return result ?? false;

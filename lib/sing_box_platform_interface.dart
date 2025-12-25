@@ -135,13 +135,13 @@ abstract class SingBoxPlatform extends PlatformInterface {
 
   /// Save settings
   /// [settings] - settings object to save
-  Future<bool> saveSingBoxSettings(SingBoxSettings settings) {
-    throw UnimplementedError('saveSingBoxSettings() has not been implemented.');
+  Future<bool> saveSettings(SingBoxSettings settings) {
+    throw UnimplementedError('saveSettings() has not been implemented.');
   }
 
   /// Load settings
-  Future<SingBoxSettings> loadSingBoxSettings() {
-    throw UnimplementedError('loadSingBoxSettings() has not been implemented.');
+  Future<SingBoxSettings> loadSettings() {
+    throw UnimplementedError('loadSettings() has not been implemented.');
   }
 
   /// Get current settings
@@ -187,8 +187,8 @@ abstract class SingBoxPlatform extends PlatformInterface {
 
   /// Set active server configuration
   /// [configId] - configuration identifier
-  Future<bool> setActiveSingBoxServerConfig(String configId) {
-    throw UnimplementedError('setActiveSingBoxServerConfig() has not been implemented.');
+  Future<bool> setActiveServerConfig(String configId) {
+    throw UnimplementedError('setActiveServerConfig() has not been implemented.');
   }
 
   /// Get active server configuration
