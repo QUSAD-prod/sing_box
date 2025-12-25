@@ -4,7 +4,12 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:sing_box/sing_box.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize plugin
+  await SingBox.instance.initialize();
+  
   runApp(const MyApp());
 }
 
@@ -17,7 +22,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
-  final _singBoxPlugin = SingBox();
+  final _singBoxPlugin = SingBox.instance;
 
   @override
   void initState() {
