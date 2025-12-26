@@ -443,7 +443,7 @@ class MethodChannelSingBox extends SingBoxPlatform {
   Future<SingBoxServerConfig?> getActiveSingBoxServerConfig() async {
     try {
       final configMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'getActiveSingBoxServerConfig',
+        'getActiveServerConfig',
       );
       if (configMap != null) {
         return SingBoxServerConfig.fromMap(configMap);

@@ -271,10 +271,11 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
             }
         }
         
-        // Calculate connectionDuration
+        // Calculate connectionDuration (in milliseconds, like Android)
         if let startTime = connectionStartTime {
-            let duration = Int(Date().timeIntervalSince(startTime))
-            stats["connectionDuration"] = duration
+            let durationSeconds = Date().timeIntervalSince(startTime)
+            let durationMs = Int(durationSeconds * 1000)
+            stats["connectionDuration"] = durationMs
         } else {
             stats["connectionDuration"] = 0
         }
