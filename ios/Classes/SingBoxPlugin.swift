@@ -1,281 +1,219 @@
 import Flutter
 import UIKit
 
-public class SingBoxPlugin: NSObject, FlutterPlugin {
-    private var statusEventSink: FlutterEventSink?
-    private var statsEventSink: FlutterEventSink?
+public class SingBoxPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+    private var methodChannel: FlutterMethodChannel?
+    private var statusEventChannel: FlutterEventChannel?
+    private var statsEventChannel: FlutterEventChannel?
+    
+    // TODO: Add sing-box instance variables after integration
+    // private var singBoxInstance: SingBoxInstance?
     
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "sing_box", binaryMessenger: registrar.messenger())
+        let methodChannel = FlutterMethodChannel(name: "sing_box", binaryMessenger: registrar.messenger())
         let instance = SingBoxPlugin()
-        registrar.addMethodCallDelegate(instance, channel: channel)
+        instance.methodChannel = methodChannel
+        registrar.addMethodCallDelegate(instance, channel: methodChannel)
         
-        let statusEventChannel = FlutterEventChannel(name: "sing_box/status", binaryMessenger: registrar.messenger())
-        statusEventChannel.setStreamHandler(StatusStreamHandler(plugin: instance))
+        // Event channels for status and stats streams
+        instance.statusEventChannel = FlutterEventChannel(name: "sing_box/status", binaryMessenger: registrar.messenger())
+        instance.statusEventChannel?.setStreamHandler(instance)
         
-        let statsEventChannel = FlutterEventChannel(name: "sing_box/stats", binaryMessenger: registrar.messenger())
-        statsEventChannel.setStreamHandler(StatsStreamHandler(plugin: instance))
+        instance.statsEventChannel = FlutterEventChannel(name: "sing_box/stats", binaryMessenger: registrar.messenger())
+        instance.statsEventChannel?.setStreamHandler(instance)
     }
-    
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "initialize":
-            // TODO: Implement initialization logic
+            // TODO: Initialize sing-box instance
             result(true)
         case "getPlatformVersion":
-            // TODO: Implement platform version retrieval
-            result("iOS \(UIDevice.current.systemVersion)")
+            result("iOS " + UIDevice.current.systemVersion)
         case "connect":
-            // TODO: Implement VPN connection logic
             let args = call.arguments as? [String: Any]
             let config = args?["config"] as? String
+            // TODO: Implement VPN connection with sing-box
             result(false)
         case "disconnect":
-            // TODO: Implement VPN disconnection logic
+            // TODO: Implement VPN disconnection
             result(false)
         case "getConnectionStatus":
-            // TODO: Implement connection status retrieval
+            // TODO: Get current connection status from sing-box
             result("disconnected")
         case "getConnectionStats":
-            // TODO: Implement connection statistics retrieval
-            let stats: [String: Any] = [
+            // TODO: Get connection statistics from sing-box
+            result([
                 "downloadSpeed": 0,
                 "uploadSpeed": 0,
                 "bytesSent": 0,
                 "bytesReceived": 0,
                 "ping": NSNull(),
                 "connectionDuration": 0
-            ]
-            result(stats)
+            ])
         case "testSpeed":
-            // TODO: Implement speed test logic
-            let speedResult: [String: Any] = [
+            // TODO: Implement speed test
+            result([
                 "downloadSpeed": 0,
                 "uploadSpeed": 0,
                 "success": false,
                 "errorMessage": "Not implemented"
-            ]
-            result(speedResult)
+            ])
         case "pingCurrentServer":
             // TODO: Implement ping to current server
-            let pingResult: [String: Any] = [
+            result([
                 "ping": 0,
                 "success": false,
                 "errorMessage": "Not implemented",
                 "address": NSNull()
-            ]
-            result(pingResult)
-        case "pingConfig":
-            // TODO: Implement ping to config
-            let args = call.arguments as? [String: Any]
-            let config = args?["config"] as? String
-            let pingResult: [String: Any] = [
-                "ping": 0,
-                "success": false,
-                "errorMessage": "Not implemented",
-                "address": NSNull()
-            ]
-            result(pingResult)
+            ])
         case "addAppToBypass":
-            // TODO: Implement add app to bypass list
             let args = call.arguments as? [String: Any]
             let packageName = args?["packageName"] as? String
+            // TODO: Add app to bypass list
             result(false)
         case "removeAppFromBypass":
-            // TODO: Implement remove app from bypass list
             let args = call.arguments as? [String: Any]
             let packageName = args?["packageName"] as? String
+            // TODO: Remove app from bypass list
             result(false)
         case "getBypassApps":
-            // TODO: Implement get bypass apps list
+            // TODO: Get list of bypass apps
             result([])
         case "addDomainToBypass":
-            // TODO: Implement add domain to bypass list
             let args = call.arguments as? [String: Any]
             let domain = args?["domain"] as? String
+            // TODO: Add domain to bypass list
             result(false)
         case "removeDomainFromBypass":
-            // TODO: Implement remove domain from bypass list
             let args = call.arguments as? [String: Any]
             let domain = args?["domain"] as? String
+            // TODO: Remove domain from bypass list
             result(false)
         case "getBypassDomains":
-            // TODO: Implement get bypass domains list
+            // TODO: Get list of bypass domains
             result([])
         case "switchServer":
-            // TODO: Implement server switching logic
             let args = call.arguments as? [String: Any]
             let config = args?["config"] as? String
+            // TODO: Stop current connection, change config, reconnect
             result(false)
         case "saveSettings":
-            // TODO: Implement save settings logic
             let args = call.arguments as? [String: Any]
             let settings = args?["settings"] as? [String: Any]
+            // TODO: Save settings to UserDefaults
             result(false)
         case "loadSettings":
-            // TODO: Implement load settings logic
-            let settings: [String: Any] = [
-                "autoConnectOnStart": false,
-                "autoReconnectOnDisconnect": false,
-                "killSwitch": false,
-                "blockedApps": [],
-                "blockedDomains": [],
-                "bypassSubnets": [],
-                "dnsServers": [],
-                "activeServerConfigId": NSNull(),
-                "serverConfigs": []
-            ]
-            result(settings)
+            // TODO: Load settings from UserDefaults
+            result([String: Any]())
         case "getSettings":
-            // TODO: Implement get settings logic
-            let settings: [String: Any] = [
-                "autoConnectOnStart": false,
-                "autoReconnectOnDisconnect": false,
-                "killSwitch": false,
-                "blockedApps": [],
-                "blockedDomains": [],
-                "bypassSubnets": [],
-                "dnsServers": [],
-                "activeServerConfigId": NSNull(),
-                "serverConfigs": []
-            ]
-            result(settings)
+            // TODO: Get current settings
+            result([String: Any]())
         case "updateSetting":
-            // TODO: Implement update setting logic
             let args = call.arguments as? [String: Any]
-            let key = args?["key"] as? String
-            let value = args?["value"]
+            // TODO: Update individual setting
             result(false)
         case "addServerConfig":
-            // TODO: Implement add server config logic
             let args = call.arguments as? [String: Any]
             let config = args?["config"] as? [String: Any]
+            // TODO: Add server configuration
             result(false)
         case "removeServerConfig":
-            // TODO: Implement remove server config logic
             let args = call.arguments as? [String: Any]
             let configId = args?["configId"] as? String
+            // TODO: Remove server configuration
             result(false)
         case "updateServerConfig":
-            // TODO: Implement update server config logic
             let args = call.arguments as? [String: Any]
             let config = args?["config"] as? [String: Any]
+            // TODO: Update server configuration
             result(false)
         case "getServerConfigs":
-            // TODO: Implement get server configs list
+            // TODO: Get all server configurations
             result([])
         case "getServerConfig":
-            // TODO: Implement get server config by ID
             let args = call.arguments as? [String: Any]
             let configId = args?["configId"] as? String
+            // TODO: Get server configuration by ID
             result(NSNull())
         case "setActiveServerConfig":
-            // TODO: Implement set active server config
             let args = call.arguments as? [String: Any]
             let configId = args?["configId"] as? String
+            // TODO: Set active server configuration
             result(false)
         case "getActiveServerConfig":
-            // TODO: Implement get active server config
+            // TODO: Get active server configuration
             result(NSNull())
         case "addBlockedApp":
-            // TODO: Implement add blocked app logic
             let args = call.arguments as? [String: Any]
             let packageName = args?["packageName"] as? String
+            // TODO: Add app to blocked list
             result(false)
         case "removeBlockedApp":
-            // TODO: Implement remove blocked app logic
             let args = call.arguments as? [String: Any]
             let packageName = args?["packageName"] as? String
+            // TODO: Remove app from blocked list
             result(false)
         case "getBlockedApps":
-            // TODO: Implement get blocked apps list
+            // TODO: Get list of blocked apps
             result([])
         case "addBlockedDomain":
-            // TODO: Implement add blocked domain logic
             let args = call.arguments as? [String: Any]
             let domain = args?["domain"] as? String
+            // TODO: Add domain to blocked list
             result(false)
         case "removeBlockedDomain":
-            // TODO: Implement remove blocked domain logic
             let args = call.arguments as? [String: Any]
             let domain = args?["domain"] as? String
+            // TODO: Remove domain from blocked list
             result(false)
         case "getBlockedDomains":
-            // TODO: Implement get blocked domains list
+            // TODO: Get list of blocked domains
             result([])
         case "addSubnetToBypass":
-            // TODO: Implement add subnet to bypass logic
             let args = call.arguments as? [String: Any]
             let subnet = args?["subnet"] as? String
+            // TODO: Add subnet to bypass list
             result(false)
         case "removeSubnetFromBypass":
-            // TODO: Implement remove subnet from bypass logic
             let args = call.arguments as? [String: Any]
             let subnet = args?["subnet"] as? String
+            // TODO: Remove subnet from bypass list
             result(false)
         case "getBypassSubnets":
-            // TODO: Implement get bypass subnets list
+            // TODO: Get list of bypass subnets
             result([])
         case "addDnsServer":
-            // TODO: Implement add DNS server logic
             let args = call.arguments as? [String: Any]
             let dnsServer = args?["dnsServer"] as? String
+            // TODO: Add DNS server
             result(false)
         case "removeDnsServer":
-            // TODO: Implement remove DNS server logic
             let args = call.arguments as? [String: Any]
             let dnsServer = args?["dnsServer"] as? String
+            // TODO: Remove DNS server
             result(false)
         case "getDnsServers":
-            // TODO: Implement get DNS servers list
+            // TODO: Get list of DNS servers
             result([])
         case "setDnsServers":
-            // TODO: Implement set DNS servers logic
             let args = call.arguments as? [String: Any]
             let dnsServers = args?["dnsServers"] as? [String]
+            // TODO: Set DNS servers (replace all)
             result(false)
         default:
             result(FlutterMethodNotImplemented)
         }
     }
-}
-
-// Event channel stream handlers
-class StatusStreamHandler: NSObject, FlutterStreamHandler {
-    private let plugin: SingBoxPlugin
     
-    init(plugin: SingBoxPlugin) {
-        self.plugin = plugin
-    }
-    
+    // FlutterStreamHandler implementation for Event Channels
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        // TODO: Implement connection status stream
-        // Should emit status updates: "disconnected", "connecting", "connected", etc.
+        // TODO: Implement event streams for status and stats
         return nil
     }
     
     public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        // TODO: Clean up status stream
+        // TODO: Cancel event streams
         return nil
     }
 }
-
-class StatsStreamHandler: NSObject, FlutterStreamHandler {
-    private let plugin: SingBoxPlugin
-    
-    init(plugin: SingBoxPlugin) {
-        self.plugin = plugin
-    }
-    
-    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        // TODO: Implement connection stats stream
-        // Should emit stats updates with downloadSpeed, uploadSpeed, bytesSent, bytesReceived, ping, connectionDuration
-        return nil
-    }
-    
-    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        // TODO: Clean up stats stream
-        return nil
-    }
-}
-

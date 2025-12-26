@@ -1,0 +1,222 @@
+/*******************************************************************************
+ *                                                                             *
+ *  Copyright (C) 2019 by Max Lv <max.c.lv@gmail.com>                          *
+ *  Copyright (C) 2019 by Mygod Studio <contact-shadowsocks-android@mygod.be>  *
+ *                                                                             *
+ *  This program is free software: you can redistribute it and/or modify       *
+ *  it under the terms of the GNU General Public License as published by       *
+ *  the Free Software Foundation, either version 3 of the License, or          *
+ *  (at your option) any later version.                                        *
+ *                                                                             *
+ *  This program is distributed in the hope that it will be useful,            *
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of             *
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the              *
+ *  GNU General Public License for more details.                               *
+ *                                                                             *
+ *  You should have received a copy of the GNU General Public License          *
+ *  along with this program. If not, see <http://www.gnu.org/licenses/>.       *
+ *                                                                             *
+ *******************************************************************************/
+
+package com.qusadprod.sing_box.bg
+
+import android.annotation.TargetApi
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.actor
+import kotlinx.coroutines.launch
+
+/**
+ * Слушатель сетевых интерфейсов по умолчанию
+ * Скопировано и адаптировано из sing-box-for-android
+ * Адаптировано для работы с контекстом вместо Application
+ */
+class DefaultNetworkListener(private val context: Context) {
+    private val connectivityManager: ConnectivityManager
+        get() = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: throw IllegalStateException("ConnectivityManager service is not available")
+    
+    // CoroutineScope для управления жизненным циклом корутин
+    private val listenerScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
+    private sealed class NetworkMessage {
+        class Start(val key: Any, val listener: (Network?) -> Unit) : NetworkMessage()
+        class Get : NetworkMessage() {
+            val response = CompletableDeferred<Network>()
+        }
+
+        class Stop(val key: Any) : NetworkMessage()
+
+        class Put(val network: Network) : NetworkMessage()
+        class Update(val network: Network) : NetworkMessage()
+        class Lost(val network: Network) : NetworkMessage()
+    }
+
+    @OptIn(ObsoleteCoroutinesApi::class)
+    private val networkActor = listenerScope.actor<NetworkMessage>(Dispatchers.Unconfined) {
+        val listeners = mutableMapOf<Any, (Network?) -> Unit>()
+        var network: Network? = null
+        val pendingRequests = arrayListOf<NetworkMessage.Get>()
+        for (message in channel) when (message) {
+            is NetworkMessage.Start -> {
+                if (listeners.isEmpty()) register()
+                listeners[message.key] = message.listener
+                if (network != null) message.listener(network)
+            }
+
+            is NetworkMessage.Get -> {
+                check(listeners.isNotEmpty()) { "Getting network without any listeners is not supported" }
+                if (network == null) pendingRequests += message else message.response.complete(
+                    network
+                )
+            }
+
+            is NetworkMessage.Stop -> if (listeners.isNotEmpty() && // was not empty
+                listeners.remove(message.key) != null && listeners.isEmpty()
+            ) {
+                network = null
+                unregister()
+            }
+
+            is NetworkMessage.Put -> {
+                network = message.network
+                pendingRequests.forEach { it.response.complete(message.network) }
+                pendingRequests.clear()
+                listeners.values.forEach { it(network) }
+            }
+
+            is NetworkMessage.Update -> if (network == message.network) listeners.values.forEach {
+                it(
+                    network
+                )
+            }
+
+            is NetworkMessage.Lost -> if (network == message.network) {
+                network = null
+                listeners.values.forEach { it(null) }
+            }
+        }
+    }
+
+    suspend fun start(key: Any, listener: (Network?) -> Unit) = networkActor.send(
+        NetworkMessage.Start(
+            key,
+            listener
+        )
+    )
+
+    suspend fun get() = if (fallback) @TargetApi(23) {
+        connectivityManager.activeNetwork
+            ?: throw IllegalStateException("missing default network") // failed to listen, return current if available
+    } else NetworkMessage.Get().run {
+        networkActor.send(this)
+        response.await()
+    }
+
+    suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
+
+    // NB: this runs in ConnectivityThread, and this behavior cannot be changed until API 26
+    // Используем listenerScope.launch вместо runBlocking, чтобы не блокировать ConnectivityThread
+    private val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            listenerScope.launch(Dispatchers.Unconfined) {
+                networkActor.send(
+                    NetworkMessage.Put(
+                        network
+                    )
+                )
+            }
+        }
+
+        override fun onCapabilitiesChanged(
+            network: Network,
+            networkCapabilities: NetworkCapabilities
+        ) {
+            // it's a good idea to refresh capabilities
+            listenerScope.launch(Dispatchers.Unconfined) {
+                networkActor.send(NetworkMessage.Update(network))
+            }
+        }
+
+        override fun onLost(network: Network) {
+            listenerScope.launch(Dispatchers.Unconfined) {
+                networkActor.send(
+                    NetworkMessage.Lost(
+                        network
+                    )
+                )
+            }
+        }
+    }
+
+    private var fallback = false
+    private val request = NetworkRequest.Builder().apply {
+        addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+        if (Build.VERSION.SDK_INT == 23) {  // workarounds for OEM bugs
+            removeCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            removeCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+        }
+    }.build()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Unfortunately registerDefaultNetworkCallback is going to return VPN interface since Android P DP1:
+     * https://android.googlesource.com/platform/frameworks/base/+/dda156ab0c5d66ad82bdcf76cda07cbc0a9c8a2e
+     *
+     * This makes doing a requestNetwork with REQUEST necessary so that we don't get ALL possible networks that
+     * satisfies default network capabilities but only THE default network. Unfortunately, we need to have
+     * android.permission.CHANGE_NETWORK_STATE to be able to call requestNetwork.
+     *
+     * Source: https://android.googlesource.com/platform/frameworks/base/+/2df4c7d/services/core/java/com/android/server/ConnectivityService.java#887
+     */
+    private fun register() {
+        when (Build.VERSION.SDK_INT) {
+            in 31..Int.MAX_VALUE -> @TargetApi(31) {
+                connectivityManager.registerBestMatchingNetworkCallback(
+                    request,
+                    callback,
+                    mainHandler
+                )
+            }
+
+            in 28 until 31 -> @TargetApi(28) {  // we want REQUEST here instead of LISTEN
+                connectivityManager.requestNetwork(request, callback, mainHandler)
+            }
+
+            in 26 until 28 -> @TargetApi(26) {
+                connectivityManager.registerDefaultNetworkCallback(callback, mainHandler)
+            }
+
+            in 24 until 26 -> @TargetApi(24) {
+                connectivityManager.registerDefaultNetworkCallback(callback)
+            }
+
+            else -> try {
+                fallback = false
+                connectivityManager.requestNetwork(request, callback)
+            } catch (e: RuntimeException) {
+                fallback =
+                    true     // known bug on API 23: https://stackoverflow.com/a/33509180/2245107
+            }
+        }
+    }
+
+    private fun unregister() {
+        runCatching {
+            connectivityManager.unregisterNetworkCallback(callback)
+        }
+    }
+}
+

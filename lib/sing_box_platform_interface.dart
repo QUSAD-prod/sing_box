@@ -9,6 +9,7 @@ import 'src/models/ping_result.dart';
 import 'src/models/speed_test_result.dart';
 import 'src/models/settings.dart';
 import 'src/models/server_config.dart';
+import 'src/models/sing_box_notification.dart';
 
 abstract class SingBoxPlatform extends PlatformInterface {
   /// Constructs a SingBoxPlatform.
@@ -73,11 +74,6 @@ abstract class SingBoxPlatform extends PlatformInterface {
     throw UnimplementedError('pingCurrentServer() has not been implemented.');
   }
 
-  /// Measure ping to specified config
-  /// [config] - JSON string with server configuration
-  Future<SingBoxPingResult> pingConfig(String config) {
-    throw UnimplementedError('pingConfig() has not been implemented.');
-  }
 
   /// Subscribe to connection status changes
   /// Returns Stream with status updates
@@ -272,5 +268,11 @@ abstract class SingBoxPlatform extends PlatformInterface {
   /// [dnsServers] - list of DNS server IP addresses
   Future<bool> setDnsServers(List<String> dnsServers) {
     throw UnimplementedError('setDnsServers() has not been implemented.');
+  }
+
+  /// Subscribe to notifications from sing-box
+  /// Returns Stream with notification updates
+  Stream<SingBoxNotification> watchNotifications() {
+    throw UnimplementedError('watchNotifications() has not been implemented.');
   }
 }

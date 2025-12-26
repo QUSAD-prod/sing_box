@@ -205,9 +205,6 @@ print('Upload: ${speedResult.uploadSpeed} B/s');
 final pingResult = await singBox.pingCurrentServer();
 print('Ping: ${pingResult.ping} ms');
 
-// Ping specific config
-final configPing = await singBox.pingConfig(config);
-print('Config ping: ${configPing.ping} ms');
 ```
 
 #### Bypass Management

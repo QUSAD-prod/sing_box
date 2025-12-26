@@ -149,13 +149,6 @@ lib/
 
 **Возвращает:** `SingBoxPingResult` - результат измерения пинга (ping в миллисекундах, success, errorMessage, address).
 
-##### `Future<SingBoxPingResult> pingConfig(String config)`
-Измеряет пинг до указанного конфига.
-
-**Параметры:**
-- `config` - JSON строка с конфигурацией сервера
-
-**Возвращает:** `SingBoxPingResult` - результат измерения пинга.
 
 #### Методы работы с исключениями (Bypass)
 
@@ -709,7 +702,6 @@ void main() async {
 ### Измерения
 - `testSpeed()` - тест скорости
 - `pingCurrentServer()` - пинг текущего сервера
-- `pingConfig()` - пинг по конфигу
 
 ### Исключения (Bypass)
 - `addAppToBypass()` - добавить приложение в исключения

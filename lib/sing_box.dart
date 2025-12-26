@@ -7,6 +7,7 @@ import 'src/models/ping_result.dart';
 import 'src/models/speed_test_result.dart';
 import 'src/models/settings.dart';
 import 'src/models/server_config.dart';
+import 'src/models/sing_box_notification.dart';
 import 'src/observer/sing_box_observer.dart';
 
 /// Main class for working with sing-box VPN
@@ -186,12 +187,6 @@ class SingBox {
   /// Measure ping to current server
   Future<SingBoxPingResult> pingCurrentServer() {
     return SingBoxPlatform.instance.pingCurrentServer();
-  }
-
-  /// Measure ping to specified config
-  /// [config] - JSON string with server configuration
-  Future<SingBoxPingResult> pingConfig(String config) {
-    return SingBoxPlatform.instance.pingConfig(config);
   }
 
   /// Subscribe to connection status changes
@@ -508,5 +503,15 @@ class SingBox {
       _observer.error('Error setting DNS servers', e, stackTrace);
       return false;
     }
+  }
+
+  /// Subscribe to notifications from sing-box
+  /// Returns Stream with notification updates
+  /// Notifications include: identifier, typeName, typeId, title, subtitle, body, openUrl
+  Stream<SingBoxNotification> watchNotifications() {
+    if (!_isInitialized) {
+      throw StateError('SingBox is not initialized. Call initialize() first.');
+    }
+    return SingBoxPlatform.instance.watchNotifications();
   }
 }

@@ -10,6 +10,7 @@ import 'src/models/ping_result.dart';
 import 'src/models/speed_test_result.dart';
 import 'src/models/settings.dart';
 import 'src/models/server_config.dart';
+import 'src/models/sing_box_notification.dart';
 
 /// An implementation of [SingBoxPlatform] that uses method channels.
 class MethodChannelSingBox extends SingBoxPlatform {
@@ -24,6 +25,10 @@ class MethodChannelSingBox extends SingBoxPlatform {
   /// Event channel for connection stats updates
   @visibleForTesting
   final statsEventChannel = const EventChannel('sing_box/stats');
+
+  /// Event channel for notifications
+  @visibleForTesting
+  final notificationsEventChannel = const EventChannel('sing_box/notifications');
 
   @override
   Future<bool> initialize() async {
@@ -139,25 +144,13 @@ class MethodChannelSingBox extends SingBoxPlatform {
       if (resultMap != null) {
         return SingBoxPingResult.fromMap(resultMap);
       }
-      return const SingBoxPingResult(ping: 0, success: false, errorMessage: 'Failed to get ping result');
+      return const SingBoxPingResult(
+        ping: 0,
+        success: false,
+        errorMessage: 'Failed to get ping result',
+      );
     } catch (e) {
       debugPrint('Error pinging current server: $e');
-      return SingBoxPingResult(ping: 0, success: false, errorMessage: e.toString());
-    }
-  }
-
-  @override
-  Future<SingBoxPingResult> pingConfig(String config) async {
-    try {
-      final resultMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('pingConfig', {
-        'config': config,
-      });
-      if (resultMap != null) {
-        return SingBoxPingResult.fromMap(resultMap);
-      }
-      return const SingBoxPingResult(ping: 0, success: false, errorMessage: 'Failed to get ping result');
-    } catch (e) {
-      debugPrint('Error pinging config: $e');
       return SingBoxPingResult(ping: 0, success: false, errorMessage: e.toString());
     }
   }
@@ -406,7 +399,9 @@ class MethodChannelSingBox extends SingBoxPlatform {
     try {
       final configsList = await methodChannel.invokeMethod<List<dynamic>>('getServerConfigs');
       if (configsList != null) {
-        return configsList.map((e) => SingBoxServerConfig.fromMap(e as Map<dynamic, dynamic>)).toList();
+        return configsList
+            .map((e) => SingBoxServerConfig.fromMap(e as Map<dynamic, dynamic>))
+            .toList();
       }
       return [];
     } catch (e) {
@@ -632,6 +627,26 @@ class MethodChannelSingBox extends SingBoxPlatform {
     } catch (e) {
       debugPrint('Error setting DNS servers: $e');
       return false;
+    }
+  }
+
+  @override
+  Stream<SingBoxNotification> watchNotifications() {
+    try {
+      final stream = notificationsEventChannel.receiveBroadcastStream();
+      return stream
+          .map((data) {
+            if (data is Map) {
+              return SingBoxNotification.fromMap(data.cast<dynamic, dynamic>());
+            }
+            throw Exception('Invalid notification data: $data');
+          })
+          .handleError((error) {
+            debugPrint('Error in notifications stream: $error');
+          });
+    } catch (e) {
+      debugPrint('Error creating notifications stream: $e');
+      return const Stream<SingBoxNotification>.empty();
     }
   }
 }
