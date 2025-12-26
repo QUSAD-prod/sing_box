@@ -17,14 +17,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import android.util.Log
 
 /**
- * VPN сервис для sing-box
- * Скопировано и адаптировано из sing-box-for-android
- * Android Service для работы с VPN
+ * VPN service for sing-box
+ * Copied and adapted from sing-box-for-android
+ * Android Service for VPN operations
  */
 class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface {
 
@@ -45,7 +44,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
     private lateinit var dnsManager: DnsManager
     private lateinit var blockManager: com.qusadprod.sing_box.BlockManager
     
-    // CoroutineScope для управления жизненным циклом корутин
+    // CoroutineScope for managing coroutine lifecycle
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     var systemProxyAvailable = false
@@ -53,7 +52,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
 
     override fun onCreate() {
         super.onCreate()
-        // Инициализация компонентов
+        // Initialize components
         networkMonitor = DefaultNetworkMonitor(this)
         localResolver = LocalResolver(this, networkMonitor)
         platformInterface = PlatformInterfaceWrapper(this, networkMonitor, localResolver)
@@ -76,7 +75,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
                 return START_NOT_STICKY
             }
             ACTION_RELOAD -> {
-                // Перезапуск VPN для применения изменений (bypass, DNS и т.д.)
+                // Restart VPN to apply changes (bypass, DNS, etc.)
                 serviceScope.launch(Dispatchers.Main) {
                     singBoxService.serviceReload()
                 }
@@ -94,7 +93,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
     override fun onDestroy() {
         singBoxService.cleanup()
         singBoxService.onDestroy()
-        // Отменяем все корутины при уничтожении сервиса
+        // Cancel all coroutines when destroying the service
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -103,7 +102,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
         serviceScope.launch(Dispatchers.Main) {
             singBoxService.onRevoke()
         }
-        // Отменяем все корутины при отзыве разрешения
+        // Cancel all coroutines when permission is revoked
         serviceScope.cancel()
     }
 
@@ -137,15 +136,15 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
         }
 
         if (options.autoRoute) {
-            // Применяем DNS серверы из DnsManager (если есть), иначе используем из options
+            // Apply DNS servers from DnsManager (if available), otherwise use from options
             val customDnsServers = dnsManager.getDnsServers()
             if (customDnsServers.isNotEmpty()) {
-                // Используем DNS серверы из DnsManager
+                // Use DNS servers from DnsManager
                 for (dnsServer in customDnsServers) {
                     builder.addDnsServer(dnsServer)
                 }
             } else {
-                // Используем DNS из options (по умолчанию)
+                // Use DNS from options (default)
                 builder.addDnsServer(options.dnsServerAddress.value)
             }
 
@@ -195,30 +194,30 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
                 }
             }
 
-            // Применяем bypass списки из BypassManager (исключаем из VPN - трафик идет напрямую)
+            // Apply bypass lists from BypassManager (exclude from VPN - traffic goes directly)
             val bypassApps = bypassManager.getBypassApps()
             for (packageName in bypassApps) {
                 try {
                     builder.addAllowedApplication(packageName)
                 } catch (_: NameNotFoundException) {
-                    // Игнорируем несуществующие приложения
+                    // Ignore non-existent applications
                 }
             }
             
-            // Применяем блокировку приложений из BlockManager (блокируем трафик)
+            // Apply app blocking from BlockManager (block traffic)
             blockManager.getBlockedApps().forEach { packageName ->
                 try {
                     builder.addDisallowedApplication(packageName)
                 } catch (_: NameNotFoundException) {
-                    // Игнорируем несуществующие приложения
+                    // Ignore non-existent applications
                 }
             }
             
-            // Применяем bypass подсети
+            // Apply bypass subnets
             val bypassSubnets = bypassManager.getBypassSubnets()
             for (subnet in bypassSubnets) {
                 try {
-                    // Парсим CIDR нотацию (например, "192.168.1.0/24")
+                    // Parse CIDR notation (e.g., "192.168.1.0/24")
                     val parts = subnet.split("/")
                     if (parts.size == 2) {
                         val address = parts[0]
@@ -228,11 +227,11 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
                         }
                     }
                 } catch (e: Exception) {
-                    // Игнорируем ошибки парсинга подсети
+                    // Ignore subnet parsing errors
                 }
             }
             
-            // Обрабатываем include/exclude пакеты из options (если есть)
+            // Process include/exclude packages from options (if any)
             val includePackage = options.includePackage
             if (includePackage.hasNext()) {
                 while (includePackage.hasNext()) {
@@ -256,7 +255,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
 
         if (options.isHTTPProxyEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             systemProxyAvailable = true
-            // Получаем состояние системного прокси из настроек или проверяем через API
+            // Get system proxy state from settings or check via API
             systemProxyEnabled = getSystemProxyEnabledState()
             if (systemProxyEnabled) builder.setHttpProxy(
                 ProxyInfo.buildDirectProxy(
@@ -283,11 +282,11 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
         singBoxService.sendNotification(notification)
     
     /**
-     * Получить состояние системного прокси
-     * Сначала проверяет настройки из SettingsManager, затем через Android API
+     * Get system proxy state
+     * First checks settings from SettingsManager, then via Android API
      */
     private fun getSystemProxyEnabledState(): Boolean {
-        // Пробуем получить из настроек
+        // Try to get from settings
         try {
             val settingsManager = com.qusadprod.sing_box.SettingsManager(this)
             val settings = settingsManager.getSettings()
@@ -296,11 +295,11 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
                 return proxyEnabled
             }
         } catch (e: Exception) {
-            // Игнорируем ошибки при чтении настроек, но логируем для отладки
+            // Ignore errors when reading settings, but log for debugging
             Log.w("SingBoxVPNService", "Error reading systemProxyEnabled from settings", e)
         }
         
-        // Если в настройках нет, проверяем через Android API
+        // If not in settings, check via Android API
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
@@ -313,12 +312,12 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
                     val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
                     if (linkProperties != null) {
                         val proxyInfo = linkProperties.httpProxy
-                        // Если proxyInfo не null и не DIRECT, значит прокси настроен
+                        // If proxyInfo is not null and not DIRECT, proxy is configured
                         return proxyInfo != null && proxyInfo != ProxyInfo.buildDirectProxy(null, 0)
                     }
                 }
             } catch (e: Exception) {
-                // В случае ошибки считаем, что прокси отключен, но логируем для отладки
+                // In case of error, consider proxy disabled, but log for debugging
                 Log.w("SingBoxVPNService", "Error checking system proxy via Android API", e)
             }
         }
@@ -326,7 +325,7 @@ class SingBoxVPNService : VpnService(), io.nekohasekai.libbox.PlatformInterface 
         return false
     }
 
-    // Делегирование методов PlatformInterface к platformInterface
+    // Delegate PlatformInterface methods to platformInterface
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = platformInterface.usePlatformAutoDetectInterfaceControl()
     override fun useProcFS(): Boolean = platformInterface.useProcFS()
     override fun findConnectionOwner(ipProtocol: Int, sourceAddress: String, sourcePort: Int, destinationAddress: String, destinationPort: Int): Int = platformInterface.findConnectionOwner(ipProtocol, sourceAddress, sourcePort, destinationAddress, destinationPort)

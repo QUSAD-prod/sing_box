@@ -1,8 +1,8 @@
 package com.qusadprod.sing_box.constant
 
 /**
- * Статус соединения sing-box
- * Скопировано и адаптировано из sing-box-for-android
+ * Connection status for sing-box
+ * Copied and adapted from sing-box-for-android
  */
 enum class Status {
     Stopped,

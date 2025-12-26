@@ -46,31 +46,31 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     // VPN Service class
     private val vpnServiceClass = SingBoxVPNService::class.java
     
-    // Bypass Manager для управления bypass списками
+    // Bypass Manager for managing bypass lists
     private var bypassManager: BypassManager? = null
     
-    // DNS Manager для управления DNS серверами
+    // DNS Manager for managing DNS servers
     private var dnsManager: DnsManager? = null
     
-    // Settings Manager для управления настройками
+    // Settings Manager for managing settings
     private var settingsManager: SettingsManager? = null
     
-    // Server Config Manager для управления конфигурациями серверов
+    // Server Config Manager for managing server configurations
     private var serverConfigManager: ServerConfigManager? = null
     
-    // Block Manager для управления блокировкой приложений и доменов
+    // Block Manager for managing app and domain blocking
     private var blockManager: BlockManager? = null
     
-    // Текущий статус соединения (кэшируется из Broadcast)
+    // Current connection status (cached from Broadcast)
     private val currentStatus = AtomicReference<String>("disconnected")
     
     companion object {
-        // Константы для ожидания отключения VPN
+        // Constants for waiting for VPN disconnection
         private const val DISCONNECT_WAIT_MAX_ATTEMPTS = 50
         private const val DISCONNECT_WAIT_DELAY_MS = 100L
     }
     
-    // Последняя статистика соединения (кэшируется из Broadcast)
+    // Last connection statistics (cached from Broadcast)
     private val lastStats = AtomicReference<Map<String, Any?>>(
         mapOf(
             "downloadSpeed" to 0L,
@@ -82,12 +82,12 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         )
     )
     
-    // Stream handlers для Event Channels
+    // Stream handlers for Event Channels
     private var statusStreamHandler: StatusStreamHandler? = null
     private var statsStreamHandler: StatsStreamHandler? = null
     private var notificationsStreamHandler: NotificationsStreamHandler? = null
     
-    // BroadcastReceiver для получения статуса и статистики
+    // BroadcastReceiver for receiving status and statistics
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -100,9 +100,9 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     val statsBundle = intent.getBundleExtra(Action.EXTRA_STATS)
                     if (statsBundle != null) {
                         val stats = bundleToMap(statsBundle)
-                        // Кэшируем последнюю статистику
+                        // Cache last statistics
                         lastStats.set(stats)
-                        // Отправляем в Event Channel
+                        // Send to Event Channel
                         statsStreamHandler?.sendStats(stats)
                     }
                 }
@@ -135,7 +135,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 else -> map[key] = value.toString()
             }
         }
-        // Убеждаемся, что ping присутствует (может быть null)
+        // Ensure ping is present (may be null)
         if (!map.containsKey("ping")) {
             map["ping"] = null
         }
@@ -154,7 +154,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "sing_box")
         channel.setMethodCallHandler(this)
         
-        // Настройка Event Channels
+        // Setup Event Channels
         statusEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "sing_box/status")
         statusStreamHandler = StatusStreamHandler()
         statusEventChannel.setStreamHandler(statusStreamHandler)
@@ -163,18 +163,18 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         statsStreamHandler = StatsStreamHandler()
         statsEventChannel.setStreamHandler(statsStreamHandler)
         
-        // Настройка Event Channel для уведомлений
+        // Setup Event Channel for notifications
         notificationsEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "sing_box/notifications")
         notificationsStreamHandler = NotificationsStreamHandler()
         notificationsEventChannel.setStreamHandler(notificationsStreamHandler)
         
-        // Регистрация BroadcastReceiver
+        // Register BroadcastReceiver
         val filter = IntentFilter().apply {
             addAction(Action.STATUS_UPDATE)
             addAction(Action.STATS_UPDATE)
             addAction(Action.NOTIFICATION_UPDATE)
         }
-        // Используем RECEIVER_NOT_EXPORTED для безопасности (Android 8.0+)
+        // Use RECEIVER_NOT_EXPORTED for security (Android 8.0+)
         context?.let { ctx ->
             ContextCompat.registerReceiver(ctx, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         }
@@ -183,8 +183,8 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "initialize" -> {
-                // Инициализация уже выполнена при создании компонентов
-                // Все компоненты создаются в SingBoxVPNService.onCreate()
+                // Initialization already done when creating components
+                // All components are created in SingBoxVPNService.onCreate()
                 result.success(true)
             }
             "getPlatformVersion" -> {
@@ -203,15 +203,15 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     return
                 }
                 
-                // Запрос разрешения VPN
+                // Request VPN permission
                 val vpnIntent = VpnService.prepare(activity)
                 if (vpnIntent != null) {
-                    // Нужно запросить разрешение
+                    // Need to request permission
                     result.error("VPN_PERMISSION_REQUIRED", "VPN permission is required", null)
                     return
                 }
                 
-                // Запуск VPN сервиса
+                // Start VPN service
                 scope.launch {
                     try {
                         val intent = Intent(context, vpnServiceClass).apply {
@@ -219,7 +219,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
                             putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
                         }
-                        // Сохраняем конфигурацию в кэш для получения адреса сервера
+                        // Cache configuration to get server address
                         currentConfigCache.set(config)
                         context?.let { ctx ->
                             ContextCompat.startForegroundService(ctx, intent)
@@ -246,17 +246,17 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
             }
             "getConnectionStatus" -> {
-                // Получаем статус из кэша (обновляется через BroadcastReceiver)
+                // Get status from cache (updated via BroadcastReceiver)
                 result.success(currentStatus.get())
             }
             "getConnectionStats" -> {
-                // Возвращаем последнюю статистику из кэша
-                // Статистика обновляется каждую секунду через BroadcastReceiver
+                // Return last statistics from cache
+                // Statistics are updated every second via BroadcastReceiver
                 val stats = lastStats.get()
                 result.success(stats)
             }
             "testSpeed" -> {
-                // Тест скорости использует текущую статистику соединения
+                // Speed test uses current connection statistics
                 scope.launch {
                     try {
                         val stats = lastStats.get()
@@ -281,7 +281,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
             }
             "pingCurrentServer" -> {
-                // Ping использует текущую статистику соединения
+                // Ping uses current connection statistics
                 scope.launch {
                     try {
                         val stats = lastStats.get()
@@ -312,7 +312,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = bypassManager?.addAppToBypass(packageName) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений
+                    // Restart VPN to apply changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -328,7 +328,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = bypassManager?.removeAppFromBypass(packageName) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений
+                    // Restart VPN to apply changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -373,9 +373,9 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     try {
                         val currentStatusValue = currentStatus.get()
                         
-                        // Если VPN не подключен, просто подключаемся с новой конфигурацией
+                        // If VPN is not connected, just connect with new configuration
                         if (currentStatusValue != "connected" && currentStatusValue != "connecting") {
-                            // Прямое подключение с новой конфигурацией
+                            // Direct connection with new configuration
                             val activity = activity
                             if (activity == null) {
                                 result.error("NO_ACTIVITY", "Activity is not available", null)
@@ -393,7 +393,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
                             putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
                         }
-                        // Сохраняем конфигурацию в кэш для получения адреса сервера
+                        // Cache configuration to get server address
                         currentConfigCache.set(config)
                         context?.let { ctx ->
                             ContextCompat.startForegroundService(ctx, intent)
@@ -404,29 +404,29 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             return@launch
                         }
                         
-                        // Если VPN подключен, сначала отключаемся
+                        // If VPN is connected, disconnect first
                         val disconnectIntent = Intent(context, vpnServiceClass).apply {
                             action = SingBoxVPNService.ACTION_STOP
                         }
                         context?.startService(disconnectIntent)
                         
-                        // Ждем отключения (максимум 5 секунд)
+                        // Wait for disconnection (maximum 5 seconds)
                         var attempts = 0
                         while (attempts < DISCONNECT_WAIT_MAX_ATTEMPTS && currentStatus.get() != "disconnected") {
                             delay(DISCONNECT_WAIT_DELAY_MS)
                             attempts++
                         }
                         
-                        // Проверяем, что отключились
+                        // Check that we disconnected
                         if (currentStatus.get() != "disconnected") {
                             result.error("DISCONNECT_TIMEOUT", "Failed to disconnect from current server", null)
                             return@launch
                         }
                         
-                        // Небольшая задержка перед переподключением
+                        // Small delay before reconnecting
                         delay(500)
                         
-                        // Подключаемся с новой конфигурацией
+                        // Connect with new configuration
                         val activity = activity
                         if (activity == null) {
                             result.error("NO_ACTIVITY", "Activity is not available", null)
@@ -444,7 +444,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
                             putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
                         }
-                        // Сохраняем конфигурацию в кэш для получения адреса сервера
+                        // Cache configuration to get server address
                         currentConfigCache.set(config)
                         context?.let { ctx ->
                             ContextCompat.startForegroundService(ctx, connectIntent)
@@ -536,7 +536,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             }
             "setActiveServerConfig" -> {
                 val configId = call.argument<String>("configId")
-                // configId может быть null для сброса активной конфигурации
+                // configId can be null to reset active configuration
                 val success = serverConfigManager?.setActiveServerConfig(configId) ?: false
                 result.success(success)
             }
@@ -552,7 +552,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = blockManager?.addBlockedApp(packageName) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений блокировки
+                    // Restart VPN to apply blocking changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -568,7 +568,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = blockManager?.removeBlockedApp(packageName) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений блокировки
+                    // Restart VPN to apply blocking changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -588,7 +588,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = blockManager?.addBlockedDomain(domain) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений блокировки
+                    // Restart VPN to apply blocking changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -604,7 +604,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = blockManager?.removeBlockedDomain(domain) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений блокировки
+                    // Restart VPN to apply blocking changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -628,7 +628,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     return
                 }
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений
+                    // Restart VPN to apply changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -644,7 +644,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = bypassManager?.removeSubnetFromBypass(subnet) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений
+                    // Restart VPN to apply changes
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -668,7 +668,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     return
                 }
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений DNS
+                    // Restart VPN to apply changes DNS
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -684,7 +684,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 val success = dnsManager?.removeDnsServer(dnsServer) ?: false
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений DNS
+                    // Restart VPN to apply changes DNS
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -708,7 +708,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     return
                 }
                 if (success && currentStatus.get() == "connected") {
-                    // Перезапустить VPN для применения изменений DNS
+                    // Restart VPN to apply changes DNS
                     val reloadIntent = Intent(context, vpnServiceClass).apply {
                         action = SingBoxVPNService.ACTION_RELOAD
                     }
@@ -725,18 +725,18 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         
-        // Отмена регистрации Event Channels
+        // Unregister Event Channels
         statusEventChannel.setStreamHandler(null)
         statsEventChannel.setStreamHandler(null)
         notificationsEventChannel.setStreamHandler(null)
         statusStreamHandler = null
         statsStreamHandler = null
         
-        // Отмена регистрации BroadcastReceiver
+        // Unregister BroadcastReceiver
         try {
             context?.unregisterReceiver(statusReceiver)
         } catch (e: Exception) {
-            // Игнорируем ошибки при отмене регистрации, но логируем для отладки
+            // Ignore errors when unregistering, but log for debugging
             android.util.Log.w("SingBoxPlugin", "Error unregistering receiver", e)
         }
         
@@ -744,31 +744,31 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
     
     /**
-     * Получить адрес сервера из текущей конфигурации
-     * Парсит JSON конфигурацию и извлекает адрес сервера
+     * Get server address from current configuration
+     * Parses JSON configuration and extracts server address
      */
     private fun getCurrentServerAddress(): String? {
         val config = currentConfigCache.get() ?: return null
         return try {
-            // Парсим JSON конфигурацию
+            // Parse JSON configuration
             val jsonObject = Gson().fromJson(config, JsonObject::class.java)
             
-            // Валидация структуры JSON
+            // JSON structure validation
             if (!jsonObject.has("outbounds")) {
                 return null
             }
             
-            // Ищем outbounds
+            // Look for outbounds
             val outbounds = jsonObject.getAsJsonArray("outbounds")
             if (outbounds == null || outbounds.size() == 0) {
                 return null
             }
             
-            // Берем первый outbound (обычно это основной сервер)
+            // Take the first outbound (usually the main server)
             val firstOutbound = outbounds.get(0).asJsonObject
             
-            // Пробуем получить адрес из разных полей в зависимости от протокола
-            // Для большинства протоколов адрес находится в поле "server"
+            // Try to get address from different fields depending on protocol
+            // For most protocols, address is in the "server" field
             val serverField = firstOutbound.get("server")
             if (serverField != null && serverField.isJsonPrimitive) {
                 val serverValue = serverField.asString
@@ -777,7 +777,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
             }
             
-            // Для некоторых протоколов адрес может быть в "settings.server"
+            // For some protocols, address may be in "settings.server"
             val settings = firstOutbound.getAsJsonObject("settings")
             if (settings != null) {
                 val serverInSettings = settings.get("server")
@@ -788,7 +788,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     }
                 }
                 
-                // Для shadowsocks адрес может быть в "settings.address"
+                // For shadowsocks, address may be in "settings.address"
                 val address = settings.get("address")
                 if (address != null && address.isJsonPrimitive) {
                     val addressValue = address.asString
@@ -821,7 +821,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
     
     /**
-     * StreamHandler для статуса соединения
+     * StreamHandler for connection status
      */
     private class StatusStreamHandler : EventChannel.StreamHandler {
         private var eventSink: EventChannel.EventSink? = null
@@ -840,7 +840,7 @@ class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
     
     /**
-     * StreamHandler для статистики соединения
+     * StreamHandler for connection statistics
      */
     private class StatsStreamHandler : EventChannel.StreamHandler {
         private var eventSink: EventChannel.EventSink? = null

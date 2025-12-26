@@ -30,9 +30,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 
 /**
- * Реализация PlatformInterface для Android
- * Скопировано и адаптировано из sing-box-for-android
- * Адаптировано для работы с контекстом вместо Application
+ * PlatformInterface implementation for Android
+ * Copied and adapted from sing-box-for-android
+ * Adapted to work with context instead of Application
  */
 class PlatformInterfaceWrapper(
     private val context: Context,
@@ -261,7 +261,15 @@ class PlatformInterfaceWrapper(
     private val NetworkInterface.flags: Int
         @SuppressLint("SoonBlockedPrivateApi") get() {
             val getFlagsMethod = NetworkInterface::class.java.getDeclaredMethod("getFlags")
-            return getFlagsMethod.invoke(this) as Int
+            val result = getFlagsMethod.invoke(this)
+            return when (result) {
+                is Int -> result
+                is Number -> result.toInt()
+                else -> {
+                    Log.w("PlatformInterface", "NetworkInterface.flags: unexpected type ${result?.javaClass?.name}, returning 0")
+                    0
+                }
+            }
         }
 }
 

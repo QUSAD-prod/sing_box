@@ -9,8 +9,8 @@ import io.nekohasekai.libbox.StringIterator
 import java.net.InetAddress
 
 /**
- * Утилиты для работы с обертками libbox
- * Скопировано и адаптировано из sing-box-for-android
+ * Utilities for working with libbox wrappers
+ * Copied and adapted from sing-box-for-android
  */
 val StringBox?.unwrap: String
     get() {

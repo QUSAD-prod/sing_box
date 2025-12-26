@@ -7,17 +7,17 @@ import com.google.gson.reflect.TypeToken
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
- * Менеджер для управления блокировкой приложений и доменов
- * Хранит списки заблокированных приложений и доменов
- * Отличие от BypassManager:
- * - Bypass = исключение из VPN (трафик идет напрямую)
- * - Block = блокировка трафика (трафик не проходит вообще)
+ * Manager for managing blocking of applications and domains
+ * Stores lists of blocked applications and domains
+ * Difference from BypassManager:
+ * - Bypass = exclude from VPN (traffic goes directly)
+ * - Block = block traffic (traffic doesn't pass at all)
  */
 class BlockManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("sing_box_block", Context.MODE_PRIVATE)
     private val gson = Gson()
     
-    // Блокированные списки в памяти для быстрого доступа
+    // Blocked lists in memory for quick access
     private val blockedApps = CopyOnWriteArraySet<String>()
     private val blockedDomains = CopyOnWriteArraySet<String>()
     
@@ -28,7 +28,7 @@ class BlockManager(private val context: Context) {
     // ========== Blocked Apps ==========
     
     /**
-     * Добавить приложение в блокировку
+     * Add application to blocking list
      */
     fun addBlockedApp(packageName: String): Boolean {
         if (packageName.isBlank()) {
@@ -42,7 +42,7 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Удалить приложение из блокировки
+     * Remove application from blocking list
      */
     fun removeBlockedApp(packageName: String): Boolean {
         if (blockedApps.remove(packageName)) {
@@ -53,7 +53,7 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Получить список заблокированных приложений
+     * Get list of blocked applications
      */
     fun getBlockedApps(): List<String> {
         return blockedApps.toList()
@@ -62,13 +62,13 @@ class BlockManager(private val context: Context) {
     // ========== Blocked Domains ==========
     
     /**
-     * Добавить домен в блокировку
+     * Add domain to blocking list
      */
     fun addBlockedDomain(domain: String): Boolean {
         if (domain.isBlank()) {
             return false
         }
-        // Нормализация домена (убираем http://, https://, www.)
+        // Domain normalization (remove http://, https://, www.)
         val normalizedDomain = normalizeDomain(domain)
         if (normalizedDomain.isBlank()) {
             return false
@@ -81,7 +81,7 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Удалить домен из блокировки
+     * Remove domain from blocking list
      */
     fun removeBlockedDomain(domain: String): Boolean {
         val normalizedDomain = normalizeDomain(domain)
@@ -93,31 +93,31 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Получить список заблокированных доменов
+     * Get list of blocked domains
      */
     fun getBlockedDomains(): List<String> {
         return blockedDomains.toList()
     }
     
-    // ========== Вспомогательные методы ==========
+    // ========== Helper Methods ==========
     
     /**
-     * Нормализация домена (убирает протокол, www, слэши)
+     * Domain normalization (removes protocol, www, slashes)
      */
     private fun normalizeDomain(domain: String): String {
         var normalized = domain.trim().lowercase()
         
-        // Убираем протокол
+        // Remove protocol
         normalized = normalized.removePrefix("http://")
         normalized = normalized.removePrefix("https://")
         
-        // Убираем www.
+        // Remove www.
         normalized = normalized.removePrefix("www.")
         
-        // Убираем слэши и пробелы в конце
+        // Remove slashes and spaces at the end
         normalized = normalized.trimEnd('/', ' ')
         
-        // Убираем путь (оставляем только домен)
+        // Remove path (keep only domain)
         val pathIndex = normalized.indexOf('/')
         if (pathIndex > 0) {
             normalized = normalized.substring(0, pathIndex)
@@ -127,16 +127,16 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Загрузка списков из SharedPreferences
+     * Load lists from SharedPreferences
      */
     private fun loadFromPreferences() {
-        // Загрузка apps
+        // Load apps
         val appsJson = prefs.getString("blocked_apps", "[]")
         val appsType = object : TypeToken<List<String>>() {}.type
         val appsList: List<String> = gson.fromJson(appsJson, appsType) ?: emptyList()
         blockedApps.addAll(appsList)
         
-        // Загрузка domains
+        // Load domains
         val domainsJson = prefs.getString("blocked_domains", "[]")
         val domainsType = object : TypeToken<List<String>>() {}.type
         val domainsList: List<String> = gson.fromJson(domainsJson, domainsType) ?: emptyList()
@@ -144,7 +144,7 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Сохранение списка приложений в SharedPreferences
+     * Save applications list to SharedPreferences
      */
     private fun saveAppsToPreferences() {
         val appsJson = gson.toJson(blockedApps.toList())
@@ -152,7 +152,7 @@ class BlockManager(private val context: Context) {
     }
     
     /**
-     * Сохранение списка доменов в SharedPreferences
+     * Save domains list to SharedPreferences
      */
     private fun saveDomainsToPreferences() {
         val domainsJson = gson.toJson(blockedDomains.toList())

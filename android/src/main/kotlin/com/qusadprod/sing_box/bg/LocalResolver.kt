@@ -18,9 +18,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
- * Локальный DNS резолвер
- * Скопировано и адаптировано из sing-box-for-android
- * Адаптировано для работы с контекстом вместо Application
+ * Local DNS resolver
+ * Copied and adapted from sing-box-for-android
+ * Adapted to work with context instead of Application
  */
 class LocalResolver(
     private val context: Context,
@@ -84,7 +84,8 @@ class LocalResolver(
                         @Suppress("ThrowableNotThrown")
                         override fun onAnswer(answer: Collection<InetAddress>, rcode: Int) {
                             if (rcode == 0) {
-                                ctx.success((answer as Collection<InetAddress?>).mapNotNull { it?.hostAddress }
+                                val addresses = answer as? Collection<InetAddress?> ?: emptyList()
+                                ctx.success(addresses.mapNotNull { it?.hostAddress }
                                     .joinToString("\n"))
                             } else {
                                 ctx.errorCode(rcode)

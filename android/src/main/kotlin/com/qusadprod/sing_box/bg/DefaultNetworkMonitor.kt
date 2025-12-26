@@ -15,9 +15,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Мониторинг сетевых интерфейсов по умолчанию
- * Скопировано и адаптировано из sing-box-for-android
- * Адаптировано для работы с контекстом вместо Application
+ * Default network interface monitoring
+ * Copied and adapted from sing-box-for-android
+ * Adapted to work with context instead of Application
  */
 class DefaultNetworkMonitor(private val context: Context) {
 
@@ -39,7 +39,7 @@ class DefaultNetworkMonitor(private val context: Context) {
     }
 
     suspend fun stop() {
-        monitorScope.cancel() // Отменяем все корутины для предотвращения утечек
+        monitorScope.cancel() // Cancel all coroutines to prevent leaks
         networkListener.stop(this)
     }
 
@@ -71,7 +71,7 @@ class DefaultNetworkMonitor(private val context: Context) {
                 return
             }
             
-            // Используем корутину вместо Thread.sleep для неблокирующей задержки
+            // Use coroutine instead of Thread.sleep for non-blocking delay
             monitorScope.launch {
                 for (times in 0 until NETWORK_INTERFACE_RETRY_COUNT) {
                     var interfaceIndex: Int
@@ -88,7 +88,7 @@ class DefaultNetworkMonitor(private val context: Context) {
                     listener.updateDefaultInterface(interfaceName, interfaceIndex, false, false)
                     return@launch
                 }
-                // Если не удалось получить индекс после всех попыток
+                // If failed to get index after all attempts
                 listener.updateDefaultInterface(interfaceName, -1, false, false)
             }
         } else {

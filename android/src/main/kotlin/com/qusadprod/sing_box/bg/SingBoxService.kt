@@ -38,9 +38,9 @@ import kotlinx.coroutines.withContext
 import android.util.Log
 
 /**
- * Основной сервис для управления sing-box
- * Скопировано и адаптировано из sing-box-for-android
- * Адаптировано для работы с конфигурацией из Method Channel вместо файлов
+ * Main service for managing sing-box
+ * Copied and adapted from sing-box-for-android
+ * Adapted to work with configuration from Method Channel instead of files
  */
 class SingBoxService(
     private val service: Service,
@@ -50,7 +50,7 @@ class SingBoxService(
 ) : CommandServerHandler {
 
     companion object {
-        // Константы для интервалов и задержек
+        // Constants for intervals and delays
         private const val STATS_BROADCAST_INTERVAL_MS = 1000L
     }
 
@@ -64,21 +64,21 @@ class SingBoxService(
     private var disableMemoryLimit: Boolean = false
     private var statsJob: Job? = null
     
-    // CoroutineScope с SupervisorJob для управления жизненным циклом корутин
+    // CoroutineScope with SupervisorJob for managing coroutine lifecycle
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     
-    // Для вычисления скорости - храним предыдущие значения и время
+    // For speed calculation - store previous values and time
     private var previousBytesSent: Long = 0
     private var previousBytesReceived: Long = 0
     private var previousStatsTime: Long = 0
     
-    // Время начала соединения для вычисления duration
+    // Connection start time for calculating duration
     private var connectionStartTime: Long = 0
     
-    // Observer для отправки Broadcast при изменении статуса
+    // Observer for sending Broadcast when status changes
     private val statusObserver = Observer<Status> { newStatus ->
         sendStatusBroadcast(newStatus)
-        // Запускаем или останавливаем периодическую отправку статистики
+        // Start or stop periodic statistics broadcasting
         if (newStatus == Status.Started) {
             startStatsBroadcast()
         } else {
@@ -87,12 +87,12 @@ class SingBoxService(
     }
     
     init {
-        // Подписываемся на изменения статуса
+        // Subscribe to status changes
         status.observeForever(statusObserver)
     }
     
     /**
-     * Отменяет подписку на изменения статуса для предотвращения утечек памяти
+     * Unsubscribes from status changes to prevent memory leaks
      */
     private fun removeStatusObserver() {
         status.removeObserver(statusObserver)
@@ -160,7 +160,7 @@ class SingBoxService(
             commandServer?.setService(boxService)
             status.postValue(Status.Started)
             
-            // Запоминаем время начала соединения
+            // Remember connection start time
             connectionStartTime = System.currentTimeMillis()
             previousStatsTime = connectionStartTime
             previousBytesSent = 0
@@ -174,7 +174,7 @@ class SingBoxService(
 
     override fun serviceReload() {
         status.postValue(Status.Starting)
-        // Безопасное закрытие fileDescriptor с использованием use
+        // Safe fileDescriptor closure using use
         fileDescriptor?.use { }
         fileDescriptor = null
         boxService?.apply {
@@ -190,7 +190,7 @@ class SingBoxService(
         boxService = null
         val config = currentConfig
         if (config != null) {
-            // Используем CoroutineScope вместо runBlocking
+            // Use CoroutineScope instead of runBlocking
             serviceScope.launch(Dispatchers.IO) {
                 startService(config, disableMemoryLimit)
             }
@@ -204,12 +204,12 @@ class SingBoxService(
     override fun getSystemProxyStatus(): SystemProxyStatus {
         val status = SystemProxyStatus()
         
-            // Проверяем доступность системного прокси (только для Android Q+)
+            // Check system proxy availability (only for Android Q+)
             status.available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
             if (status.available) {
-                // Проверяем, включен ли системный прокси
-                // В Android системный прокси настраивается для Wi-Fi сетей
+                // Check if system proxy is enabled
+                // In Android, system proxy is configured for Wi-Fi networks
                 try {
                     val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
                     if (connectivityManager == null) {
@@ -222,7 +222,7 @@ class SingBoxService(
                     val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
                     if (linkProperties != null) {
                         val proxyInfo = linkProperties.httpProxy
-                        // Если proxyInfo не null и не DIRECT, значит прокси настроен
+                        // If proxyInfo is not null and not DIRECT, proxy is configured
                         status.enabled = proxyInfo != null && proxyInfo != android.net.ProxyInfo.buildDirectProxy(null, 0)
                     } else {
                         status.enabled = false
@@ -231,7 +231,7 @@ class SingBoxService(
                     status.enabled = false
                 }
             } catch (e: Exception) {
-                // В случае ошибки считаем, что прокси отключен
+                // In case of error, consider proxy disabled
                 status.enabled = false
             }
         } else {
@@ -264,7 +264,7 @@ class SingBoxService(
         if (status.value != Status.Started) return
         status.value = Status.Stopping
         
-        // Сбрасываем время начала соединения
+        // Reset connection start time
         connectionStartTime = 0
         previousStatsTime = 0
         previousBytesSent = 0
@@ -274,7 +274,7 @@ class SingBoxService(
             receiverRegistered = false
         }
         serviceScope.launch(Dispatchers.IO) {
-            // Безопасное закрытие fileDescriptor с использованием use
+            // Safe fileDescriptor closure using use
             fileDescriptor?.use { }
             fileDescriptor = null
             boxService?.apply {
@@ -346,15 +346,15 @@ class SingBoxService(
 
     fun onDestroy() {
         stopService()
-        removeStatusObserver() // Отменяем подписку на изменения статуса
-        // Отменяем все корутины при уничтожении сервиса
+        removeStatusObserver() // Unsubscribe from status changes
+        // Cancel all coroutines when destroying the service
         serviceScope.cancel()
     }
 
     fun onRevoke() {
         stopService()
-        removeStatusObserver() // Отменяем подписку на изменения статуса
-        // Отменяем все корутины при отзыве разрешения
+        removeStatusObserver() // Unsubscribe from status changes
+        // Cancel all coroutines when permission is revoked
         serviceScope.cancel()
     }
 
@@ -363,7 +363,7 @@ class SingBoxService(
     }
 
     fun sendNotification(notification: Notification) {
-        // Отправляем уведомление через Broadcast для передачи в Flutter
+        // Send notification via Broadcast to pass to Flutter
         Log.d("SingBoxService", "Sending notification: ${notification.title} (${notification.typeName})")
         val intent = Intent(Action.NOTIFICATION_UPDATE).apply {
             putExtra(Action.EXTRA_NOTIFICATION_IDENTIFIER, notification.identifier)
@@ -386,41 +386,41 @@ class SingBoxService(
     }
     
     /**
-     * Получить адрес сервера из текущей конфигурации
-     * Парсит JSON конфигурацию и извлекает адрес сервера из outbounds
+     * Get server address from current configuration
+     * Parses JSON configuration and extracts server address from outbounds
      */
     fun getCurrentServerAddress(): String? {
         val config = currentConfig ?: return null
         return try {
-            // Парсим JSON конфигурацию
+            // Parse JSON configuration
             val jsonObject = gson.fromJson(config, com.google.gson.JsonObject::class.java)
             
-            // Валидация структуры JSON
+            // JSON structure validation
             if (!jsonObject.has("outbounds")) {
                 return null
             }
             
-            // Ищем outbounds
+            // Look for outbounds
             val outbounds = jsonObject.getAsJsonArray("outbounds")
             if (outbounds == null || outbounds.size() == 0) {
                 return null
             }
             
-            // Берем первый outbound (обычно это основной сервер)
+            // Take the first outbound (usually the main server)
             val firstOutbound = outbounds.get(0).asJsonObject
             
-            // Пробуем получить адрес из разных полей в зависимости от протокола
-            // Для большинства протоколов адрес находится в поле "server"
+            // Try to get address from different fields depending on protocol
+            // For most protocols, address is in the "server" field
             val serverField = firstOutbound.get("server")
             if (serverField != null && serverField.isJsonPrimitive) {
                 val serverValue = serverField.asString
-                // Если это IP адрес или домен, возвращаем его
+                // If it's an IP address or domain, return it
                 if (serverValue.isNotEmpty()) {
                     return serverValue
                 }
             }
             
-            // Для некоторых протоколов адрес может быть в "settings.server"
+            // For some protocols, address may be in "settings.server"
             val settings = firstOutbound.getAsJsonObject("settings")
             if (settings != null) {
                 val serverInSettings = settings.get("server")
@@ -432,7 +432,7 @@ class SingBoxService(
                 }
             }
             
-            // Для shadowsocks адрес может быть в "settings.address"
+            // For shadowsocks, address may be in "settings.address"
             if (settings != null) {
                 val address = settings.get("address")
                 if (address != null && address.isJsonPrimitive) {
@@ -445,13 +445,13 @@ class SingBoxService(
             
             null
         } catch (e: Exception) {
-            // Если не удалось распарсить, возвращаем null
+            // If parsing failed, return null
             null
         }
     }
     
     /**
-     * Отправка Broadcast с текущим статусом
+     * Send Broadcast with current status
      */
     private fun sendStatusBroadcast(status: Status) {
         val intent = Intent(Action.STATUS_UPDATE).apply {
@@ -461,7 +461,7 @@ class SingBoxService(
     }
     
     /**
-     * Преобразование Status в строку для Flutter
+     * Convert Status to string for Flutter
      */
     private fun statusToFlutterStatus(status: Status): String {
         return when (status) {
@@ -473,8 +473,8 @@ class SingBoxService(
     }
     
     /**
-     * Получение текущей статистики соединения
-     * Используется для прямого запроса статистики без Broadcast
+     * Get current connection statistics
+     * Used for direct statistics request without Broadcast
      */
     fun getConnectionStats(): Map<String, Any?> {
         val boxService = boxService ?: return getEmptyStats()
@@ -484,22 +484,22 @@ class SingBoxService(
                 return calculateStats(connections)
             }
         } catch (e: Exception) {
-            // Игнорируем ошибки, но логируем для отладки
+            // Ignore errors, but log for debugging
             Log.d("SingBoxService", "Error getting connection stats", e)
         }
         return getEmptyStats()
     }
     
     /**
-     * Вычисление статистики из connections
+     * Calculate statistics from connections
      */
     private fun calculateStats(connections: io.nekohasekai.libbox.Connections): Map<String, Any?> {
         val currentTime = System.currentTimeMillis()
         
-        // Вычисляем статистику из connections
+        // Calculate statistics from connections
         var bytesSent = 0L
         var bytesReceived = 0L
-        var minRtt: Long? = null // Минимальный RTT для ping
+        var minRtt: Long? = null // Minimum RTT for ping
         
         val connectionIterator = connections.iterator()
         while (connectionIterator.hasNext()) {
@@ -507,10 +507,10 @@ class SingBoxService(
             bytesSent += connection.upload
             bytesReceived += connection.download
             
-            // Получаем RTT (Round Trip Time) для ping
-            // Пробуем получить RTT из connection через рефлексию
+            // Get RTT (Round Trip Time) for ping
+            // Try to get RTT from connection via reflection
             try {
-                // Проверяем наличие метода rtt()
+                // Check for rtt() method
                 val rttMethod = connection.javaClass.getMethod("rtt")
                 val rtt = rttMethod.invoke(connection)
                 when (rtt) {
@@ -527,7 +527,7 @@ class SingBoxService(
                     }
                 }
             } catch (e: NoSuchMethodException) {
-                // Метод rtt() недоступен, пробуем latency()
+                // rtt() method unavailable, try latency()
                 try {
                     val latencyMethod = connection.javaClass.getMethod("latency")
                     val latency = latencyMethod.invoke(connection)
@@ -545,16 +545,16 @@ class SingBoxService(
                         }
                     }
                 } catch (e2: Exception) {
-                    // RTT/latency недоступен, оставляем null
+                    // RTT/latency unavailable, leave null
                     Log.d("SingBoxService", "RTT/latency method not available via reflection", e2)
                 }
             } catch (e: Exception) {
-                // Игнорируем другие ошибки рефлексии
+                // Ignore other reflection errors
                 Log.d("SingBoxService", "Error accessing RTT via reflection", e)
             }
         }
         
-        // Вычисляем скорость (bytes per second)
+        // Calculate speed (bytes per second)
         var downloadSpeed = 0L
         var uploadSpeed = 0L
         
@@ -565,17 +565,17 @@ class SingBoxService(
                 val bytesReceivedDelta = bytesReceived - previousBytesReceived
                 val bytesSentDelta = bytesSent - previousBytesSent
                 
-                // Вычисляем скорость в байтах в секунду
+                // Calculate speed in bytes per second
                 downloadSpeed = (bytesReceivedDelta / timeDeltaSeconds).toLong()
                 uploadSpeed = (bytesSentDelta / timeDeltaSeconds).toLong()
                 
-                // Защита от отрицательных значений (может произойти при переподключении)
+                // Protection against negative values (can occur during reconnection)
                 if (downloadSpeed < 0) downloadSpeed = 0
                 if (uploadSpeed < 0) uploadSpeed = 0
             }
         }
         
-        // Вычисляем connectionDuration
+        // Calculate connectionDuration
         val connectionDuration = if (connectionStartTime > 0) {
             currentTime - connectionStartTime
         } else {
@@ -593,7 +593,7 @@ class SingBoxService(
     }
     
     /**
-     * Пустая статистика (когда соединение не активно)
+     * Empty statistics (when connection is not active)
      */
     private fun getEmptyStats(): Map<String, Any?> {
         return mapOf(
@@ -607,7 +607,7 @@ class SingBoxService(
     }
     
     /**
-     * Отправка Broadcast со статистикой соединения
+     * Send Broadcast with connection statistics
      */
     fun sendStatsBroadcast() {
         val boxService = boxService ?: return
@@ -616,13 +616,13 @@ class SingBoxService(
             if (connections != null) {
                 val stats = calculateStats(connections)
                 
-                // Обновляем предыдущие значения для следующего вычисления скорости
+                // Update previous values for next speed calculation
                 val currentTime = System.currentTimeMillis()
                 previousBytesSent = stats["bytesSent"] as? Long ?: 0L
                 previousBytesReceived = stats["bytesReceived"] as? Long ?: 0L
                 previousStatsTime = currentTime
                 
-                // Отправляем через Broadcast
+                // Send via Broadcast
                 val statsBundle = Bundle().apply {
                     putLong("downloadSpeed", stats["downloadSpeed"] as? Long ?: 0L)
                     putLong("uploadSpeed", stats["uploadSpeed"] as? Long ?: 0L)
@@ -640,13 +640,13 @@ class SingBoxService(
                 context.sendBroadcast(intent)
             }
         } catch (e: Exception) {
-            // Игнорируем ошибки при получении статистики, но логируем для отладки
+            // Ignore errors when getting statistics, but log for debugging
             Log.w("SingBoxService", "Error in sendStatsBroadcast", e)
         }
     }
     
     /**
-     * Запуск периодической отправки статистики
+     * Start periodic statistics broadcasting
      */
     private fun startStatsBroadcast() {
         stopStatsBroadcast()
@@ -659,7 +659,7 @@ class SingBoxService(
     }
     
     /**
-     * Остановка периодической отправки статистики
+     * Stop periodic statistics broadcasting
      */
     private fun stopStatsBroadcast() {
         statsJob?.cancel()
@@ -667,7 +667,7 @@ class SingBoxService(
     }
     
     /**
-     * Очистка ресурсов
+     * Cleanup resources
      */
     fun cleanup() {
         stopStatsBroadcast()

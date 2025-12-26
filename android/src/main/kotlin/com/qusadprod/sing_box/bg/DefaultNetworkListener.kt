@@ -38,16 +38,16 @@ import kotlinx.coroutines.channels.actor
 import kotlinx.coroutines.launch
 
 /**
- * Слушатель сетевых интерфейсов по умолчанию
- * Скопировано и адаптировано из sing-box-for-android
- * Адаптировано для работы с контекстом вместо Application
+ * Default network interface listener
+ * Copied and adapted from sing-box-for-android
+ * Adapted to work with context instead of Application
  */
 class DefaultNetworkListener(private val context: Context) {
     private val connectivityManager: ConnectivityManager
         get() = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: throw IllegalStateException("ConnectivityManager service is not available")
     
-    // CoroutineScope для управления жизненным циклом корутин
+    // CoroutineScope for managing coroutine lifecycle
     private val listenerScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     private sealed class NetworkMessage {
@@ -127,7 +127,7 @@ class DefaultNetworkListener(private val context: Context) {
     suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
 
     // NB: this runs in ConnectivityThread, and this behavior cannot be changed until API 26
-    // Используем listenerScope.launch вместо runBlocking, чтобы не блокировать ConnectivityThread
+    // Use listenerScope.launch instead of runBlocking to avoid blocking ConnectivityThread
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             listenerScope.launch(Dispatchers.Unconfined) {

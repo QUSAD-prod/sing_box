@@ -8,15 +8,15 @@ import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 
 /**
- * Менеджер для управления конфигурациями серверов
- * Использует SQLite для хранения конфигураций
+ * Manager for managing server configurations
+ * Uses SQLite for storing configurations
  */
 class ServerConfigManager(private val context: Context) {
     private val gson = Gson()
     private val dbHelper = ServerConfigDbHelper(context)
     
     /**
-     * Добавить конфигурацию сервера
+     * Add server configuration
      */
     fun addServerConfig(config: Map<String, Any?>): Boolean {
         return try {
@@ -48,7 +48,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Удалить конфигурацию сервера
+     * Remove server configuration
      */
     fun removeServerConfig(configId: String): Boolean {
         return try {
@@ -66,7 +66,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Обновить конфигурацию сервера
+     * Update server configuration
      */
     fun updateServerConfig(config: Map<String, Any?>): Boolean {
         return try {
@@ -96,7 +96,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Получить все конфигурации серверов
+     * Get all server configurations
      */
     fun getServerConfigs(): List<Map<String, Any?>> {
         val configs = mutableListOf<Map<String, Any?>>()
@@ -120,7 +120,7 @@ class ServerConfigManager(private val context: Context) {
                             val config: Map<String, Any?> = gson.fromJson(configJson, configType) ?: continue
                             configs.add(config)
                         } catch (e: JsonSyntaxException) {
-                            // Пропускаем невалидные конфигурации
+                            // Skip invalid configurations
                             continue
                         }
                     }
@@ -133,7 +133,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Получить конфигурацию сервера по ID
+     * Get server configuration by ID
      */
     fun getServerConfig(configId: String): Map<String, Any?>? {
         return try {
@@ -162,11 +162,11 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Установить активную конфигурацию сервера
+     * Set active server configuration
      */
     fun setActiveServerConfig(configId: String?): Boolean {
         return try {
-            // Сохраняем активную конфигурацию в SettingsManager
+            // Save active configuration to SettingsManager
             val settingsManager = SettingsManager(context)
             settingsManager.updateSetting("activeServerConfigId", configId)
             true
@@ -176,7 +176,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Получить активную конфигурацию сервера
+     * Get active server configuration
      */
     fun getActiveServerConfig(): Map<String, Any?>? {
         return try {
@@ -195,7 +195,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * Получить ID активной конфигурации
+     * Get active server configuration ID
      */
     fun getActiveServerConfigId(): String? {
         return try {
@@ -208,7 +208,7 @@ class ServerConfigManager(private val context: Context) {
     }
     
     /**
-     * SQLite Helper для конфигураций серверов
+     * SQLite Helper for server configurations
      */
     private class ServerConfigDbHelper(context: Context) : SQLiteOpenHelper(
         context,

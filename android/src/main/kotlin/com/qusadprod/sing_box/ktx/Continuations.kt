@@ -3,8 +3,8 @@ package com.qusadprod.sing_box.ktx
 import kotlin.coroutines.Continuation
 
 /**
- * Утилиты для работы с Continuation
- * Скопировано и адаптировано из sing-box-for-android
+ * Utilities for working with Continuation
+ * Copied and adapted from sing-box-for-android
  */
 fun <T> Continuation<T>.tryResume(value: T) {
     try {

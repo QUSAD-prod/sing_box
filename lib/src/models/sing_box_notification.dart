@@ -1,24 +1,24 @@
-/// Модель уведомления от sing-box
+/// Notification model from sing-box
 class SingBoxNotification {
-  /// Идентификатор уведомления
+  /// Notification identifier
   final String identifier;
 
-  /// Тип уведомления (название)
+  /// Notification type (name)
   final String typeName;
 
-  /// ID типа уведомления
+  /// Notification type ID
   final int typeId;
 
-  /// Заголовок уведомления
+  /// Notification title
   final String title;
 
-  /// Подзаголовок уведомления
+  /// Notification subtitle
   final String subtitle;
 
-  /// Текст уведомления
+  /// Notification body
   final String body;
 
-  /// URL для открытия при нажатии на уведомление
+  /// URL to open when notification is tapped
   final String? openUrl;
 
   const SingBoxNotification({
@@ -31,7 +31,7 @@ class SingBoxNotification {
     this.openUrl,
   });
 
-  /// Создать из Map (из Method Channel)
+  /// Create from Map (from Method Channel)
   factory SingBoxNotification.fromMap(Map<dynamic, dynamic> map) {
     return SingBoxNotification(
       identifier: map['identifier'] as String? ?? '',
@@ -44,7 +44,7 @@ class SingBoxNotification {
     );
   }
 
-  /// Преобразовать в Map (для Method Channel)
+  /// Convert to Map (for Method Channel)
   Map<String, dynamic> toMap() {
     return {
       'identifier': identifier,
@@ -62,4 +62,3 @@ class SingBoxNotification {
     return 'SingBoxNotification(identifier: $identifier, typeName: $typeName, typeId: $typeId, title: $title, subtitle: $subtitle, body: $body, openUrl: $openUrl)';
   }
 }
-

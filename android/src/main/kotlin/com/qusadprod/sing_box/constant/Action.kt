@@ -1,20 +1,20 @@
 package com.qusadprod.sing_box.constant
 
 /**
- * Константы действий для sing-box сервиса
- * Скопировано и адаптировано из sing-box-for-android
+ * Action constants for sing-box service
+ * Copied and adapted from sing-box-for-android
  */
 object Action {
     const val SERVICE = "com.qusadprod.sing_box.SERVICE"
     const val SERVICE_CLOSE = "com.qusadprod.sing_box.SERVICE_CLOSE"
     const val OPEN_URL = "com.qusadprod.sing_box.SERVICE_OPEN_URL"
     
-    // Broadcast actions для передачи статуса и статистики
+    // Broadcast actions for sending status and statistics
     const val STATUS_UPDATE = "com.qusadprod.sing_box.STATUS_UPDATE"
     const val STATS_UPDATE = "com.qusadprod.sing_box.STATS_UPDATE"
     const val NOTIFICATION_UPDATE = "com.qusadprod.sing_box.NOTIFICATION_UPDATE"
     
-    // Extra keys для Intent
+    // Extra keys for Intent
     const val EXTRA_STATUS = "status"
     const val EXTRA_STATS = "stats"
     const val EXTRA_NOTIFICATION_IDENTIFIER = "extra_notification_identifier"

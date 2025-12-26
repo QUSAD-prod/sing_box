@@ -7,18 +7,18 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
 /**
- * Менеджер для управления настройками плагина
- * Использует SQLite для хранения настроек
+ * Manager for managing plugin settings
+ * Uses SQLite for storing settings
  */
 class SettingsManager(private val context: Context) {
     private val gson = Gson()
     private val dbHelper = SettingsDatabaseHelper(context)
     
-    // Кэш текущих настроек
+    // Cache for current settings
     private var cachedSettings: Map<String, Any?>? = null
     
     /**
-     * Сохранить настройки
+     * Save settings
      */
     fun saveSettings(settings: Map<String, Any?>): Boolean {
         return try {
@@ -47,10 +47,10 @@ class SettingsManager(private val context: Context) {
     }
     
     /**
-     * Загрузить настройки
+     * Load settings
      */
     fun loadSettings(): Map<String, Any?> {
-        // Проверяем кэш
+        // Check cache
         if (cachedSettings != null) {
             return cachedSettings ?: getDefaultSettings()
         }
@@ -85,14 +85,14 @@ class SettingsManager(private val context: Context) {
     }
     
     /**
-     * Получить текущие настройки
+     * Get current settings
      */
     fun getSettings(): Map<String, Any?> {
         return loadSettings()
     }
     
     /**
-     * Обновить отдельную настройку
+     * Update individual setting
      */
     fun updateSetting(key: String, value: Any?): Boolean {
         return try {
@@ -105,7 +105,7 @@ class SettingsManager(private val context: Context) {
     }
     
     /**
-     * Получить настройки по умолчанию
+     * Get default settings
      */
     private fun getDefaultSettings(): Map<String, Any?> {
         return mapOf(
@@ -129,14 +129,14 @@ class SettingsManager(private val context: Context) {
     }
     
     /**
-     * Очистить кэш
+     * Clear cache
      */
     fun clearCache() {
         cachedSettings = null
     }
     
     /**
-     * SQLite Helper для настроек
+     * SQLite Helper for settings
      */
     private class SettingsDatabaseHelper(context: Context) : SQLiteOpenHelper(
         context,

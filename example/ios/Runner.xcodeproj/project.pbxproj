@@ -64,12 +64,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-			isa = PBXGroup;
-			children = (
-			);
-			sourceTree = "<group>";
-		};
-		9740EEB11CF90186004384FC /* Flutter */ = {
+	9740EEB11CF90186004384FC /* Flutter */ = {
 			isa = PBXGroup;
 			children = (
 				3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */,
