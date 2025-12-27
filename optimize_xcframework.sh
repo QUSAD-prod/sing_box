@@ -28,9 +28,13 @@ ORIGINAL_SIZE=$(du -sh "$XCFRAMEWORK_PATH" | cut -f1)
 echo "Original framework size: $ORIGINAL_SIZE"
 
 # Step 1: Ensure Versions/Current is a symlink to A
-if [ ! -L "$VERSIONS_CURRENT" ]; then
-    echo "Creating Versions/Current symlink..."
+# If Current exists as a directory, remove it and create symlink
+if [ -d "$VERSIONS_CURRENT" ] && [ ! -L "$VERSIONS_CURRENT" ]; then
+    echo "Removing Versions/Current directory (duplicates exist in Versions/A)..."
     rm -rf "$VERSIONS_CURRENT"
+    ln -s A "$VERSIONS_CURRENT"
+elif [ ! -L "$VERSIONS_CURRENT" ]; then
+    echo "Creating Versions/Current symlink..."
     ln -s A "$VERSIONS_CURRENT"
 fi
 

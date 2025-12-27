@@ -57,8 +57,12 @@ ios/libbox/
 # Exclude optimization scripts
 optimize_aar.sh
 optimize_xcframework.sh
+fix_xcframework_duplicates.sh
 
 # Exclude backup files
 *.backup
 **/*.backup
+
+# Exclude Versions/Current from XCFramework (it's a symlink to A, files are already in Versions/A)
+ios/Frameworks/**/Versions/Current
 
