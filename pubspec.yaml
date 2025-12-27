@@ -4,14 +4,11 @@ version: 0.0.1
 homepage: https://github.com/qusadprod/sing_box
 repository: https://github.com/qusadprod/sing_box
 topics:
-  - flutter
   - flutter-plugin
   - vpn
   - sing-box
   - proxy
   - network
-  - android
-  - ios
 
 environment:
   sdk: ^3.10.4
