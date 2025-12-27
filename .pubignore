@@ -57,3 +57,7 @@ ios/libbox/
 # Exclude optimization scripts
 optimize_aar.sh
 
+# Exclude backup files
+*.backup
+**/*.backup
+
