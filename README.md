@@ -73,12 +73,36 @@ flutter pub get
 
 1. **Minimum iOS Version**: iOS 15.0 or higher
 
-2. **Network Extension**: The plugin uses Network Extension for VPN functionality. You need to:
+2. **Download Libbox.xcframework**: 
+   
+   The iOS framework (`Libbox.xcframework`) is distributed via GitHub Releases due to size limitations. You need to download it manually:
+   
+   **Option 1: Using the installation script (recommended)**
+   ```bash
+   # In your Flutter project root
+   # Note: Requires git-lfs (install with: brew install git-lfs)
+   curl -L https://raw.githubusercontent.com/qusadprod/sing_box/main/install_ios_framework.sh | bash
+   ```
+   
+   **Option 2: Manual installation**
+   ```bash
+   # Clone repository (shallow clone to save time)
+   git clone --depth=1 https://github.com/qusadprod/sing_box.git temp_repo
+   
+   # Copy framework
+   mkdir -p ios/Frameworks
+   cp -R temp_repo/ios/Frameworks/Libbox.xcframework ios/Frameworks/
+   
+   # Cleanup
+   rm -rf temp_repo
+   ```
+
+3. **Network Extension**: The plugin uses Network Extension for VPN functionality. You need to:
    - Enable Network Extension capability in Xcode
    - Configure App Groups for communication between main app and extension
    - The extension is automatically configured during build
 
-3. **Permissions**: The plugin automatically handles required permissions.
+4. **Permissions**: The plugin automatically handles required permissions.
 
 ## Quick Start
 
@@ -1135,14 +1159,21 @@ Then open Xcode and archive the app.
 
 ### iOS Issues
 
-1. **Network Extension Not Working**:
+1. **Framework Not Found**:
+   - Make sure you've downloaded `Libbox.xcframework` from GitHub Releases
+   - Verify it's in `ios/Frameworks/Libbox.xcframework`
+   - Run the installation script: `curl -L https://raw.githubusercontent.com/qusadprod/sing_box/main/install_ios_framework.sh | bash`
+   - See [INSTALL_IOS_FRAMEWORK.md](INSTALL_IOS_FRAMEWORK.md) for detailed instructions
+
+2. **Network Extension Not Working**:
    - Ensure App Groups are configured
    - Check Network Extension capability is enabled
    - Verify signing and provisioning profiles
 
-2. **Build Errors**:
+3. **Build Errors**:
    - Run `pod install` in `ios/` directory
    - Clean build: `flutter clean && flutter pub get`
+   - Make sure `Libbox.xcframework` is properly linked in Xcode
 
 ## Contributing
 

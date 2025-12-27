@@ -59,17 +59,22 @@ optimize_aar.sh
 optimize_xcframework.sh
 fix_xcframework_duplicates.sh
 
+# Exclude support request template
+PUBDEV_SUPPORT_REQUEST.md
+
+# Exclude installation scripts and documentation (available in repo, not in package)
+install_ios_framework.sh
+setup_git_lfs.sh
+INSTALL_IOS_FRAMEWORK.md
+CREATE_RELEASE.md
+PUBLISH_CHECKLIST.md
+SETUP_GITHUB_LFS.md
+
 # Exclude backup files
 *.backup
 **/*.backup
 
-# Exclude Versions/Current from XCFramework (it's a symlink to A, files are already in Versions/A)
-ios/Frameworks/**/Versions/Current
-
-# Exclude root-level symlinks in framework (they point to Versions/Current, which is already excluded)
-# Only Versions/A contains the actual files
-ios/Frameworks/**/Libbox.framework/Libbox
-ios/Frameworks/**/Libbox.framework/Headers
-ios/Frameworks/**/Libbox.framework/Modules
-ios/Frameworks/**/Libbox.framework/Resources
+# Exclude iOS framework - it will be distributed via GitHub Releases
+# Users need to download it manually and place it in ios/Frameworks/
+ios/Frameworks/Libbox.xcframework
 
