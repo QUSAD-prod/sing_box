@@ -43,3 +43,6 @@ migrate_working_dir/
 
 # Optimization scripts (not needed in published package)
 optimize_aar.sh
+
+# iOS framework archives (framework is stored via Git LFS)
+ios/Frameworks/*.zip

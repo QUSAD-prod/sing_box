@@ -74,7 +74,9 @@ SETUP_GITHUB_LFS.md
 *.backup
 **/*.backup
 
-# Exclude iOS framework - it will be distributed via GitHub Releases
-# Users need to download it manually and place it in ios/Frameworks/
+# Exclude iOS framework - it will be distributed via GitHub LFS
+# Users need to download it manually using the installation script
 ios/Frameworks/Libbox.xcframework
+ios/Frameworks/Libbox.xcframework.zip
+ios/Frameworks/*.zip
 
