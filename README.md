@@ -41,7 +41,7 @@ flutter pub get
 
 #### Android
 
-1. **Minimum SDK**: Android API 21 (Android 5.0) or higher
+1. **Minimum SDK**: Android API 23 (Android 6.0) or higher
 2. **Permissions**: The plugin automatically declares required permissions in `AndroidManifest.xml`:
    - `INTERNET`
    - `BIND_VPN_SERVICE`
@@ -54,7 +54,7 @@ flutter pub get
 
 #### iOS
 
-1. **Minimum iOS Version**: iOS 13.0 or higher
+1. **Minimum iOS Version**: iOS 15.0 or higher
 2. **Network Extension**: The plugin uses Network Extension for VPN functionality. You need to:
    - Enable Network Extension capability in Xcode
    - Configure App Groups for communication between main app and extension
@@ -1111,8 +1111,8 @@ Then open Xcode and archive the app.
 
 ## Platform Support
 
-- ✅ **Android**: API 21+ (Android 5.0+)
-- ✅ **iOS**: iOS 13.0+
+- ✅ **Android**: API 23+ (Android 6.0+)
+- ✅ **iOS**: iOS 15.0+
 
 ## Troubleshooting
 

@@ -46,7 +46,7 @@ android {
     }
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 23
     }
 
     dependencies {
@@ -64,11 +64,8 @@ android {
         implementation("com.google.code.gson:gson:2.10.1")
         
         // sing-box Android library (libbox)
-        // Скомпилировано из исходников в android/libbox/
-        // libbox.aar - для Android API 23+
-        // libbox-legacy.aar - для Android API 21-22
+        // Compiled from sources in android/libbox/
+        // libbox.aar - for Android API 23+
         implementation files('libs/libbox.aar')
-        // Для поддержки старых версий Android (API 21-22) раскомментируйте:
-        // implementation files('libs/libbox-legacy.aar')
     }
 }
