@@ -2,6 +2,8 @@
 
 A Flutter plugin for sing-box, providing platform-specific implementations for Android and iOS.
 
+> **⚠️ Warning**: This is an unstable project currently under testing. The API may change, and there may be bugs. Any help, feedback, and contributions are welcome!
+
 ## Features
 
 - ✅ Platform-specific implementations for Android and iOS
@@ -20,9 +22,23 @@ A Flutter plugin for sing-box, providing platform-specific implementations for A
 - ✅ Observer pattern for logging (with Talker integration support)
 - ✅ Notifications from sing-box
 
+## Requirements
+
+### Minimum Versions
+
+- **Android**: API 23+ (Android 6.0+)
+- **iOS**: iOS 15.0+
+- **Flutter**: 3.3.0 or higher
+
+### Development Tools
+
+- **Flutter SDK**: Install Flutter SDK (version 3.3.0 or higher)
+- **Android Studio / Xcode**: For Android/iOS development
+- **Physical Device or Emulator**: VPN functionality requires a real device or emulator
+
 ## Installation
 
-### Add dependency
+### Add Dependency
 
 Add this to your package's `pubspec.yaml` file:
 
@@ -42,6 +58,7 @@ flutter pub get
 #### Android
 
 1. **Minimum SDK**: Android API 23 (Android 6.0) or higher
+
 2. **Permissions**: The plugin automatically declares required permissions in `AndroidManifest.xml`:
    - `INTERNET`
    - `BIND_VPN_SERVICE`
@@ -55,6 +72,7 @@ flutter pub get
 #### iOS
 
 1. **Minimum iOS Version**: iOS 15.0 or higher
+
 2. **Network Extension**: The plugin uses Network Extension for VPN functionality. You need to:
    - Enable Network Extension capability in Xcode
    - Configure App Groups for communication between main app and extension
@@ -1051,12 +1069,6 @@ class _MyAppState extends State<MyApp> {
 
 ## Running the Example
 
-### Prerequisites
-
-1. **Flutter SDK**: Install Flutter SDK (version 3.3.0 or higher)
-2. **Android Studio / Xcode**: For Android/iOS development
-3. **Physical Device or Emulator**: VPN functionality requires a real device or emulator
-
 ### Steps
 
 1. **Clone the repository**:
@@ -1085,7 +1097,7 @@ class _MyAppState extends State<MyApp> {
    ```bash
    flutter run
    ```
-   
+
    **Note**: For iOS, you may need to:
    - Open `ios/Runner.xcworkspace` in Xcode
    - Configure signing and capabilities
@@ -1093,7 +1105,7 @@ class _MyAppState extends State<MyApp> {
 
 ### Building for Release
 
-#### Android
+#### Android Release Build
 
 ```bash
 flutter build apk --release
@@ -1101,7 +1113,7 @@ flutter build apk --release
 flutter build appbundle --release
 ```
 
-#### iOS
+#### iOS Release Build
 
 ```bash
 flutter build ios --release
@@ -1109,14 +1121,9 @@ flutter build ios --release
 
 Then open Xcode and archive the app.
 
-## Platform Support
-
-- ✅ **Android**: API 23+ (Android 6.0+)
-- ✅ **iOS**: iOS 15.0+
-
 ## Troubleshooting
 
-### Android
+### Android Issues
 
 1. **VPN Permission Not Granted**:
    - The plugin will request VPN permission automatically
@@ -1126,7 +1133,7 @@ Then open Xcode and archive the app.
    - Check AndroidManifest.xml permissions
    - Ensure VPN permission is granted
 
-### iOS
+### iOS Issues
 
 1. **Network Extension Not Working**:
    - Ensure App Groups are configured
@@ -1149,10 +1156,10 @@ This plugin uses the following open-source projects:
 
 - **Repository**: [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - **License**: GPL-3.0 (see [sing-box LICENSE](https://github.com/SagerNet/sing-box/blob/master/LICENSE))
-- **Usage**: 
+- **Usage**:
   - Android: Uses `libbox` library from `experimental/libbox` directory (compiled to `libbox.aar`)
   - iOS: Uses `Libbox.xcframework` compiled from `experimental/libbox` directory
-- **Source Location**: 
+- **Source Location**:
   - Android sources: `android/libbox/`
   - iOS sources: `ios/libbox/`
 
