@@ -1,59 +1,58 @@
-# libbox - библиотека для работы с sing-box
+# libbox - library for working with sing-box
 
-## Описание
+## Description
 
-Эта папка содержит исходники библиотеки `libbox` из репозитория [sing-box](https://github.com/SagerNet/sing-box).
+This folder contains the source code of the `libbox` library from the [sing-box](https://github.com/SagerNet/sing-box) repository.
 
-## Источник
+## Source
 
-Скопировано из: `/tmp/sing-box-source/experimental/libbox`
+Copied from: `/tmp/sing-box-source/experimental/libbox`
 
-Оригинальный репозиторий: https://github.com/SagerNet/sing-box
+Original repository: https://github.com/SagerNet/sing-box
 
-## Что это?
+## What is this?
 
-`libbox` - это Go библиотека, которая предоставляет API для работы с sing-box из Android/Kotlin через JNI (Java Native Interface).
+`libbox` is a Go library that provides an API for working with sing-box from Android/Kotlin through JNI (Java Native Interface).
 
-## Компиляция
+## Compilation
 
-Для компиляции в Android библиотеку (.aar) необходимо:
+To compile into an Android library (.aar), you need to:
 
-1. Установить Go и gomobile:
+1. Install Go and gomobile:
 ```bash
 go install golang.org/x/mobile/cmd/gomobile@latest
 gomobile init
 ```
 
-2. Скомпилировать библиотеку:
+2. Compile the library:
 ```bash
 cd android/libbox
 gomobile bind -target android -o libbox.aar github.com/SagerNet/sing-box/experimental/libbox
 ```
 
-3. Добавить в `android/build.gradle`:
+3. Add to `android/build.gradle`:
 ```gradle
 dependencies {
     implementation files('libs/libbox.aar')
 }
 ```
 
-## Структура
+## Structure
 
-- `command.go` - команды для управления sing-box
-- `command_client.go` - клиент для выполнения команд
-- `config.go` - работа с конфигурацией
-- `dns.go` - DNS функциональность
-- `log.go` - логирование
-- `memory.go` - управление памятью
-- `monitor.go` - мониторинг
-- `pprof.go` - профилирование
-- И другие файлы...
+- `command.go` - commands for managing sing-box
+- `command_client.go` - client for executing commands
+- `config.go` - configuration handling
+- `dns.go` - DNS functionality
+- `log.go` - logging
+- `memory.go` - memory management
+- `monitor.go` - monitoring
+- `pprof.go` - profiling
+- And other files...
 
-## Использование
+## Usage
 
-После компиляции библиотека будет доступна как `io.nekohasekai.libbox.*` в Kotlin коде.
+After compilation, the library will be available as `io.nekohasekai.libbox.*` in Kotlin code.
 
-## Примечание
+## Note
 
-Эти исходники нужно скомпилировать с помощью `gomobile` для получения Android библиотеки (.aar файл).
-
+These sources need to be compiled using `gomobile` to obtain the Android library (.aar file).

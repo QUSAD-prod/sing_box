@@ -19,3 +19,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Third-Party Licenses
+
+This software includes the following third-party components:
+
+### sing-box (libbox)
+
+This software uses the `libbox` library from the sing-box project.
+
+- **Source**: https://github.com/SagerNet/sing-box
+- **License**: GPL-3.0
+- **License Text**: Available at https://github.com/SagerNet/sing-box/blob/master/LICENSE
+- **Usage**: 
+  - Android: `libbox.aar` compiled from `experimental/libbox`
+  - iOS: `Libbox.xcframework` compiled from `experimental/libbox`
+
+The libbox library is licensed under the GNU General Public License v3.0 (GPL-3.0).
+Please refer to the original license for terms and conditions.

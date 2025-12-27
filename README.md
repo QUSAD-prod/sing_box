@@ -1141,6 +1141,33 @@ Then open Xcode and archive the app.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Acknowledgments
+
+This plugin uses the following open-source projects:
+
+### sing-box
+
+- **Repository**: [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
+- **License**: GPL-3.0 (see [sing-box LICENSE](https://github.com/SagerNet/sing-box/blob/master/LICENSE))
+- **Usage**: 
+  - Android: Uses `libbox` library from `experimental/libbox` directory (compiled to `libbox.aar`)
+  - iOS: Uses `Libbox.xcframework` compiled from `experimental/libbox` directory
+- **Source Location**: 
+  - Android sources: `android/libbox/`
+  - iOS sources: `ios/libbox/`
+
+The `libbox` library provides the core VPN functionality and protocol implementations for both Android and iOS platforms.
+
+### Other Dependencies
+
+- **Flutter SDK**: Flutter framework and plugin system
+- **Kotlin Coroutines**: For asynchronous operations on Android
+- **AndroidX Core**: Android support libraries
+- **Gson**: JSON serialization for Android
+- **plugin_platform_interface**: Flutter plugin platform interface
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Note**: This plugin uses `libbox` from [SagerNet/sing-box](https://github.com/SagerNet/sing-box), which is licensed under GPL-3.0. Please refer to the [sing-box LICENSE](https://github.com/SagerNet/sing-box/blob/master/LICENSE) for details.
