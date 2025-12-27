@@ -25,7 +25,22 @@ fi
 
 # Get original size
 ORIGINAL_SIZE=$(du -sh "$XCFRAMEWORK_PATH" | cut -f1)
+BINARY_PATH="$VERSIONS_A/Libbox"
 echo "Original framework size: $ORIGINAL_SIZE"
+
+# Try to strip debug symbols from binary (optional optimization)
+if [ -f "$BINARY_PATH" ]; then
+    BINARY_SIZE_BEFORE=$(du -h "$BINARY_PATH" | cut -f1)
+    echo "Binary size before strip: $BINARY_SIZE_BEFORE"
+    
+    # Try to strip debug symbols (may fail for universal binaries)
+    if strip -S "$BINARY_PATH" 2>/dev/null; then
+        BINARY_SIZE_AFTER=$(du -h "$BINARY_PATH" | cut -f1)
+        echo "Binary size after strip: $BINARY_SIZE_AFTER"
+    else
+        echo "Note: strip failed (may be a universal binary or already stripped)"
+    fi
+fi
 
 # Step 1: Ensure Versions/Current is a symlink to A
 # If Current exists as a directory, remove it and create symlink

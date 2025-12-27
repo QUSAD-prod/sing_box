@@ -66,3 +66,10 @@ fix_xcframework_duplicates.sh
 # Exclude Versions/Current from XCFramework (it's a symlink to A, files are already in Versions/A)
 ios/Frameworks/**/Versions/Current
 
+# Exclude root-level symlinks in framework (they point to Versions/Current, which is already excluded)
+# Only Versions/A contains the actual files
+ios/Frameworks/**/Libbox.framework/Libbox
+ios/Frameworks/**/Libbox.framework/Headers
+ios/Frameworks/**/Libbox.framework/Modules
+ios/Frameworks/**/Libbox.framework/Resources
+
