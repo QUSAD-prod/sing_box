@@ -1,7 +1,10 @@
 #!/bin/bash
 
-# Script to optimize libbox.aar by removing x86 and x86_64 architectures
-# This reduces the size by ~50% since x86/x86_64 are only needed for emulators
+# Script to optimize libbox.aar by removing x86, x86_64, and armeabi-v7a architectures
+# This reduces the size significantly:
+# - x86/x86_64 are only needed for emulators
+# - armeabi-v7a is for old 32-bit Android devices (rarely used now)
+# Only arm64-v8a is kept (modern 64-bit Android devices)
 
 set -e
 
@@ -13,8 +16,9 @@ echo "Extracting AAR..."
 cd "$(dirname "$0")"
 unzip -q "$AAR_FILE" -d "$TEMP_DIR"
 
-echo "Removing x86 and x86_64 architectures..."
-rm -rf "$TEMP_DIR/jni/x86" "$TEMP_DIR/jni/x86_64"
+echo "Removing x86, x86_64, and armeabi-v7a architectures..."
+echo "Keeping only arm64-v8a (modern 64-bit Android devices)"
+rm -rf "$TEMP_DIR/jni/x86" "$TEMP_DIR/jni/x86_64" "$TEMP_DIR/jni/armeabi-v7a"
 
 echo "Creating optimized AAR..."
 cd "$TEMP_DIR"

@@ -31,3 +31,15 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+
+# Android local properties (may contain local paths)
+**/local.properties
+
+# Backup files
+*.backup
+*.backup*
+*_backup
+*_old
+
+# Optimization scripts (not needed in published package)
+optimize_aar.sh
