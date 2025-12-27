@@ -1,0 +1,46 @@
+# Exclude example app from publication
+example/
+
+# Exclude libbox source files (Go files) - only compiled libraries are needed
+android/libbox/*.go
+android/libbox/**/*.go
+ios/libbox/*.go
+ios/libbox/**/*.go
+
+# Exclude libbox documentation and build scripts
+android/libbox/BUILD.md
+android/libbox/README.md
+ios/libbox/BUILD.md
+ios/libbox/build.sh
+
+# Exclude build artifacts
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+
+# Exclude IDE files
+**/*.iml
+**/.idea/
+**/.vscode/
+
+# Exclude local properties
+**/local.properties
+
+# Exclude Pods (iOS)
+**/Pods/
+**/Podfile.lock
+
+# Exclude gradle wrapper (not needed in published package)
+**/gradlew
+**/gradlew.bat
+**/gradle/wrapper/gradle-wrapper.jar
+
+# Exclude test files if any
+**/test/
+**/*_test.dart
+
+# Exclude documentation that's not needed
+**/doc/
+**/docs/
+
