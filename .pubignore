@@ -44,3 +44,16 @@ ios/libbox/build.sh
 **/doc/
 **/docs/
 
+# Exclude README files in subdirectories (keep only root README.md)
+android/libbox/README.md
+android/libs/README.md
+ios/libbox/BUILD.md
+example/README.md
+
+# Exclude Go source files completely
+android/libbox/
+ios/libbox/
+
+# Exclude optimization scripts
+optimize_aar.sh
+
