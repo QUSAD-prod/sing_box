@@ -1,135 +1,121 @@
-import 'sing_box_observer.dart';
 import '../models/connection_stats.dart';
+import '../models/connection_status.dart';
+import '../models/sing_box_notification.dart';
+import 'sing_box_observer.dart';
 
-/// Observer for Talker integration
-/// 
-/// To use, add talker dependency to pubspec.yaml:
-/// ```yaml
-/// dependencies:
-///   talker: ^3.0.0
-/// ```
-/// 
-/// Usage example:
+/// A [SingBoxObserver] that forwards events to a
+/// [Talker](https://pub.dev/packages/talker) instance.
+///
+/// `sing_box` does not depend on `talker`; the instance is used through
+/// dynamic calls of its `info`, `warning`, `error` and `debug` methods, so
+/// any object with the same methods works:
+///
 /// ```dart
 /// import 'package:talker/talker.dart';
-/// import 'package:sing_box/sing_box.dart';
-/// 
+///
 /// final talker = Talker();
-/// final observer = SingBoxTalkerObserver(talker);
-/// SingBox.instance.setObserver(observer);
+/// SingBox.instance.setObserver(SingBoxTalkerObserver(talker));
 /// ```
-class SingBoxTalkerObserver implements SingBoxObserver {
-  /// Talker instance for logging
-  /// Uses dynamic for compatibility without required dependency
+///
+/// Traffic statistics are logged only when [logStats] is `true`, because
+/// they arrive every second.
+class SingBoxTalkerObserver extends SingBoxObserver {
+  /// Creates an observer that logs to [talker].
+  const SingBoxTalkerObserver(
+    this.talker, {
+    this.prefix = '[SingBox]',
+    this.logStats = false,
+  });
+
+  /// The `Talker` instance (typed `dynamic` to avoid a hard dependency).
   final dynamic talker;
 
-  /// Prefix for all logs
+  /// Prefix added to every message.
   final String prefix;
 
-  SingBoxTalkerObserver(this.talker, {this.prefix = '[SingBox]'});
+  /// Whether [onConnectionStatsChanged] events are logged.
+  final bool logStats;
 
-  void _log(String level, String message, [Map<String, dynamic>? data]) {
-    if (talker == null) return;
-    
-    final fullMessage = data != null && data.isNotEmpty
-        ? '$prefix $message | Data: $data'
-        : '$prefix $message';
-    
+  String _format(String message, Map<String, dynamic>? data) =>
+      data != null && data.isNotEmpty
+      ? '$prefix $message | $data'
+      : '$prefix $message';
+
+  void _call(void Function(dynamic talker) call) {
+    final instance = talker;
+    if (instance == null) return;
     try {
-      // Use dynamic call for compatibility
-      final method = (talker as dynamic)[level];
-      if (method != null && method is Function) {
-        Function.apply(method, [fullMessage], {});
-      }
-    } catch (e) {
-      // If talker is unavailable, ignore error
+      call(instance);
+    } catch (_) {
+      // The object does not provide the method; logging must never throw.
     }
   }
 
   @override
-  void info(String message, [Map<String, dynamic>? data]) {
-    _log('info', message, data);
-  }
+  void info(String message, [Map<String, dynamic>? data]) =>
+      _call((t) => t.info(_format(message, data)));
 
   @override
-  void warning(String message, [Map<String, dynamic>? data]) {
-    _log('warning', message, data);
-  }
+  void warning(String message, [Map<String, dynamic>? data]) =>
+      _call((t) => t.warning(_format(message, data)));
 
   @override
-  void error(String message, [Object? error, StackTrace? stackTrace]) {
-    if (talker == null) return;
-    try {
-      final fullMessage = '$prefix $message';
-      final errorMethod = (talker as dynamic)['error'];
-      if (errorMethod != null && errorMethod is Function) {
-        if (error != null && stackTrace != null) {
-          Function.apply(errorMethod, [fullMessage, error, stackTrace], {});
-        } else if (error != null) {
-          Function.apply(errorMethod, [fullMessage, error], {});
-        } else {
-          Function.apply(errorMethod, [fullMessage], {});
-        }
-      }
-    } catch (e) {
-      // If talker is unavailable, ignore error
+  void error(String message, [Object? error, StackTrace? stackTrace]) =>
+      _call((t) => t.error('$prefix $message', error, stackTrace));
+
+  @override
+  void debug(String message, [Map<String, dynamic>? data]) =>
+      _call((t) => t.debug(_format(message, data)));
+
+  @override
+  void onConnect(String config) =>
+      info('Connecting', {'configLength': config.length});
+
+  @override
+  void onDisconnect() => info('Disconnecting');
+
+  @override
+  void onStatusChanged(String status) => debug('Status: $status');
+
+  @override
+  void onConnectionStateChanged(SingBoxConnectionState state) {
+    if (state.error != null) {
+      warning('Tunnel stopped with an error', {'error': state.error});
     }
   }
 
   @override
-  void debug(String message, [Map<String, dynamic>? data]) {
-    _log('debug', message, data);
-  }
-
-  @override
-  void onConnect(String config) {
-    info('Connecting to VPN', {'config': config});
-  }
-
-  @override
-  void onDisconnect() {
-    info('Disconnecting from VPN');
-  }
-
-  @override
-  void onStatusChanged(String status) {
-    debug('Connection status changed', {'status': status});
-  }
-
-  @override
-  void onConnectionError(String error) {
-    this.error('Connection error: $error');
-  }
+  void onConnectionError(String error) => this.error('Connection error: $error');
 
   @override
   void onConnectionStatsChanged(SingBoxConnectionStats stats) {
-    debug('Connection stats updated', {
-      'downloadSpeed': '${stats.downloadSpeed} B/s',
-      'uploadSpeed': '${stats.uploadSpeed} B/s',
-      'bytesSent': stats.bytesSent,
-      'bytesReceived': stats.bytesReceived,
-      'ping': stats.ping != null ? '${stats.ping} ms' : null,
-      'connectionDuration': '${stats.connectionDuration} ms',
+    if (!logStats) return;
+    debug('Stats', {
+      'up': '${stats.uploadSpeed} B/s',
+      'down': '${stats.downloadSpeed} B/s',
+      'upTotal': stats.uploadTotal,
+      'downTotal': stats.downloadTotal,
+      'duration': stats.duration.toString(),
     });
   }
 
   @override
-  void onSettingsChanged(String key, dynamic value) {
-    debug('Settings changed', {'key': key, 'value': value});
-  }
+  void onSettingsChanged(String key, dynamic value) =>
+      debug('Setting changed', {'key': key, 'value': value});
 
   @override
-  void onServerConfigAdded(String configId, String name) {
-    info('Server config added', {'id': configId, 'name': name});
-  }
+  void onServerConfigAdded(String configId, String name) =>
+      info('Server config added', {'id': configId, 'name': name});
 
   @override
-  void onServerConfigRemoved(String configId) {
-    info('Server config removed', {'id': configId});
-  }
+  void onServerConfigRemoved(String configId) =>
+      info('Server config removed', {'id': configId});
 
   @override
-  void onActiveServerConfigChanged(String configId) {
-    info('Active server config changed', {'id': configId});
-  }
+  void onActiveServerConfigChanged(String configId) =>
+      info('Active server config changed', {'id': configId});
+
+  @override
+  void onNotification(SingBoxNotification notification) =>
+      info('Notification: ${notification.title}', {'body': notification.body});
 }

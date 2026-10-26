@@ -38,3 +38,16 @@ Branch: `claude/singbox-flutter-plugin-review-22aa2f`.
 - [ ] Dart core (models/exceptions/options done; platform interface, method channel, facade, storage pending)
 - [ ] Android native, iOS native, config module, research — in progress
 - [ ] example app UI, README/CHANGELOG/docs, CI workflow + release script, final verification
+
+## Checkpoint 2 (lead)
+- Done in lib/: exceptions.dart, options.dart, storage.dart, utils/validators.dart, all models
+  (connection_status/stats, log_entry, outbound_group, connection, clash_mode, network_quality,
+  stun_result, ping_result, speed_test_result, sing_box_notification, settings, server_config,
+  runtime_info), observer (SingBoxObserver with no-op defaults, Talker fixed),
+  sing_box_platform_interface.dart, sing_box_method_channel.dart.
+- NEXT: lib/src/sing_box.dart facade (connect/buildConfig via lib/src/config/config.dart barrel,
+  rules/settings/servers persistence via SingBoxStorage, ping via urlTest + outbounds stream,
+  testSpeed via network quality), lib/sing_box.dart exports, tests with fake platform,
+  real example app (example/lib/main.dart is a temporary placeholder on purpose).
+- Agents running at checkpoint: Android native, iOS native, Dart config module, flutter_vless research.
+  If they were interrupted, check android/, ios/, lib/src/config/ for partial work and resume.
