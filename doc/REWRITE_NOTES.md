@@ -51,3 +51,23 @@ Branch: `claude/singbox-flutter-plugin-review-22aa2f`.
   real example app (example/lib/main.dart is a temporary placeholder on purpose).
 - Agents running at checkpoint: Android native, iOS native, Dart config module, flutter_vless research.
   If they were interrupted, check android/, ios/, lib/src/config/ for partial work and resume.
+
+## Checkpoint 3 — session stopped by usage limit (2026-10-27)
+All four sub-agents were stopped before writing files (they had only read references). Relaunch them
+in the next session with these briefs (full context: doc/platform_channel.md + this file):
+1. Android: rewrite android/ (build.gradle.kts, AGP 9.1, built-in Kotlin, minSdk 24, compileSdk 36),
+   libbox resolution: gradle prop `singBox.libboxAar` / env `SING_BOX_LIBBOX_AAR` -> android/libs/libbox.aar ->
+   download release asset to <gradleUserHome>/caches/sing_box/libbox/<ver>/ with sha256 (android/libbox.properties).
+   VpnService (systemExempted FGS), CommandServer.startOrReloadService, PlatformInterface per SFA
+   (reference clone: scratchpad/src/sfx-android at submodule commit f87c2ebd), all channels of the contract,
+   boot receiver, KV storage. Verify flutter build apk debug/release + e2e on emulator vs local sing-box server.
+2. iOS: ios/sing_box/Package.swift (products `sing-box` + `SingBoxTunnel`, binaryTarget local path or release url+checksum),
+   sing_box.podspec + separate SingBoxTunnel.podspec (download zip in podspec Ruby if missing),
+   SingBoxPacketTunnelProvider open class (ref: sfx-apple at 2dd154e7), example/ios PacketTunnel target
+   (bundle com.qusadprod.singBoxExample.PacketTunnel, app group group.com.qusadprod.singBoxExample), SPM + CocoaPods builds.
+3. Dart config module lib/src/config/ (+ barrel config.dart): SingBoxRoutingRules, SingBoxConfigOptions/Tun/Dns,
+   SingBoxConfigBuilder(build/buildFromJson/apply; tags proxy/auto/direct), SingBoxShareLink (vless/vmess/trojan/ss/hy2/tuic/socks/http…),
+   SingBoxDnsServer; tests validated with `sing-box check` (build CLI from scratchpad/src/sing-box).
+4. Research flutter_vless (pub.dev + github.com/XIIIFOX/flutter_vless issues) -> doc/agent_notes/flutter_vless_research.md.
+Note: scratchpad (/private/tmp/...) may be wiped; re-clone sing-box v1.14.4 and the SFA/SFI repos at the commits above
+and rebuild libbox with scripts/build_libbox.sh if build/libbox is gone.
