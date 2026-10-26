@@ -35,14 +35,10 @@ migrate_working_dir/
 # Android local properties (may contain local paths)
 **/local.properties
 
-# Backup files
-*.backup
-*.backup*
-*_backup
-*_old
-
-# Optimization scripts (not needed in published package)
-optimize_aar.sh
-
-# iOS framework archives (framework is stored via Git LFS)
-ios/Frameworks/*.zip
+# Native libbox binaries. They are built by scripts/build_libbox.sh and
+# published as GitHub release assets; Gradle and CocoaPods/SwiftPM download
+# them on demand, so they are never committed.
+/android/libs/
+/ios/Frameworks/
+/ios/sing_box/Frameworks/
+*.xcframework.zip
