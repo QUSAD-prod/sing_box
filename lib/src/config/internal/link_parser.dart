@@ -507,8 +507,8 @@ String _vmessSecurity(String? value) {
     'auto',
     'none',
     'zero',
-    'aes-128-cfb',
     'aes-128-gcm',
+    'aes-128-ctr',
     'chacha20-poly1305',
   };
   return security != null && known.contains(security) ? security : 'auto';
