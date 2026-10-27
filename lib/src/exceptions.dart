@@ -62,8 +62,8 @@ class SingBoxException implements Exception {
 /// example `decode config at outbounds[0]: unknown field "uuidd"`.
 class SingBoxConfigException extends SingBoxException {
   /// Creates a configuration error.
-  const SingBoxConfigException(String message, {Object? details})
-      : super(SingBoxErrorCode.invalidConfig, message, details: details);
+  const SingBoxConfigException(String message, {super.details})
+    : super(SingBoxErrorCode.invalidConfig, message);
 
   @override
   String toString() => 'SingBoxConfigException: $message';
@@ -74,8 +74,8 @@ class SingBoxConfigException extends SingBoxException {
 /// Call `SingBox.instance.requestVpnPermission()` and retry.
 class SingBoxPermissionException extends SingBoxException {
   /// Creates a permission error.
-  const SingBoxPermissionException(String message, {Object? details})
-      : super(SingBoxErrorCode.permissionDenied, message, details: details);
+  const SingBoxPermissionException(String message, {super.details})
+    : super(SingBoxErrorCode.permissionDenied, message);
 
   @override
   String toString() => 'SingBoxPermissionException: $message';
@@ -84,8 +84,8 @@ class SingBoxPermissionException extends SingBoxException {
 /// The operation needs a running VPN service, but it is stopped.
 class SingBoxServiceNotRunningException extends SingBoxException {
   /// Creates a "service not running" error.
-  const SingBoxServiceNotRunningException(String message, {Object? details})
-      : super(SingBoxErrorCode.serviceNotRunning, message, details: details);
+  const SingBoxServiceNotRunningException(String message, {super.details})
+    : super(SingBoxErrorCode.serviceNotRunning, message);
 
   @override
   String toString() => 'SingBoxServiceNotRunningException: $message';
@@ -94,8 +94,8 @@ class SingBoxServiceNotRunningException extends SingBoxException {
 /// The feature is not available on the current platform or OS version.
 class SingBoxUnsupportedException extends SingBoxException {
   /// Creates an "unsupported" error.
-  const SingBoxUnsupportedException(String message, {Object? details})
-      : super(SingBoxErrorCode.unsupported, message, details: details);
+  const SingBoxUnsupportedException(String message, {super.details})
+    : super(SingBoxErrorCode.unsupported, message);
 
   @override
   String toString() => 'SingBoxUnsupportedException: $message';

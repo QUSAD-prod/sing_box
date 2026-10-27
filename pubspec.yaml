@@ -1,25 +1,31 @@
 name: sing_box
-description: A Flutter plugin for sing-box, providing platform-specific implementations for Android and iOS. Supports VPN connection management, statistics monitoring, bypass rules, DNS configuration, and more.
-version: 0.0.1
-homepage: https://github.com/qusadprod/sing_box
-repository: https://github.com/qusadprod/sing_box
+description: >-
+  Flutter VPN plugin powered by the sing-box core: VLESS, VMess, Trojan,
+  Shadowsocks, Hysteria2, TUIC, WireGuard, routing rules, stats and speed tests.
+version: 0.1.0
+homepage: https://github.com/QUSAD-prod/sing_box
+repository: https://github.com/QUSAD-prod/sing_box
+issue_tracker: https://github.com/QUSAD-prod/sing_box/issues
+documentation: https://github.com/QUSAD-prod/sing_box#readme
 topics:
-  - flutter-plugin
   - vpn
-  - sing-box
   - proxy
+  - sing-box
+  - vless
   - network
 
 environment:
-  sdk: ^3.10.4
-  flutter: '>=3.3.0'
+  sdk: ^3.12.0
+  flutter: '>=3.44.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  plugin_platform_interface: ^2.0.2
+  plugin_platform_interface: ^2.1.8
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^6.0.0
 
 flutter:
