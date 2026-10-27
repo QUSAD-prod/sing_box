@@ -49,7 +49,8 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
   - Outputs in `build/libbox/` (gitignored): `libbox.aar` (85 MB, 4 ABIs, sha256
     `d5511581e6275f10683f57bc8e7263badfa48c720d5d04acc741549fe6a66bae`), `Libbox.xcframework` (ios-arm64 +
     ios-arm64_x86_64-simulator) and `Libbox.xcframework.zip` (sha256/SwiftPM checksum
-    `0413d065d147c1cb7c55c59315b60e5507a5e0bfb2e3c95696c5fa7c25a2da68`).
+    `8bca7d8f5f8615df5d719a0e50fd2364d041cd2182ebda2d981d1e7494c71c40` — session 3: iOS slices flattened to shallow
+    bundles by `scripts/flatten_xcframework.sh`, now run by `build_libbox.sh`; the old checksum `0413d0…` is obsolete).
   - Local dev copies (gitignored): `android/libs/libbox.aar`, `ios/sing_box/Frameworks/Libbox.xcframework`.
   - 16 KB page alignment verified: arm64-v8a/x86_64 `2**14` (Play requirement OK).
 - **Distribution**: binaries are NOT in git and NOT in the pub package. Downloaded at build time from GitHub release
@@ -83,9 +84,9 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
 | Dart core (`lib/`) | ✅ `flutter analyze` clean, **245 tests pass** (+3 skipped without `SING_BOX_BIN`; 248 with it). Truthful `connect()` (waits for connected / `SingBoxStartException` / `SingBoxTimeoutException` / `SingBoxCancelledException`, serialized start/stop, generation token), `pingServers()` batch latency. Fake platform `test/support/fake_platform.dart` emulates connecting→connected/error and disconnecting→disconnected |
 | Config module `lib/src/config/` | ✅ tested in `test/config/` (share links per scheme + malformed corpus + round trips, subscriptions, builder flags/options, `apply()` immutability, DNS/rule-sets/options); every generated config passes real `sing-box check` (`test/config/support/sing_box_check.dart`, `SING_BOX_BIN`) |
 | Android native `android/` | ✅ (session 3) compiles, `flutter build apk --debug/--release` OK (release universal APK 235 MB: 3 ABIs × ~60 MB libbox stored uncompressed). `SingBoxPlugin.kt` + `plugin/{StreamHandlers,Converters}.kt` implement the whole contract. **e2e on emulator (Android 17, `example/integration_test/vpn_e2e_test.dart`) passes** against a local sing-box server — see §5.4. Notes: `doc/agent_notes/android.md` |
-| iOS native `ios/` | 🟡 partial, **never compiled**: `Package.swift`, `Sources/SingBoxShared/{SingBoxKeys,SingBoxPaths,SingBoxLibbox}.swift`, `Sources/SingBoxTunnel/{SingBoxPacketTunnelProvider,SingBoxPlatformInterface,RunBlocking,ScreenStateObserver}.swift`, `Sources/sing_box/{SingBoxPlugin,TunnelController,StreamHandlers,CommandStreamHandler,LibboxConverters,PluginError}.swift`. Missing: podspecs/`libbox.rb` (check), PrivacyInfo, deletion of old `ios/Classes`, `ios/Assets`, `ios/Resources`, example `PacketTunnel` target + entitlements, builds. Notes: `doc/agent_notes/ios.md` |
-| Example | 🟡 pages done in `example/lib/src/` (app, home, servers, routing, logs, tools); `example/lib/main.dart` is still a **placeholder** — replace with `WidgetsFlutterBinding.ensureInitialized(); await SingBox.instance.initialize(); runApp(const ExampleApp());` |
-| Docs | ✅ README, CHANGELOG (0.1.0), THIRD_PARTY_NOTICES; ❌ `doc/android.md`, `doc/ios.md` (README links to them) |
+| iOS native `ios/` | ✅ (session 3) old `ios/Classes|Assets|Resources` deleted; SPM build (`flutter build ios --simulator --debug`, `--release --no-codesign` 140 MB) and CocoaPods build (`enable-swift-package-manager: false`) pass; `ios/sing_box.podspec`, `ios/SingBoxTunnel.podspec`, `ios/libbox.rb`; `ios/scripts/add_packet_tunnel.rb` (idempotent) added the `PacketTunnel` target to `example/ios`; extension links `SingBoxTunnel` **via CocoaPods with static linkage** in both modes (an SPM product reference conflicts with Flutter's folder-named package identity). `example/integration_test/smoke_test.dart` passes on the iPhone 17 Pro simulator. **Not tested on a device** (needs paid team + device: tunnel start, reload, on-demand, memory). Notes: `doc/agent_notes/ios.md` |
+| Example | ✅ real `main.dart`; `integration_test/{vpn_e2e,permission_e2e,smoke}_test.dart`; Android QUERY_ALL_PACKAGES for per-app demo; iOS PacketTunnel target |
+| Docs | ✅ README (iOS setup rewritten around the script), CHANGELOG, THIRD_PARTY_NOTICES, `doc/android.md`, `doc/ios.md`; `flutter pub publish --dry-run`: 244 KB, 0 warnings |
 
 ### Android e2e how-to (session 3)
 - Servers bind to **127.0.0.1 only** (binding 0.0.0.0 is blocked by the auto-mode classifier); the emulator reaches
@@ -149,7 +150,7 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
    vless server config on the Mac; connect from the emulator to `10.0.2.2`; verify status, stats, logs, groups,
    urlTest/select, clash mode, connections, speed test, stop/reload, invalid config, permission denial, process kill
    (service survives, plugin reattaches). Grant consent via `adb shell appops set com.qusadprod.sing_box_example ACTIVATE_VPN allow`.
-5. **iOS native**: finish sources; podspecs + `libbox.rb`; PrivacyInfo; delete old `ios/Classes|Assets|Resources`;
+5. ✅ (session 3, simulator/compile level) **iOS native**: finish sources; podspecs + `libbox.rb`; PrivacyInfo; delete old `ios/Classes|Assets|Resources`;
    add `PacketTunnel` target to `example/ios` (bundle `com.qusadprod.singBoxExample.PacketTunnel`, app group
    `group.com.qusadprod.singBoxExample`, NE + App Groups entitlements, Info.plist `NSExtension…packet-tunnel`,
    `SingBoxAppGroup`), **Embed Foundation Extensions before Thin Binary**; link `SingBoxTunnel` in SPM and CocoaPods
@@ -158,8 +159,8 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
    `cancelTunnelWithError` when the core stops/fails; `sleep`/`wake` → pause/wake; NWPathMonitor; fail loudly when
    the app group container is nil. Builds: `flutter build ios --simulator --debug` and `--release --no-codesign`, SPM + CocoaPods.
    Simulator smoke test (initialize/version/checkConfig/storage/graceful VPN failure).
-6. **Example**: real `main.dart`, run on Android emulator and iOS simulator; `example/test` widget smoke test optional.
-7. **Docs**: `doc/android.md`, `doc/ios.md` (setup, troubleshooting, Always-on, ProGuard, offline builds, signing),
+6. ✅ (session 3) **Example**: real `main.dart`, run on Android emulator and iOS simulator; `example/test` widget smoke test optional.
+7. ✅ (session 3; re-check after device tests) **Docs**: `doc/android.md`, `doc/ios.md` (setup, troubleshooting, Always-on, ProGuard, offline builds, signing),
    update README with final integration steps from native work; CHANGELOG.
 8. **Verification**: `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`, `pana` (target 160/160),
    `flutter pub publish --dry-run` (package size), CI workflows sanity.
@@ -188,6 +189,17 @@ Must-haves for our plugin:
 - Requested features we cover/plan: per-app include/exclude, routing/geo rule-sets, LAN bypass, DoH/DoT, FakeIP, IPv6,
   kill switch/always-on/on-demand, status/stats/logs streams, ping (single + batch), core version, notification
   customization, QS tile. Not planned yet: desktop/Linux, proxy-only mode, iOS Control Center widget.
+
+### Next session — what is left
+- **iOS on a real device** (user: paid team + iPhone): run the example, `connect` to a server, reload/switchServer,
+  stop, start errors from the extension (`last_error` path), On Demand, kill switch, memory under load. The Dart
+  contract requires the `connecting` event before the `start` result — verify the iOS TunnelController emits it
+  (NEVPNStatus `.connecting` arrives asynchronously; Dart tolerates it, but check the timeout path).
+- Android manual checks not automated: swipe the app away while connected (VPN keeps running, new engine attaches),
+  notification Stop + lockdown, boot start, QS tile, Always-on.
+- §5.8 verification: `pana` (target 160/160), CI workflows sanity (`.github/workflows/ci.yml`, `libbox.yml`) — they
+  should run `flatten_xcframework.sh` via `build_libbox.sh` (already wired).
+- **Publish the libbox GitHub release** (§7.1) with the *new* `build/libbox/Libbox.xcframework.zip` (checksum above).
 
 ## 7. Open questions for the user
 1. **GitHub release** `libbox-v1.14.4` must be published (`scripts/release_libbox.sh --publish` or push tag
