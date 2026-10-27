@@ -44,3 +44,40 @@ GitHub REST API issues/PRs, pub.dev.
 - #26 PR runtime inputs iOS r3 (XRayStartPrivate, structured private diagnostics) / Android protect1 (protected transport/DNS broker overlay → socket protect broker).
 - #27 PR fix macOS CI signing + Windows forwarding header.
 - #29 Android INVALID_CONFIG when streamSettings.security none: Xray-core v26.9.9 rejects VLESS outbound to public address with both security none and encryption none (upstream validation infra/conf/xray.go). Error message generic "VPN configuration was rejected; the active session was preserved". LESSON: surface core's actual error text to Dart.
+
+## Package code study (main @ 2026-10-25; unreleased 1.1.7 train)
+
+### Federated layout
+- flutter_vless (app-facing + iOS impl in root ios/), flutter_vless_platform_interface, flutter_vless_android, flutter_vless_macos, flutter_vless_windows. No Linux (#25 open).
+- MethodChannel 'flutter_vless', EventChannel 'flutter_vless/status'.
+- Fork origin evidence: Android code still uses AppConfigs.V2RAY_STATE / V2RAY_STATES.V2RAY_CONNECTED / V2RAY_CONNECTION_INFO / V2RAY_SERVICE_COMMANDS, process name ":RunSoLibXrayDaemon" (flutter_v2ray had ":RunSoLibV2RayDaemon"), CHANGELOG 1.0.1 "modify V2rayCoreManager to use CoreController". => derived from flutter_v2ray (pub: flutter_v2ray by amir-zr) lineage; repo itself is not a GitHub fork. NOTICE claims copyright 2024-2026 13FOX Studio.
+
+### Public Dart API (FlutterVless)
+- ctor FlutterVless({onStatusChanged}) ; callback only, NO Stream, NO getStatus()/current-state query.
+- initializeVless({notificationIconResourceType, notificationIconResourceName, providerBundleIdentifier (base bundle id; '.XrayTunnel' appended internally on Apple), groupIdentifier, keychainAccessGroup?, options: VlessOptions?})
+- requestPermission() -> bool (Android VpnService.prepare + notif perm)
+- startVless({remark, config (Xray JSON string), notificationDisconnectButtonName='DISCONNECT', blockedApps (Android pkgs), bypassSubnets (CIDR; iOS VPN rejects non-empty w/ INCOMPATIBLE_ROUTING; mac/win translate IPv4 to xray direct rules), proxyOnly, geoAssetsDirectory, certificateAssetsDirectory, androidDnsPolicy {config, proxy}, androidDnsProxyOutboundTag, vpnRouting: VpnRoutingOptions(sourceInboundIndex, defaultOutboundTag)})
+- startVlessWithReport(...) -> VlessPreparationReport (closed codes: coreCheck passed/unavailable, scope host/runtimeFinal, changes list)
+- stopVless()
+- getServerDelay({config, url='https://google.com/generate_204', geoAssetsDirectory, certificateAssetsDirectory}) -> int ms or -1 (Windows standalone delay unsupported -> -1)
+- getConnectedServerDelay({url}) -> int
+- getCoreVersion() -> String ; getProviderDebugSnapshot() -> String (bounded human-readable logs)
+- getCapabilities() -> VlessCapabilities(optionsVersion, quickAccessSurfaces, requestAddQuickTile, controlCenterExtensionConfigured, customReconnectBackoff, onDemand, alwaysOn, alwaysOnEnabled, lockdownEnabled, killSwitch)
+- requestAddQuickTile() -> QuickTileAddResult {added, alreadyAdded, declined, unsupported}; clearQuickAccessProfile()
+- static parse(input) / parseMany(subscription) / parseFromURL(url) -> FlutterVlessURL (VmessURL, VlessURL, TrojanURL, ShadowSocksURL, SocksURL, Hysteria2URL, XrayJsonConfig); .remark, .getFullConfiguration(indent), .outbound1, mutable inbound/routing/log/stream maps; typed XrayConfigDocument model + XrayConfigValidator.
+- VlessStatus {duration s, uploadSpeed, downloadSpeed, upload, download (bytes), state raw string, connectionState enum connected/connecting/disconnected/disconnecting/unknown}. Wire format: legacy positional List<String>[duration, upSpeed, downSpeed, upTotal, downTotal, state] or Map. NO error/reason field in status.
+- VlessOptions: NotificationOptions(iconResourceType/Name, buttonLabel, action disconnect/openApp/none), QuickAccessOptions(enabled, surface, label, action toggle/openApp, requireUnlock, androidIconResourceName, appleSymbol, windowsIconPath), ReconnectOptions(enabled, initialDelay, maxDelay, maxAttempts 0=unlimited), ProtectionOptions(killSwitch platformDefault/required, onDemand platformDefault/enabled/disabled, alwaysOn system/requireEnabled), DiagnosticsOptions(enabled, maxBytes, maxLines).
+- Errors: PlatformException codes e.g. INVALID_CONFIG ("VPN configuration was rejected; the active session was preserved"), INCOMPATIBLE_ROUTING, VPN_STOP_ERROR, VPN_START_CANCELLED; VlessConfigurationFailure.fromDetails(details) for closed failure stage.
+- Dart-side generation counter cancels stale capability-gated starts (race Start/Stop).
+
+### Android implementation (flutter_vless_android, Kotlin)
+- Runtime AAR on Maven Central dev.tfox.fluttervless:xray-android:<xray ver>-protect1 with libxray.so + libtun2socks.so (4 ABIs) + geoip/geosite. Pub package excludes binaries (pub size limit).
+- Xray and tun2socks are EXECUTABLES launched via ProcessBuilder from nativeLibraryDir -> REQUIRES `packaging.jniLibs.useLegacyPackaging = true` / extractNativeLibs=true (bigger APK install size; Play warns). 
+- tun2socks config yaml: proxy socks5://user:pass@127.0.0.1:port, mtu 1500; TUN fd passed over LocalSocket (-sock-path) with SCM_RIGHTS.
+- VpnService.Builder: setSession(remark), MTU 1500, 26.26.26.1/30 + fd26:26:26::1/126 (v2rayNG-like), routes 0.0.0.0/0 and ::/0, setMetered(false), addDisallowedApplication(blockedApps) (bug #18 fixed 1.1.5), DNS virtual 10.0.85.53. Earlier versions disallowed own package (whole app UID bypassed VPN) — changed in 1.1.6 to use socket protect broker (Go overlay xray-protect calls VpnService.protect via broker).
+- Services in separate process ":RunSoLibXrayDaemon" (VPN service + TileService), FGS type specialUse subtype "vpn" (0x40000000), SUPPORTS_ALWAYS_ON=true. Manifest includes READ_EXTERNAL_STORAGE (unneeded, store-review smell), POST_NOTIFICATIONS, FOREGROUND_SERVICE_SPECIAL_USE.
+- Notification: channel "vpn_service_channel" IMPORTANCE_LOW, title=remark, text Connected/Recovering..., action Disconnect (hidden when always-on/lockdown) or openApp.
+- Status: VPN service ticks every 1 s → publishState → sendBroadcast(intent with STATE, DURATION, speeds, totals) → plugin BroadcastReceiver registered ON ACTIVITY only (none when activity detached) → EventChannel list payload. Traffic read by spawning `libxray.so api statsquery --server=127.0.0.1:<api> --pattern inbound>>>tag>>>traffic>>>` PROCESS EVERY SECOND (battery/CPU cost); speed = delta per tick.
+- Health: every 30 ticks authenticated SOCKS + packet path probe; network callback (NOT_VPN INTERNET onAvailable/onLost) triggers recovery; recovery keeps TUN established (kill-switch) with capped backoff; status CONNECTING during recovery.
+- Session restore after process death: authorized profile encrypted with Android Keystore in noBackupFilesDir (for always-on / sticky restart).
+- Delay (getServerDelay): spawns a separate whole Xray process per test with temp config + authenticated SOCKS inbound, retries up to 20×100ms, measures ONE `HEAD <path>` through SOCKS incl. connect+TLS (System.nanoTime) → single sample, -1 on any failure. Connected delay executes in service process via the running core. Default delay URL in service: https://www.gstatic.com/generate_204.
