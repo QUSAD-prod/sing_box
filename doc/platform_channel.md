@@ -364,12 +364,14 @@ end-of-stream (`EventSink.endOfStream()`):
 Capacities are bits per second. Phases: 0 idle, 1 download, 2 upload, 3 done.
 Accuracy: 0 low, 1 medium, 2 high. On failure the stream emits an error
 (`FlutterError(code: "COMMAND_FAILED", message)`) and ends. Cancelling the
-subscription closes the libbox session. Throws `SERVICE_NOT_RUNNING` (as a
-stream error) when the service is stopped.
+subscription closes the libbox session. While the service is stopped the test
+runs directly in the app process (`Libbox.newNetworkQualityTest()`,
+`outboundTag` ignored) and measures the connection without the tunnel.
 
 ### `sing_box/stun`
 
-One-shot stream like `network_quality`. Arguments
+One-shot stream like `network_quality` (direct `Libbox.newSTUNTest()` while
+the service is stopped). Arguments
 `{ "server": String?, "outboundTag": String? }` (defaults:
 `STUNDefaultServer`, `""`). Events:
 

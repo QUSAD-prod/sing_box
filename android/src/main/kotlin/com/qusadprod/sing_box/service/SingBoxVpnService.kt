@@ -64,6 +64,10 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
     companion object {
         private const val TAG = "sing_box"
 
+        /** Android 11+ package visibility also hides apps from VpnService.Builder and package_name rules. */
+        private const val VISIBILITY_HINT =
+            "; on Android 11+ declare QUERY_ALL_PACKAGES or a <queries> entry for it in the app manifest"
+
         @Volatile
         internal var instance: SingBoxVpnService? = null
             private set
@@ -422,19 +426,37 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             }
             val includePackages = options.includePackage.toList()
             val excludePackages = options.excludePackage.toList()
+            var allowed = 0
             for (packageName in includePackages) {
+                // Recent Android versions accept unknown packages silently, so check first.
+                if (!isPackageVisible(packageName)) {
+                    Log.w(TAG, "include_package: $packageName is not installed or not visible$VISIBILITY_HINT")
+                    continue
+                }
                 try {
                     builder.addAllowedApplication(packageName)
+                    allowed++
                 } catch (_: PackageManager.NameNotFoundException) {
-                    Log.w(TAG, "include_package: $packageName is not installed")
+                    Log.w(TAG, "include_package: $packageName is not installed or not visible$VISIBILITY_HINT")
                 }
+            }
+            if (includePackages.isNotEmpty() && allowed == 0) {
+                // Without any allowed application the VPN would capture every app.
+                error(
+                    "android: none of the include_package apps is installed or visible to the app " +
+                        "(${includePackages.joinToString()})$VISIBILITY_HINT",
+                )
             }
             if (includePackages.isEmpty()) {
                 for (packageName in excludePackages) {
+                    if (!isPackageVisible(packageName)) {
+                        Log.w(TAG, "exclude_package: $packageName is not installed or not visible$VISIBILITY_HINT")
+                        continue
+                    }
                     try {
                         builder.addDisallowedApplication(packageName)
                     } catch (_: PackageManager.NameNotFoundException) {
-                        Log.w(TAG, "exclude_package: $packageName is not installed")
+                        Log.w(TAG, "exclude_package: $packageName is not installed or not visible$VISIBILITY_HINT")
                     }
                 }
             }
@@ -459,6 +481,10 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         runCatching { previous?.close() }
         return pfd.fd
     }
+
+    @Suppress("DEPRECATION")
+    private fun isPackageVisible(packageName: String): Boolean =
+        runCatching { packageManager.getApplicationInfo(packageName, 0) }.isSuccess
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun addRoutesTiramisu(builder: Builder, options: TunOptions, hasInet4: Boolean, hasInet6: Boolean) {

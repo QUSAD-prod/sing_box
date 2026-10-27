@@ -102,12 +102,16 @@ Recommended:
    (`flutter build appbundle`) or split APKs per ABI
    (`flutter build apk --split-per-abi`); you can also drop ABIs you do not
    need with `ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }`.
-4. **Wi-Fi rules**: sing-box rules that match Wi-Fi SSID/BSSID need location
+4. **Per-app routing** (`proxyApps`, `bypassApps`, `blockedApps`): on
+   Android 11+ other apps are invisible unless you declare
+   `QUERY_ALL_PACKAGES` or list them in `<queries>`; see
+   [doc/android.md](doc/android.md#per-app-routing-and-package-visibility).
+5. **Wi-Fi rules**: sing-box rules that match Wi-Fi SSID/BSSID need location
    permissions (`ACCESS_FINE_LOCATION`, and `ACCESS_BACKGROUND_LOCATION` on
    Android 10+), which the plugin intentionally does not declare.
 
-See [doc/android.md](doc/android.md) for details (Always-on VPN, ProGuard,
-offline builds).
+See [doc/android.md](doc/android.md) for details (Always-on VPN, Quick
+Settings tile, ProGuard, offline builds, troubleshooting).
 
 ### iOS setup
 
@@ -332,6 +336,9 @@ final group = await singBox.testGroup(SingBoxConfigBuilder.proxyTag);
 Latency is measured with an HTTP request through the proxy
 (`SingBoxConfigOptions.urlTestUrl`, default
 `https://www.gstatic.com/generate_204`), which reflects real proxy latency.
+`pingOutbound()` tests an outbound through its `urltest` group (the `auto`
+group of generated configs) so that this URL is used; outbounds outside such
+a group are tested by libbox against its built-in default URL.
 
 To rank a whole list of profiles (for example before connecting) use
 `pingServers()`. It emits one result per profile as soon as it is known:

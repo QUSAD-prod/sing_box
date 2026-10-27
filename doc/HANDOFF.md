@@ -82,10 +82,24 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
 | Contract `doc/platform_channel.md` | ✅ (incl. Quick Settings tile + `requestAddQuickSettingsTile`) |
 | Dart core (`lib/`) | ✅ `flutter analyze` clean, **245 tests pass** (+3 skipped without `SING_BOX_BIN`; 248 with it). Truthful `connect()` (waits for connected / `SingBoxStartException` / `SingBoxTimeoutException` / `SingBoxCancelledException`, serialized start/stop, generation token), `pingServers()` batch latency. Fake platform `test/support/fake_platform.dart` emulates connecting→connected/error and disconnecting→disconnected |
 | Config module `lib/src/config/` | ✅ tested in `test/config/` (share links per scheme + malformed corpus + round trips, subscriptions, builder flags/options, `apply()` immutability, DNS/rule-sets/options); every generated config passes real `sing-box check` (`test/config/support/sing_box_check.dart`, `SING_BOX_BIN`) |
-| Android native `android/` | 🟡 partial, **never compiled**: `build.gradle.kts`, `settings.gradle.kts`, `libbox.properties`, manifest, proguard, `core/{SingBoxError,Util,LibboxRuntime,ServiceState,Settings,CommandSession}.kt`, `service/{BootReceiver,SingBoxTileService,LocalResolver,DefaultNetworkMonitor,ServiceNotification,PlatformInterfaceImpl,SingBoxVpnService}.kt`. Missing at least: `SingBoxPlugin.kt` (method/event channels), command-client stream handlers, network quality/STUN, permission flows. Old broken files under `android/src/main/kotlin/com/qusadprod/sing_box/` root (`BypassManager.kt` etc., `bg/`, `ktx/`, `constant/`) must be deleted if still present. Notes: `doc/agent_notes/android.md` |
+| Android native `android/` | ✅ (session 3) compiles, `flutter build apk --debug/--release` OK (release universal APK 235 MB: 3 ABIs × ~60 MB libbox stored uncompressed). `SingBoxPlugin.kt` + `plugin/{StreamHandlers,Converters}.kt` implement the whole contract. **e2e on emulator (Android 17, `example/integration_test/vpn_e2e_test.dart`) passes** against a local sing-box server — see §5.4. Notes: `doc/agent_notes/android.md` |
 | iOS native `ios/` | 🟡 partial, **never compiled**: `Package.swift`, `Sources/SingBoxShared/{SingBoxKeys,SingBoxPaths,SingBoxLibbox}.swift`, `Sources/SingBoxTunnel/{SingBoxPacketTunnelProvider,SingBoxPlatformInterface,RunBlocking,ScreenStateObserver}.swift`, `Sources/sing_box/{SingBoxPlugin,TunnelController,StreamHandlers,CommandStreamHandler,LibboxConverters,PluginError}.swift`. Missing: podspecs/`libbox.rb` (check), PrivacyInfo, deletion of old `ios/Classes`, `ios/Assets`, `ios/Resources`, example `PacketTunnel` target + entitlements, builds. Notes: `doc/agent_notes/ios.md` |
 | Example | 🟡 pages done in `example/lib/src/` (app, home, servers, routing, logs, tools); `example/lib/main.dart` is still a **placeholder** — replace with `WidgetsFlutterBinding.ensureInitialized(); await SingBox.instance.initialize(); runApp(const ExampleApp());` |
 | Docs | ✅ README, CHANGELOG (0.1.0), THIRD_PARTY_NOTICES; ❌ `doc/android.md`, `doc/ios.md` (README links to them) |
+
+### Android e2e how-to (session 3)
+- Servers bind to **127.0.0.1 only** (binding 0.0.0.0 is blocked by the auto-mode classifier); the emulator reaches
+  host loopback as `10.0.2.2`. Server config: shadowsocks `aes-128-gcm`/`e2e-password` on 8388, vless (uuid
+  `b831381d-…`, no TLS) on 10086, route rule `ip_cidr 203.0.113.80/32 → route-options override_address 127.0.0.1`;
+  `python3 -m http.server 18080 --bind 127.0.0.1` serves `probe.txt` (`sing-box-e2e-ok`) and test `.srs` rule-sets
+  (`sing-box rule-set compile`). The app fetches `http://203.0.113.80:18080/probe.txt`, which only works through the proxy.
+- `flutter test integration_test/...` may **reinstall the app (new uid) and reset the VPN consent** → keep a host loop
+  running `adb shell appops set com.qusadprod.sing_box_example ACTIVATE_VPN allow` every second during the run.
+- Found + fixed by e2e: default interface reported asynchronously → first-start rule-set downloads failed with
+  "no available network interface" (now synchronous like SFA); Android 17 `addAllowedApplication` silently accepts
+  unknown packages and Android 11+ hides apps without `QUERY_ALL_PACKAGES` → start fails clearly when no
+  `include_package` app is visible (example declares `QUERY_ALL_PACKAGES`, documented in doc/android.md).
+- Not automated yet: engine detach/reattach (swipe away app, VPN keeps running), boot start, tile, Always-on, notification UI.
 
 ## 4. Facts about libbox 1.14.4 learned so far
 - libbox has **no standalone URL test** of arbitrary outbounds (only through the running CommandServer) → profile
@@ -119,13 +133,13 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
    `serverId` + `method`); `SingBoxServerConfig` reads WireGuard peer / port-hopping addresses. Stop reason =
    existing `SingBoxConnectionState.error` (no extra field). **Native must honour the contract addition**:
    emit `connecting` before the `start` result, then `connected` or `disconnected`+`error` (doc/platform_channel.md §start).
-3. **Android native** (follow contract + SFA): finish `SingBoxPlugin.kt`, command-client streams with reconnect,
+3. ✅ (session 3) **Android native** (follow contract + SFA): finish `SingBoxPlugin.kt`, command-client streams with reconnect,
    network quality/STUN one-shot streams, VPN/notification permission flows (activity result; lifecycle-safe),
    `openVpnSettings`, KV storage, service options, tile. Must: `startForeground` immediately; handle null intent
    (sticky/always-on start → last config); stop in-process (no background `startService`); serialize start/stop;
    don't hardcode `setMetered(false)`; `SUPPORTS_ALWAYS_ON`; hide Stop action under lockdown; no extra permissions.
    Delete old broken sources. Then `flutter build apk --debug/--release` (JDK 21).
-4. **Android e2e on emulator**: run `scratchpad/bin/sing-box run` with a shadowsocks (`aes-128-gcm`, 0.0.0.0:8388) and
+4. ✅ (session 3, see below) **Android e2e on emulator**: run `scratchpad/bin/sing-box run` with a shadowsocks (`aes-128-gcm`, 0.0.0.0:8388) and
    vless server config on the Mac; connect from the emulator to `10.0.2.2`; verify status, stats, logs, groups,
    urlTest/select, clash mode, connections, speed test, stop/reload, invalid config, permission denial, process kill
    (service survives, plugin reattaches). Grant consent via `adb shell appops set com.qusadprod.sing_box_example ACTIVATE_VPN allow`.

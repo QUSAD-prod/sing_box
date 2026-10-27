@@ -569,6 +569,36 @@ void main() {
       expect(result.address, '203.0.113.10');
     });
 
+    test(
+      'pingOutbound tests through the urltest group of the outbound',
+      () async {
+        platform.currentGroups = const [
+          SingBoxOutboundGroup(
+            tag: 'auto',
+            type: 'urltest',
+            selectable: false,
+            selected: 'my-ss',
+            items: [SingBoxOutboundItem(tag: 'my-ss', type: 'shadowsocks')],
+          ),
+        ];
+        platform.onUrlTest = (tag) {
+          Timer.run(() {
+            platform.outbounds.add([
+              SingBoxOutboundItem(
+                tag: 'my-ss',
+                type: 'shadowsocks',
+                urlTestTime: DateTime.now(),
+                urlTestDelay: 55,
+              ),
+            ]);
+          });
+        };
+        final result = await singBox.pingOutbound('my-ss');
+        expect(platform.calls, contains('urlTest:auto'));
+        expect(result.ping, 55);
+      },
+    );
+
     test('pingCurrentServer follows nested groups', () async {
       platform.currentGroups = const [
         SingBoxOutboundGroup(

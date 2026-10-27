@@ -24,7 +24,9 @@ Future<void> main() async {
         ? const ExampleApp()
         : MaterialApp(
             home: Scaffold(
-              body: Center(child: Text('Failed to initialize sing_box: $error')),
+              body: Center(
+                child: Text('Failed to initialize sing_box: $error'),
+              ),
             ),
           ),
   );

@@ -1,4 +1,11 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Per-app routing (proxyApps / bypassApps / blockedApps) needs to see the
+         other apps on Android 11+ (package visibility). Google Play restricts this
+         permission; list specific packages in <queries> instead when possible. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <application
         android:label="sing_box_example"
         android:name="${applicationName}"

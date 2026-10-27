@@ -73,10 +73,11 @@ internal object DefaultNetworkMonitor {
 
     fun setListener(newListener: InterfaceUpdateListener?) {
         listener = newListener
-        if (newListener != null) {
-            // Report the current state from the callback thread; never block the caller (Go).
-            callbackHandler.post { checkDefaultInterfaceUpdate(defaultNetwork) }
-        }
+        // Report the current interface before returning (like SFA): the core dials right
+        // after starting the monitor (initial rule-set downloads, DNS bootstrap) and fails
+        // with "no available network interface" until it knows the default interface.
+        // Called on a Go thread, never on the main thread.
+        if (newListener != null) checkDefaultInterfaceUpdate(defaultNetwork)
     }
 
     private fun register(manager: ConnectivityManager) {

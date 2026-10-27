@@ -1024,7 +1024,13 @@ class SingBox {
   }
 
   /// Measures the latency of the outbound [tag] through the running tunnel
-  /// (HTTP request through the proxy, see [SingBoxConfigOptions.urlTestUrl]).
+  /// with an HTTP request through the proxy.
+  ///
+  /// When [tag] belongs to a `urltest` group (such as
+  /// [SingBoxConfigBuilder.autoTag]) the group is tested, so its configured
+  /// URL is used ([SingBoxConfigOptions.urlTestUrl]); libbox tests other
+  /// outbounds against its built-in default URL
+  /// (`https://www.gstatic.com/generate_204`).
   Future<SingBoxPingResult> pingOutbound(
     String tag, {
     Duration timeout = const Duration(seconds: 15),
@@ -1045,7 +1051,7 @@ class SingBox {
                 !item.urlTestTime!.isBefore(startedAt),
           )
           .timeout(timeout);
-      await urlTest(tag);
+      await urlTest(await _urlTestGroupOf(tag) ?? tag);
       final item = await resultFuture;
       return item.urlTestDelay == null
           ? SingBoxPingResult.failure(
@@ -1228,6 +1234,23 @@ class SingBox {
     }
   }
 
+  /// Tag of a `urltest` group that contains [tag], or `null`.
+  Future<String?> _urlTestGroupOf(String tag) async {
+    try {
+      final groups = await watchGroups().first.timeout(
+        const Duration(seconds: 3),
+      );
+      for (final group in groups) {
+        if (group.type == 'urltest' && group.items.any((i) => i.tag == tag)) {
+          return group.tag;
+        }
+      }
+    } on Object {
+      // Fall back to testing the outbound itself.
+    }
+    return null;
+  }
+
   /// Measures the latency of the server currently used by the main selector.
   Future<SingBoxPingResult> pingCurrentServer({
     Duration timeout = const Duration(seconds: 15),
@@ -1377,8 +1400,11 @@ class SingBox {
   // Speed and NAT tests
   // ===========================================================================
 
-  /// Runs a network quality test through the tunnel and streams progress;
-  /// the last event has [SingBoxNetworkQuality.isFinal] set.
+  /// Runs a network quality test and streams progress; the last event has
+  /// [SingBoxNetworkQuality.isFinal] set.
+  ///
+  /// While the tunnel is connected the test runs through it; while it is
+  /// stopped the direct connection is measured ([outboundTag] is ignored).
   ///
   /// [outboundTag] tests a specific outbound instead of the default route,
   /// [configUrl] uses a custom server (Apple `networkQuality` format,
@@ -1401,7 +1427,8 @@ class SingBox {
     );
   }
 
-  /// Measures download/upload speed through the tunnel.
+  /// Measures download/upload speed: through the tunnel while it is
+  /// connected, of the direct connection otherwise.
   ///
   /// A convenience wrapper around [runNetworkQualityTest]; never throws,
   /// failures are reported in the result.
@@ -1411,9 +1438,6 @@ class SingBox {
     bool serial = false,
   }) async {
     _ensureInitialized();
-    if (!isConnected) {
-      return const SingBoxSpeedTestResult.failure('Not connected to VPN');
-    }
     try {
       final result = await runNetworkQualityTest(
         outboundTag: outboundTag,
@@ -1430,9 +1454,9 @@ class SingBox {
     }
   }
 
-  /// Runs a STUN test (UDP connectivity, public address and NAT type) through
-  /// the tunnel and streams progress; the last event has
-  /// [SingBoxStunResult.isFinal] set.
+  /// Runs a STUN test (UDP connectivity, public address and NAT type) and
+  /// streams progress; the last event has [SingBoxStunResult.isFinal] set.
+  /// Runs through the tunnel while it is connected, directly otherwise.
   Stream<SingBoxStunResult> runStunTest({String? server, String? outboundTag}) {
     _ensureInitialized();
     return _platform.runStunTest(server: server, outboundTag: outboundTag);
