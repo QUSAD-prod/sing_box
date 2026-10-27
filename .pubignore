@@ -28,7 +28,6 @@ build/
 .DS_Store
 
 # Internal working notes
-doc/REWRITE_NOTES.md
 doc/agent_notes/
 
 # Repository tooling
