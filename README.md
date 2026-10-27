@@ -333,6 +333,23 @@ Latency is measured with an HTTP request through the proxy
 (`SingBoxConfigOptions.urlTestUrl`, default
 `https://www.gstatic.com/generate_204`), which reflects real proxy latency.
 
+To rank a whole list of profiles (for example before connecting) use
+`pingServers()`. It emits one result per profile as soon as it is known:
+
+```dart
+final servers = await singBox.getServerConfigs();
+singBox.pingServers(servers, concurrency: 8).listen((result) {
+  print('${result.serverId}: ${result.success ? '${result.ping} ms' : result.errorMessage}');
+});
+```
+
+While the VPN is stopped it measures the TCP handshake with each server
+(`SingBoxPingMethod.tcp`); UDP protocols (Hysteria, Hysteria 2, TUIC,
+WireGuard) cannot be measured that way. While the VPN is running the app's
+own traffic goes through the tunnel, so profiles that are part of the
+running configuration are measured with a URL test through the proxy
+(`SingBoxPingMethod.urlTest`) and the others are reported as failures.
+
 ### Speed and NAT tests
 
 ```dart

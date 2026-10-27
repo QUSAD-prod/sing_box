@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/sing_box.dart';
@@ -442,6 +443,100 @@ void main() {
         ['d'],
         <String>[],
       ]);
+    });
+  });
+
+  group('pingServers', () {
+    setUp(singBox.initialize);
+
+    SingBoxServerConfig profile(
+      String id,
+      String type,
+      String server,
+      int port, [
+      Map<String, dynamic> extra = const {},
+    ]) => SingBoxServerConfig.fromOutbound({
+      'type': type,
+      'tag': id,
+      'server': server,
+      'server_port': port,
+      ...extra,
+    }, id: id);
+
+    test('measures TCP latency while disconnected', () async {
+      final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(listener.close);
+      listener.listen((socket) => socket.destroy());
+      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final closedPort = closed.port;
+      await closed.close();
+
+      final results = await singBox.pingServers([
+        profile('open', 'vless', '127.0.0.1', listener.port),
+        profile('closed', 'trojan', '127.0.0.1', closedPort),
+        profile('udp', 'hysteria2', '127.0.0.1', listener.port),
+        profile('quic', 'vless', '127.0.0.1', listener.port, {
+          'transport': {'type': 'quic'},
+        }),
+        profile('empty', 'vless', '', 0),
+      ], concurrency: 2).toList();
+
+      final byId = {for (final r in results) r.serverId!: r};
+      expect(
+        byId.keys,
+        unorderedEquals(['open', 'closed', 'udp', 'quic', 'empty']),
+      );
+      expect(byId['open']!.success, isTrue);
+      expect(byId['open']!.method, SingBoxPingMethod.tcp);
+      expect(byId['open']!.address, '127.0.0.1');
+      expect(byId['closed']!.success, isFalse);
+      expect(byId['udp']!.errorMessage, contains('UDP'));
+      expect(byId['quic']!.errorMessage, contains('UDP'));
+      expect(byId['empty']!.errorMessage, 'The server has no address');
+    });
+
+    test('uses URL tests for servers of the running config', () async {
+      platform.lastConfig = jsonEncode({
+        'outbounds': [_ssOutbound],
+      });
+      platform.emitState(SingBoxConnectionStatus.connected);
+      await pumpEventQueue();
+      platform.onUrlTest = (tag) {
+        Timer.run(() {
+          platform.outbounds.add([
+            SingBoxOutboundItem(
+              tag: tag,
+              type: 'shadowsocks',
+              urlTestTime: DateTime.now(),
+              urlTestDelay: 42,
+            ),
+          ]);
+        });
+      };
+      final results = await singBox.pingServers([
+        SingBoxServerConfig.fromOutbound(
+          Map<String, dynamic>.from(_ssOutbound),
+          id: 'running',
+        ),
+        profile('other', 'vless', 'other.example.com', 443),
+      ]).toList();
+      final byId = {for (final r in results) r.serverId!: r};
+      expect(byId['running']!.success, isTrue);
+      expect(byId['running']!.ping, 42);
+      expect(byId['running']!.tag, 'my-ss');
+      expect(byId['running']!.method, SingBoxPingMethod.urlTest);
+      expect(
+        byId['other']!.errorMessage,
+        'Not part of the running configuration',
+      );
+    });
+
+    test('validates the concurrency', () {
+      expect(
+        () => singBox.pingServers(const [], concurrency: 0),
+        throwsArgumentError,
+      );
+      expect(singBox.pingServers(const []).toList(), completion(isEmpty));
     });
   });
 

@@ -29,7 +29,9 @@ A complete rewrite on top of **sing-box 1.14.4** (`libbox`).
 - Commands: `selectOutbound`, `urlTest`, `setClashMode`, `closeConnection`,
   `closeAllConnections`, `clearLogs`, `reload`, `restart`, `switchServer`.
 - Real latency test through the proxy (`pingOutbound`, `pingCurrentServer`,
-  `testGroup`), network quality speed test (`runNetworkQualityTest`,
+  `testGroup`), batch latency of server profiles (`pingServers`: TCP
+  handshake without the tunnel, URL test through it), network quality speed
+  test (`runNetworkQualityTest`,
   `testSpeed`) and STUN NAT test (`runStunTest`).
 - Routing rules (`SingBoxRoutingRules`): bypass/blocked apps, domains and
   subnets, proxy-only apps, bypass LAN, bypass countries via rule-sets, ad

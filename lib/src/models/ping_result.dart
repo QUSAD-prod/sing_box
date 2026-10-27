@@ -1,9 +1,11 @@
-/// Result of a latency measurement (URL test) through an outbound.
+/// Result of a latency measurement.
 ///
-/// sing-box measures latency by performing an HTTP request through the
-/// outbound (by default to `https://www.gstatic.com/generate_204`), which
-/// reflects real proxy latency including the handshake - unlike ICMP ping,
-/// which most proxy servers do not even answer.
+/// Through a running tunnel sing-box measures latency with a URL test: an
+/// HTTP request through the outbound (by default to
+/// `https://www.gstatic.com/generate_204`), which reflects real proxy latency
+/// including the handshake - unlike ICMP ping, which most proxy servers do
+/// not even answer. `SingBox.pingServers` measures the TCP handshake time to
+/// the server instead while the tunnel is stopped ([method]).
 class SingBoxPingResult {
   /// Creates a ping result.
   const SingBoxPingResult({
@@ -12,13 +14,20 @@ class SingBoxPingResult {
     this.errorMessage,
     this.address,
     this.tag,
+    this.serverId,
+    this.method = SingBoxPingMethod.urlTest,
   });
 
   /// Creates a failed result.
-  const SingBoxPingResult.failure(String message, {this.address, this.tag})
-    : ping = 0,
-      success = false,
-      errorMessage = message;
+  const SingBoxPingResult.failure(
+    String message, {
+    this.address,
+    this.tag,
+    this.serverId,
+    this.method = SingBoxPingMethod.urlTest,
+  }) : ping = 0,
+       success = false,
+       errorMessage = message;
 
   /// Creates an object from a map (for deserialization).
   factory SingBoxPingResult.fromMap(Map<dynamic, dynamic> map) {
@@ -28,6 +37,8 @@ class SingBoxPingResult {
       errorMessage: map['errorMessage'] as String?,
       address: map['address'] as String?,
       tag: map['tag'] as String?,
+      serverId: map['serverId'] as String?,
+      method: SingBoxPingMethod.fromName(map['method'] as String?),
     );
   }
 
@@ -43,11 +54,29 @@ class SingBoxPingResult {
   /// Server address of the measured outbound, when known.
   final String? address;
 
-  /// Tag of the measured outbound.
+  /// Tag of the measured outbound, when it is part of the running
+  /// configuration.
   final String? tag;
+
+  /// Id of the measured server profile (`SingBox.pingServers`).
+  final String? serverId;
+
+  /// How the latency was measured.
+  final SingBoxPingMethod method;
 
   /// [ping] as a [Duration].
   Duration get latency => Duration(milliseconds: ping);
+
+  /// Returns a copy for the server profile [serverId].
+  SingBoxPingResult forServer(String serverId) => SingBoxPingResult(
+    ping: ping,
+    success: success,
+    errorMessage: errorMessage,
+    address: address,
+    tag: tag,
+    serverId: serverId,
+    method: method,
+  );
 
   /// Converts the object to a map (for serialization).
   Map<String, dynamic> toMap() => {
@@ -56,10 +85,32 @@ class SingBoxPingResult {
     'errorMessage': errorMessage,
     'address': address,
     'tag': tag,
+    'serverId': serverId,
+    'method': method.name,
   };
 
   @override
-  String toString() => success
-      ? 'SingBoxPingResult(${ping}ms, tag: $tag, address: $address)'
-      : 'SingBoxPingResult(failed: $errorMessage, tag: $tag)';
+  String toString() {
+    final target = [
+      if (serverId != null) 'server: $serverId',
+      if (tag != null) 'tag: $tag',
+      if (address != null) 'address: $address',
+    ].join(', ');
+    return success
+        ? 'SingBoxPingResult(${ping}ms ${method.name}, $target)'
+        : 'SingBoxPingResult(failed: $errorMessage, $target)';
+  }
+}
+
+/// How a [SingBoxPingResult] was measured.
+enum SingBoxPingMethod {
+  /// HTTP request through the outbound of the running tunnel.
+  urlTest,
+
+  /// TCP handshake with the server, without the tunnel.
+  tcp;
+
+  /// Parses [name], defaulting to [urlTest].
+  static SingBoxPingMethod fromName(String? name) =>
+      name == tcp.name ? tcp : urlTest;
 }

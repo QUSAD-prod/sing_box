@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../config/outbound.dart';
+
 /// A saved server profile.
 ///
 /// [config] holds either
@@ -40,13 +42,14 @@ class SingBoxServerConfig {
   }) {
     final tag = outbound['tag'] as String?;
     final resolvedId = id ?? tag ?? _generateId();
+    final address = _addressOf(outbound);
     return SingBoxServerConfig(
       id: resolvedId,
       name: name ?? tag ?? resolvedId,
       config: jsonEncode(outbound),
       protocol: outbound['type'] as String? ?? '',
-      server: outbound['server'] as String? ?? '',
-      port: (outbound['server_port'] as num?)?.toInt() ?? 0,
+      server: address.server,
+      port: address.port,
       link: link,
       subscriptionId: subscriptionId,
     );
@@ -67,24 +70,29 @@ class SingBoxServerConfig {
     Map<String, dynamic>? first;
     try {
       final decoded = jsonDecode(config);
-      if (decoded is Map && decoded['outbounds'] is List) {
-        for (final o in decoded['outbounds'] as List) {
-          if (o is Map && !_nonProxyTypes.contains(o['type'])) {
-            first = Map<String, dynamic>.from(o);
-            break;
+      if (decoded is Map) {
+        for (final key in const ['outbounds', 'endpoints']) {
+          final list = decoded[key];
+          if (first != null || list is! List) continue;
+          for (final o in list) {
+            if (o is Map && !_nonProxyTypes.contains(o['type'])) {
+              first = Map<String, dynamic>.from(o);
+              break;
+            }
           }
         }
       }
     } on FormatException {
       // Keep the defaults; the config is validated when connecting.
     }
+    final address = first == null ? null : _addressOf(first);
     return SingBoxServerConfig(
       id: id,
       name: name,
       config: config,
       protocol: protocol ?? first?['type'] as String? ?? 'custom',
-      server: server ?? first?['server'] as String? ?? '',
-      port: port ?? (first?['server_port'] as num?)?.toInt() ?? 0,
+      server: server ?? address?.server ?? '',
+      port: port ?? address?.port ?? 0,
     );
   }
 
@@ -110,6 +118,17 @@ class SingBoxServerConfig {
     'selector',
     'urltest',
   };
+
+  /// Server address of an outbound or endpoint (WireGuard peers, port
+  /// hopping ranges included).
+  static ({String server, int port}) _addressOf(Map<String, dynamic> json) {
+    try {
+      final outbound = SingBoxOutbound.fromJson(json);
+      return (server: outbound.server ?? '', port: outbound.serverPort ?? 0);
+    } on ArgumentError {
+      return (server: '', port: 0);
+    }
+  }
 
   static int _counter = 0;
 

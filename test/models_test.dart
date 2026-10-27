@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/sing_box.dart';
@@ -197,6 +199,65 @@ void main() {
       expect(SingBoxValidators.isPackageName('com.example.app'), isTrue);
       expect(SingBoxValidators.isPackageName('example'), isFalse);
     });
+  });
+
+  test('server profiles read endpoint and port hopping addresses', () {
+    final wg = SingBoxServerConfig.fromOutbound({
+      'type': 'wireguard',
+      'tag': 'wg',
+      'peers': [
+        {'address': 'wg.example.com', 'port': 51820},
+      ],
+    });
+    expect(wg.server, 'wg.example.com');
+    expect(wg.port, 51820);
+    final hop = SingBoxServerConfig.fromOutbound({
+      'type': 'hysteria2',
+      'tag': 'hop',
+      'server': 'h.example.com',
+      'server_ports': ['20000:30000'],
+    });
+    expect(hop.port, 20000);
+    final full = SingBoxServerConfig.fromFullConfig(
+      jsonEncode({
+        'outbounds': [
+          {'type': 'direct', 'tag': 'direct'},
+        ],
+        'endpoints': [
+          {
+            'type': 'wireguard',
+            'tag': 'wg',
+            'peers': [
+              {'address': '1.2.3.4', 'port': 51821},
+            ],
+          },
+        ],
+      }),
+      id: 'full',
+      name: 'Full',
+    );
+    expect(full.protocol, 'wireguard');
+    expect(full.server, '1.2.3.4');
+    expect(full.port, 51821);
+  });
+
+  test('ping results round trip', () {
+    const result = SingBoxPingResult(
+      ping: 12,
+      success: true,
+      address: 'a.com',
+      tag: 't',
+      serverId: 's',
+      method: SingBoxPingMethod.tcp,
+    );
+    final copy = SingBoxPingResult.fromMap(result.toMap());
+    expect(copy.toMap(), result.toMap());
+    expect(copy.forServer('x').serverId, 'x');
+    expect(
+      SingBoxPingResult.fromMap(const {}).method,
+      SingBoxPingMethod.urlTest,
+    );
+    expect(result.toString(), contains('12ms tcp'));
   });
 
   test('exceptions map platform codes', () {
