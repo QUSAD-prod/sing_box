@@ -794,6 +794,53 @@ void main() {
         },
       ]);
       expect((result['dns'] as Map)['final'], 'dns-custom');
+      // The proxy server name is still resolved by the original server.
+      expect((result['route'] as Map)['default_domain_resolver'], 'cloudflare');
+      await expectSingBoxAccepts(result);
+    });
+
+    test(
+      'custom DNS servers keep the system resolver for outbound names',
+      () async {
+        final input = userConfig()..remove('dns');
+        final result = builder.apply(
+          input,
+          rules: const SingBoxRoutingRules(dnsServers: ['8.8.8.8']),
+        );
+        expect(dnsServers(result), [
+          {
+            'type': 'udp',
+            'tag': 'dns-custom',
+            'server': '8.8.8.8',
+            'detour': 'my-proxy',
+          },
+          {'type': 'local', 'tag': 'dns-local'},
+        ]);
+        expect(
+          (result['route'] as Map)['default_domain_resolver'],
+          'dns-local',
+        );
+        await expectSingBoxAccepts(result);
+      },
+    );
+
+    test('an explicit default_domain_resolver is kept', () async {
+      final input = userConfig();
+      (input['route'] as Map)['default_domain_resolver'] = 'cloudflare';
+      (input['dns'] as Map)['servers'] = [
+        ...((input['dns'] as Map)['servers'] as List),
+        {'type': 'local', 'tag': 'system'},
+      ];
+      final result = builder.apply(
+        input,
+        rules: const SingBoxRoutingRules(dnsServers: ['8.8.8.8']),
+      );
+      expect((result['route'] as Map)['default_domain_resolver'], 'cloudflare');
+      expect(dnsServers(result).map((s) => s['tag']), [
+        'cloudflare',
+        'system',
+        'dns-custom',
+      ]);
       await expectSingBoxAccepts(result);
     });
 

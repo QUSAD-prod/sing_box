@@ -201,7 +201,9 @@ class SingBoxConfigBuilder {
   /// * Custom [SingBoxRoutingRules.dnsServers] become the final DNS servers,
   ///   reached through the config's main outbound (`route.final`, else the
   ///   first proxy outbound), or directly when that is a `direct` or `block`
-  ///   outbound.
+  ///   outbound. Without `route.default_domain_resolver` the server names of
+  ///   the outbounds keep being resolved as before: by the only original DNS
+  ///   server, or by the system resolver when there was none.
   /// * Blocked domains are answered with NXDOMAIN by DNS.
   Map<String, dynamic> apply(
     Map<String, dynamic> config, {
@@ -303,6 +305,14 @@ class SingBoxConfigBuilder {
       if (dnsServers.isNotEmpty) {
         final detour = _proxyDetourTag(result);
         final taken = servers.map((s) => s['tag']).whereType<String>().toSet();
+        // Without `route.default_domain_resolver` sing-box resolves outbound
+        // server names with the only DNS server (none: the system resolver)
+        // and rejects configs with several servers. Keep that resolver.
+        final original = [...servers.map((s) => s['tag']).whereType<String>()];
+        final keepResolver = original.length == 1 ? original.single : null;
+        final route = _map(result, 'route');
+        final needsResolver =
+            route['default_domain_resolver'] == null && original.length <= 1;
         String? localTag;
         String? first;
         for (final address in dnsServers) {
@@ -322,7 +332,14 @@ class SingBoxConfigBuilder {
           }
           first ??= tag;
         }
-        if (first != null) dns['final'] = first;
+        if (first != null) {
+          dns['final'] = first;
+          if (needsResolver) {
+            route['default_domain_resolver'] =
+                keepResolver ??
+                (localTag ??= _localDnsServerTag(servers, taken));
+          }
+        }
       }
     }
     return result;
