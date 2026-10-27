@@ -1,8 +1,12 @@
 # sing_box rewrite — HANDOFF (start here in a new chat)
 
-Last updated: 2026-10-27, commit `84eda3d` on branch `claude/singbox-flutter-plugin-review-22aa2f`.
+Last updated: 2026-10-27 (session 3), branch `claude/package-study-navigators-83455e` — it was
+fast-forwarded from `claude/singbox-flutter-plugin-review-22aa2f` (old branch, no longer updated).
 Worktree: `/Users/qusadprod/projects/sing_box/.claude/worktrees/singbox-flutter-plugin-review-22aa2f`
 (main checkout `/Users/qusadprod/projects/sing_box`). This file supersedes `doc/REWRITE_NOTES.md`.
+If a new session starts on a fresh branch from `main` again, fast-forward it first:
+`git -c filter.lfs.process= -c filter.lfs.clean= -c filter.lfs.smudge= -c filter.lfs.required=false merge --ff-only <latest work branch>`
+(`main` still has LFS-tracked framework files and git-lfs is not installed).
 
 ## 0. How to resume
 1. `cd` into the worktree, `git log --oneline | head` (all work is committed as WIP commits).
@@ -76,14 +80,20 @@ Worktree: `/Users/qusadprod/projects/sing_box/.claude/worktrees/singbox-flutter-
 | --- | --- |
 | libbox build + scripts | ✅ built, script works; release script + CI written, **not run** |
 | Contract `doc/platform_channel.md` | ✅ (incl. Quick Settings tile + `requestAddQuickSettingsTile`) |
-| Dart core (`lib/`) | ✅ `flutter analyze` clean, **49 tests pass** (`test/sing_box_test.dart`, `test/sing_box_method_channel_test.dart`, `test/models_test.dart`, fake platform `test/support/fake_platform.dart`) |
-| Config module `lib/src/config/` | 🟡 share links/subscriptions/DNS/rule-sets/options written by an agent; `config_builder.dart` written by lead (just now). **No `test/config/` tests yet, not validated with `sing-box check`** |
+| Dart core (`lib/`) | ✅ `flutter analyze` clean, **245 tests pass** (+3 skipped without `SING_BOX_BIN`; 248 with it). Truthful `connect()` (waits for connected / `SingBoxStartException` / `SingBoxTimeoutException` / `SingBoxCancelledException`, serialized start/stop, generation token), `pingServers()` batch latency. Fake platform `test/support/fake_platform.dart` emulates connecting→connected/error and disconnecting→disconnected |
+| Config module `lib/src/config/` | ✅ tested in `test/config/` (share links per scheme + malformed corpus + round trips, subscriptions, builder flags/options, `apply()` immutability, DNS/rule-sets/options); every generated config passes real `sing-box check` (`test/config/support/sing_box_check.dart`, `SING_BOX_BIN`) |
 | Android native `android/` | 🟡 partial, **never compiled**: `build.gradle.kts`, `settings.gradle.kts`, `libbox.properties`, manifest, proguard, `core/{SingBoxError,Util,LibboxRuntime,ServiceState,Settings,CommandSession}.kt`, `service/{BootReceiver,SingBoxTileService,LocalResolver,DefaultNetworkMonitor,ServiceNotification,PlatformInterfaceImpl,SingBoxVpnService}.kt`. Missing at least: `SingBoxPlugin.kt` (method/event channels), command-client stream handlers, network quality/STUN, permission flows. Old broken files under `android/src/main/kotlin/com/qusadprod/sing_box/` root (`BypassManager.kt` etc., `bg/`, `ktx/`, `constant/`) must be deleted if still present. Notes: `doc/agent_notes/android.md` |
 | iOS native `ios/` | 🟡 partial, **never compiled**: `Package.swift`, `Sources/SingBoxShared/{SingBoxKeys,SingBoxPaths,SingBoxLibbox}.swift`, `Sources/SingBoxTunnel/{SingBoxPacketTunnelProvider,SingBoxPlatformInterface,RunBlocking,ScreenStateObserver}.swift`, `Sources/sing_box/{SingBoxPlugin,TunnelController,StreamHandlers,CommandStreamHandler,LibboxConverters,PluginError}.swift`. Missing: podspecs/`libbox.rb` (check), PrivacyInfo, deletion of old `ios/Classes`, `ios/Assets`, `ios/Resources`, example `PacketTunnel` target + entitlements, builds. Notes: `doc/agent_notes/ios.md` |
 | Example | 🟡 pages done in `example/lib/src/` (app, home, servers, routing, logs, tools); `example/lib/main.dart` is still a **placeholder** — replace with `WidgetsFlutterBinding.ensureInitialized(); await SingBox.instance.initialize(); runApp(const ExampleApp());` |
 | Docs | ✅ README, CHANGELOG (0.1.0), THIRD_PARTY_NOTICES; ❌ `doc/android.md`, `doc/ios.md` (README links to them) |
 
 ## 4. Facts about libbox 1.14.4 learned so far
+- libbox has **no standalone URL test** of arbitrary outbounds (only through the running CommandServer) → profile
+  latency without the tunnel is TCP-handshake based (`pingServers`).
+- sing-box rejects unknown JSON fields (`json: unknown field "x"`), so `apply()` "unknown field preservation" means
+  real sing-box fields the builder does not model (`ntp`, `udp_timeout`, `connect_timeout`, …).
+- A DNS server with a host name + `detour` resolves the host through the detour outbound (verified in
+  `common/dialer/dialer.go`: local resolution only when `!hasDetour || domain_resolver set`).
 - `PlatformInterface` has ~26 methods (neighbor monitor, shell, bridge, tailscale hooks) — implement irrelevant ones as no-op.
 - `Libbox.setMemoryLimit` is gone → `SetupOptions.oomKiller*` (SFA Android: off). `disableMemoryLimit` may be ignored on Android.
 - Handler-bound `CommandClient.connect()` retries ~3.25 s then throws; standalone clients close after each call → new standalone client per op.
@@ -99,14 +109,16 @@ Worktree: `/Users/qusadprod/projects/sing_box/.claude/worktrees/singbox-flutter-
   don't use geoip rule-sets in DNS rules; clash_api without `external_controller` doesn't listen but enables modes/stats.
 
 ## 5. Remaining tasks (in order)
-1. **Config module**: write `test/config/` (link parsing corpora per scheme incl. malformed input, round trips,
-   subscriptions, builder for every rules flag, `apply()` immutability + unknown-field preservation); add a test helper
-   that runs `$SING_BOX_BIN check -c <tmp>` when `SING_BOX_BIN` is set; run it against
-   `scratchpad/bin/sing-box`; fix builder until every generated config passes.
-2. **Dart improvements from §6**: `connect()` should by default wait until `connected` or a start error (truthful
-   result, typed `START_FAILED` with the core message, timeout) — keep a `waitUntilConnected` flag; serialize
-   connect calls / cancel superseded starts (generation token); add batch ping of non-running profiles
-   (TCP connect latency, concurrency limit, streamed results); add stop reason to `SingBoxConnectionState` if native can provide it.
+1. ✅ (session 3) Config module tests + `sing-box check` validation. Fixed: VMess legacy cipher `aes-128-ctr`
+   (was `aes-128-cfb`), `apply()` custom DNS never detours to an empty `direct`/`block` outbound (host names get a
+   `local` bootstrap resolver instead of being dropped), invalid DNS addresses no longer consume tags.
+2. ✅ (session 3) Truthful `connect()` (+ `connectToServer(s)`, `restart`) with `waitUntilConnected`/`timeout`;
+   serialized start/stop + supersede/cancel; waits for a `disconnecting` session before starting;
+   `watchConnectionState()` race fixed (async* dropped events between the initial yield and subscribing);
+   `pingServers()` (TCP while stopped, URL test through the tunnel for running-config profiles; result has
+   `serverId` + `method`); `SingBoxServerConfig` reads WireGuard peer / port-hopping addresses. Stop reason =
+   existing `SingBoxConnectionState.error` (no extra field). **Native must honour the contract addition**:
+   emit `connecting` before the `start` result, then `connected` or `disconnected`+`error` (doc/platform_channel.md §start).
 3. **Android native** (follow contract + SFA): finish `SingBoxPlugin.kt`, command-client streams with reconnect,
    network quality/STUN one-shot streams, VPN/notification permission flows (activity result; lifecycle-safe),
    `openVpnSettings`, KV storage, service options, tile. Must: `startForeground` immediately; handle null intent
