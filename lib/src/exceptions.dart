@@ -31,6 +31,8 @@ class SingBoxException implements Exception {
         return SingBoxConfigException(message, details: e.details);
       case SingBoxErrorCode.permissionDenied:
         return SingBoxPermissionException(message, details: e.details);
+      case SingBoxErrorCode.startFailed:
+        return SingBoxStartException(message, details: e.details);
       case SingBoxErrorCode.serviceNotRunning:
         return SingBoxServiceNotRunningException(message, details: e.details);
       case SingBoxErrorCode.unsupported:
@@ -79,6 +81,46 @@ class SingBoxPermissionException extends SingBoxException {
 
   @override
   String toString() => 'SingBoxPermissionException: $message';
+}
+
+/// The tunnel could not be started, or it stopped before it connected.
+///
+/// [message] contains the exact error reported by the sing-box core or the
+/// operating system, for example
+/// `start service: initialize outbound[0]: missing uuid`.
+class SingBoxStartException extends SingBoxException {
+  /// Creates a start error.
+  const SingBoxStartException(String message, {super.details})
+    : super(SingBoxErrorCode.startFailed, message);
+
+  @override
+  String toString() => 'SingBoxStartException: $message';
+}
+
+/// The tunnel did not reach the expected state in time.
+///
+/// Thrown by `SingBox.connect` when the tunnel is still connecting after the
+/// timeout. The tunnel is left as it is: follow
+/// `SingBox.watchConnectionStatus` or call `SingBox.disconnect`.
+class SingBoxTimeoutException extends SingBoxException {
+  /// Creates a timeout error.
+  const SingBoxTimeoutException(String message, {super.details})
+    : super(SingBoxErrorCode.timeout, message);
+
+  @override
+  String toString() => 'SingBoxTimeoutException: $message';
+}
+
+/// The operation was superseded, for example a `SingBox.connect` that was
+/// still waiting for the tunnel when `SingBox.disconnect` or another
+/// `SingBox.connect` was called.
+class SingBoxCancelledException extends SingBoxException {
+  /// Creates a cancellation error.
+  const SingBoxCancelledException(String message, {super.details})
+    : super(SingBoxErrorCode.cancelled, message);
+
+  @override
+  String toString() => 'SingBoxCancelledException: $message';
 }
 
 /// The operation needs a running VPN service, but it is stopped.
@@ -137,6 +179,12 @@ abstract final class SingBoxErrorCode {
 
   /// A libbox command failed.
   static const commandFailed = 'COMMAND_FAILED';
+
+  /// Dart only: the tunnel did not reach the expected state in time.
+  static const timeout = 'TIMEOUT';
+
+  /// Dart only: the operation was superseded by another one.
+  static const cancelled = 'CANCELLED';
 
   /// Not supported on this platform.
   static const unsupported = 'UNSUPPORTED';

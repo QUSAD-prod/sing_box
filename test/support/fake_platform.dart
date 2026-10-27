@@ -38,8 +38,31 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   /// Groups returned by the first event of [watchGroups].
   List<SingBoxOutboundGroup> currentGroups = const [];
 
-  void emitState(SingBoxConnectionStatus status, {DateTime? startedAt}) {
-    state.add(SingBoxConnectionState(status: status, startedAt: startedAt));
+  /// The status the fake tunnel is in (updated by [emitState]).
+  SingBoxConnectionStatus status = SingBoxConnectionStatus.disconnected;
+
+  /// Whether [start] drives the fake tunnel to `connected`.
+  bool connectOnStart = true;
+
+  /// When set, a started tunnel stops with this error instead of connecting.
+  String? runtimeError;
+
+  /// When set, [start] reports [runtimeError] before it returns.
+  bool failBeforeStartReturns = false;
+
+  void emitState(
+    SingBoxConnectionStatus status, {
+    DateTime? startedAt,
+    String? error,
+  }) {
+    this.status = status;
+    state.add(
+      SingBoxConnectionState(
+        status: status,
+        startedAt: startedAt,
+        error: error,
+      ),
+    );
   }
 
   @override
@@ -88,16 +111,39 @@ class FakeSingBoxPlatform extends SingBoxPlatform
     String? label,
   }) async => SingBoxQuickTileResult.added;
 
+  /// Behaves like the native side: `connecting` is reported before the call
+  /// returns, the outcome (`connected` or `disconnected` with
+  /// [runtimeError]) afterwards. A connected tunnel is reloaded.
   @override
   Future<void> start(String config, {bool disableMemoryLimit = false}) async {
     calls.add('start');
     if (configError != null) throw SingBoxConfigException(configError!);
     lastConfig = config;
     started.add(config);
+    if (status == SingBoxConnectionStatus.connected) return;
+    if (failBeforeStartReturns && runtimeError != null) {
+      emitState(SingBoxConnectionStatus.disconnected, error: runtimeError);
+      return;
+    }
+    emitState(SingBoxConnectionStatus.connecting);
+    if (!connectOnStart) return;
+    scheduleMicrotask(() {
+      if (status != SingBoxConnectionStatus.connecting) return;
+      if (runtimeError != null) {
+        emitState(SingBoxConnectionStatus.disconnected, error: runtimeError);
+      } else {
+        emitState(SingBoxConnectionStatus.connected, startedAt: DateTime.now());
+      }
+    });
   }
 
   @override
-  Future<void> stop() async => calls.add('stop');
+  Future<void> stop() async {
+    calls.add('stop');
+    if (status == SingBoxConnectionStatus.disconnected) return;
+    emitState(SingBoxConnectionStatus.disconnecting);
+    scheduleMicrotask(() => emitState(SingBoxConnectionStatus.disconnected));
+  }
 
   @override
   Future<void> reload([String? config]) async {

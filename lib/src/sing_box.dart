@@ -81,6 +81,12 @@ class SingBox {
   StreamSubscription<SingBoxNotification>? _notificationSubscription;
   SingBoxConnectionStats? _lastStats;
   Future<void> _mutation = Future<void>.value();
+  Future<void> _serviceQueue = Future<void>.value();
+  int _connectGeneration = 0;
+  _StartWaiter? _startWaiter;
+
+  /// Default time [connect] waits for the tunnel to connect.
+  static const defaultConnectTimeout = Duration(seconds: 30);
 
   /// Options used to generate configurations from share links and outbounds
   /// (TUN, DNS, logging, URL test, clash modes).
@@ -225,6 +231,9 @@ class SingBox {
     configOptions = const SingBoxConfigOptions();
     reloadOnRulesChange = true;
     _mutation = Future<void>.value();
+    _serviceQueue = Future<void>.value();
+    _startWaiter?.cancel();
+    _startWaiter = null;
   }
 
   // ===========================================================================
@@ -447,12 +456,21 @@ class SingBox {
   /// The generated configuration is validated by sing-box before the tunnel
   /// starts. When the VPN permission is missing it is requested first (set
   /// [requestPermission] to `false` to throw a [SingBoxPermissionException]
-  /// instead). If the tunnel is already running it is reloaded with the new
+  /// instead). If the tunnel is already connected it is reloaded with the new
   /// configuration.
   ///
-  /// Completes when the start was requested; follow
-  /// [watchConnectionStatus] for the result. Throws
-  /// [SingBoxConfigException], [SingBoxPermissionException] or another
+  /// By default the returned future completes once the tunnel is connected
+  /// and throws a [SingBoxStartException] carrying the exact sing-box error
+  /// when the tunnel stops instead, or a [SingBoxTimeoutException] when it
+  /// is still connecting after [timeout] (the tunnel is left connecting).
+  /// With [waitUntilConnected] set to `false` it completes as soon as the
+  /// start was requested; follow [watchConnectionState] for the result.
+  ///
+  /// Start and stop requests are executed one after another. A [connect]
+  /// that is still waiting when [disconnect] or another [connect] is called
+  /// throws a [SingBoxCancelledException].
+  ///
+  /// Throws [SingBoxConfigException], [SingBoxPermissionException] or another
   /// [SingBoxException].
   Future<void> connect(
     String config, {
@@ -461,8 +479,33 @@ class SingBox {
     bool applyRules = true,
     bool requestPermission = true,
     String? selectedTag,
+    bool waitUntilConnected = true,
+    Duration timeout = defaultConnectTimeout,
+  }) => _connect(
+    config,
+    rules: rules,
+    options: options,
+    applyRules: applyRules,
+    requestPermission: requestPermission,
+    selectedTag: selectedTag,
+    waitUntilConnected: waitUntilConnected,
+    timeout: timeout,
+  );
+
+  /// [connect] that runs [onRequested] once the platform accepted the start.
+  Future<void> _connect(
+    String config, {
+    SingBoxRoutingRules? rules,
+    SingBoxConfigOptions? options,
+    bool applyRules = true,
+    required bool requestPermission,
+    String? selectedTag,
+    required bool waitUntilConnected,
+    required Duration timeout,
+    Future<void> Function()? onRequested,
   }) async {
     _ensureInitialized();
+    final generation = _supersede();
     final finalConfig = await buildConfig(
       config,
       rules: rules,
@@ -470,33 +513,58 @@ class SingBox {
       applyRules: applyRules,
       selectedTag: selectedTag,
     );
-    await _startTunnel(finalConfig, requestPermission: requestPermission);
-    await _rememberInput(
-      config,
-      applyRules: applyRules,
-      selectedTag: selectedTag,
+    await _startTunnel(
+      finalConfig,
+      generation: generation,
+      requestPermission: requestPermission,
+      waitUntilConnected: waitUntilConnected,
+      timeout: timeout,
+      onRequested: () async {
+        await _rememberInput(
+          config,
+          applyRules: applyRules,
+          selectedTag: selectedTag,
+        );
+        await onRequested?.call();
+      },
     );
   }
 
   /// Connects using the stored server profile [server] and makes it the
   /// active server.
+  ///
+  /// [waitUntilConnected] and [timeout] work as in [connect].
   Future<void> connectToServer(
     SingBoxServerConfig server, {
     bool requestPermission = true,
-  }) async {
-    await connect(server.config, requestPermission: requestPermission);
-    await _setActiveId(server.id);
-  }
+    bool waitUntilConnected = true,
+    Duration timeout = defaultConnectTimeout,
+  }) => _connect(
+    server.config,
+    requestPermission: requestPermission,
+    waitUntilConnected: waitUntilConnected,
+    timeout: timeout,
+    onRequested: () => _setActiveId(server.id),
+  );
 
   /// Connects to the active server profile (see [setActiveServerConfig]).
   ///
   /// Throws a [SingBoxConfigException] when no active server is set.
-  Future<void> connectToActiveServer({bool requestPermission = true}) async {
+  Future<void> connectToActiveServer({
+    bool requestPermission = true,
+    bool waitUntilConnected = true,
+    Duration timeout = defaultConnectTimeout,
+  }) async {
     final active = await getActiveServerConfig();
     if (active == null) {
       throw const SingBoxConfigException('No active server configuration.');
     }
-    await connectToServer(active, requestPermission: requestPermission);
+    await connectToServer(
+      active,
+      requestPermission: requestPermission,
+      waitUntilConnected: waitUntilConnected,
+      timeout: timeout,
+    );
   }
 
   /// Connects with several server profiles combined into one configuration:
@@ -506,11 +574,13 @@ class SingBox {
   /// Switching between them later is instant with [selectOutbound] - no
   /// reconnect needed. Disabled profiles and complete configs are skipped.
   /// [selectedId] selects a profile initially (default: automatic selection
-  /// by latency).
+  /// by latency). [waitUntilConnected] and [timeout] work as in [connect].
   Future<void> connectToServers(
     List<SingBoxServerConfig> servers, {
     String? selectedId,
     bool requestPermission = true,
+    bool waitUntilConnected = true,
+    Duration timeout = defaultConnectTimeout,
   }) async {
     final outbounds = <Map<String, dynamic>>[];
     final usedTags = <String>{};
@@ -536,12 +606,14 @@ class SingBox {
         'None of the servers can be combined (all disabled or complete configs).',
       );
     }
-    await connect(
+    await _connect(
       jsonEncode(outbounds),
       selectedTag: selectedTag,
       requestPermission: requestPermission,
+      waitUntilConnected: waitUntilConnected,
+      timeout: timeout,
+      onRequested: selectedId == null ? null : () => _setActiveId(selectedId),
     );
-    if (selectedId != null) await _setActiveId(selectedId);
   }
 
   static const _reservedTags = {
@@ -550,42 +622,117 @@ class SingBox {
     SingBoxConfigBuilder.directTag,
   };
 
+  /// Starts a new connect generation: a [connect] still waiting for the
+  /// tunnel is cancelled. Returns the new generation.
+  int _supersede() {
+    _startWaiter?.cancel();
+    _startWaiter = null;
+    return ++_connectGeneration;
+  }
+
+  void _checkGeneration(int generation) {
+    if (generation != _connectGeneration) {
+      throw const SingBoxCancelledException(
+        'The connection request was superseded.',
+      );
+    }
+  }
+
+  /// Runs platform start/stop requests one after another.
+  Future<T> _serviceOperation<T>(Future<T> Function() action) {
+    final result = _serviceQueue.then((_) => action());
+    _serviceQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
+  }
+
   Future<void> _startTunnel(
     String config, {
+    required int generation,
     required bool requestPermission,
+    required bool waitUntilConnected,
+    required Duration timeout,
+    Future<void> Function()? onRequested,
   }) async {
-    if (!await _platform.hasVpnPermission()) {
-      final granted =
-          requestPermission && await _platform.requestVpnPermission();
-      if (!granted) {
-        const error = SingBoxPermissionException(
-          'The VPN permission was not granted.',
-        );
-        _observer.onConnectionError(error.message);
-        throw error;
-      }
-    }
-    final settings = await getSettings();
-    _observer.onConnect(config);
+    _StartWaiter? waiter;
     try {
-      await _platform.start(
-        config,
-        disableMemoryLimit: settings.disableMemoryLimit,
+      final reloaded = await _serviceOperation(() async {
+        _checkGeneration(generation);
+        if (_state.status == SingBoxConnectionStatus.disconnecting) {
+          // Let the previous session finish so its events are not mistaken
+          // for the result of this start.
+          try {
+            await waitForStatus(
+              SingBoxConnectionStatus.disconnected,
+              timeout: const Duration(seconds: 10),
+            );
+          } on TimeoutException {
+            _observer.warning('The previous session is still stopping');
+          }
+          _checkGeneration(generation);
+        }
+        if (!await _platform.hasVpnPermission()) {
+          final granted =
+              requestPermission && await _platform.requestVpnPermission();
+          if (!granted) {
+            throw const SingBoxPermissionException(
+              'The VPN permission was not granted.',
+            );
+          }
+        }
+        final settings = await getSettings();
+        _checkGeneration(generation);
+        final wasConnected = _state.status == SingBoxConnectionStatus.connected;
+        if (waitUntilConnected && !wasConnected) {
+          waiter = _startWaiter = _StartWaiter(_stateController.stream, _state);
+        }
+        _observer.onConnect(config);
+        await _platform.start(
+          config,
+          disableMemoryLimit: settings.disableMemoryLimit,
+        );
+        _observer.info(
+          wasConnected ? 'Tunnel reloaded' : 'Tunnel start requested',
+        );
+        return wasConnected;
+      });
+      await onRequested?.call();
+      final pending = waiter;
+      if (reloaded || pending == null) return;
+      pending.requested();
+      await pending.outcome.timeout(
+        timeout,
+        onTimeout: () => throw SingBoxTimeoutException(
+          'The tunnel did not connect within ${timeout.inSeconds} s.',
+        ),
       );
-      _observer.info('Tunnel start requested');
+      _observer.info('Tunnel connected');
+    } on SingBoxCancelledException {
+      _observer.info('Connection request superseded');
+      rethrow;
     } on SingBoxException catch (e, s) {
       _observer.onConnectionError(e.message);
       _observer.error('Failed to start the tunnel', e, s);
       rethrow;
+    } finally {
+      waiter?.dispose();
+      if (identical(_startWaiter, waiter)) _startWaiter = null;
     }
   }
 
   /// Stops the VPN.
+  ///
+  /// Completes when the stop was requested; a [connect] that is still
+  /// waiting for the tunnel throws a [SingBoxCancelledException].
   Future<void> disconnect() async {
     _ensureInitialized();
+    _supersede();
+    await _stopTunnel();
+  }
+
+  Future<void> _stopTunnel() async {
     _observer.onDisconnect();
     try {
-      await _platform.stop();
+      await _serviceOperation(_platform.stop);
     } on SingBoxException catch (e, s) {
       _observer.error('Failed to stop the tunnel', e, s);
       rethrow;
@@ -593,8 +740,16 @@ class SingBox {
   }
 
   /// Stops and starts the tunnel again with the last configuration.
-  Future<void> restart({Duration timeout = const Duration(seconds: 10)}) async {
+  ///
+  /// [timeout] limits the wait for the stop; [waitUntilConnected] and
+  /// [connectTimeout] work as in [connect].
+  Future<void> restart({
+    Duration timeout = const Duration(seconds: 10),
+    bool waitUntilConnected = true,
+    Duration connectTimeout = defaultConnectTimeout,
+  }) async {
     _ensureInitialized();
+    final generation = _supersede();
     final config = await _platform.getLastConfig();
     if (config == null) {
       throw const SingBoxConfigException(
@@ -602,13 +757,19 @@ class SingBox {
       );
     }
     if (_state.status != SingBoxConnectionStatus.disconnected) {
-      await disconnect();
+      await _stopTunnel();
       await waitForStatus(
         SingBoxConnectionStatus.disconnected,
         timeout: timeout,
       );
     }
-    await _startTunnel(config, requestPermission: false);
+    await _startTunnel(
+      config,
+      generation: generation,
+      requestPermission: false,
+      waitUntilConnected: waitUntilConnected,
+      timeout: connectTimeout,
+    );
   }
 
   /// Reloads the running tunnel without tearing down the VPN interface,
@@ -697,10 +858,25 @@ class SingBox {
   /// Emits the full tunnel state: the current value first, then every
   /// change. Use it to show the connection time ([SingBoxConnectionState.startedAt])
   /// or the error that stopped the tunnel ([SingBoxConnectionState.error]).
-  Stream<SingBoxConnectionState> watchConnectionState() async* {
+  Stream<SingBoxConnectionState> watchConnectionState() {
     _ensureInitialized();
-    yield _state;
-    yield* _stateController.stream;
+    // The current state is emitted and the live stream subscribed in the
+    // same synchronous step, so no change can fall in between.
+    StreamSubscription<SingBoxConnectionState>? subscription;
+    late final StreamController<SingBoxConnectionState> controller;
+    controller = StreamController<SingBoxConnectionState>(
+      onListen: () {
+        controller.add(_state);
+        subscription = _stateController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: () => subscription?.cancel(),
+    );
+    return controller.stream;
   }
 
   /// Completes when the tunnel reaches [status], or throws a
@@ -1520,5 +1696,70 @@ class SingBox {
     final result = _mutation.then((_) => action());
     _mutation = result.then<void>((_) {}, onError: (_) {});
     return result;
+  }
+}
+
+/// Follows the tunnel state after one start request and completes
+/// [outcome] when the tunnel connects, or fails it when the tunnel stops
+/// first or the request is cancelled.
+class _StartWaiter {
+  _StartWaiter(Stream<SingBoxConnectionState> states, this._before) {
+    _subscription = states.listen(_onState);
+  }
+
+  /// The state when the start was requested.
+  final SingBoxConnectionState _before;
+  late final StreamSubscription<SingBoxConnectionState> _subscription;
+  final _completer = Completer<void>();
+  bool _sawActive = false;
+  bool _requested = false;
+  String? _earlyError;
+
+  Future<void> get outcome => _completer.future;
+
+  void _onState(SingBoxConnectionState state) {
+    if (_completer.isCompleted) return;
+    switch (state.status) {
+      case SingBoxConnectionStatus.connected:
+        _completer.complete();
+      case SingBoxConnectionStatus.connecting:
+      case SingBoxConnectionStatus.disconnecting:
+        _sawActive = true;
+      case SingBoxConnectionStatus.disconnected:
+        // Until the tunnel became active or the platform confirmed the
+        // request, a plain "disconnected" belongs to the previous session.
+        if (_sawActive || _requested) {
+          _fail(state.error);
+        } else if (state.error != null && state.error != _before.error) {
+          _earlyError = state.error;
+        }
+    }
+  }
+
+  /// Called once the platform accepted the start request.
+  void requested() {
+    _requested = true;
+    if (_earlyError != null) _fail(_earlyError);
+  }
+
+  void _fail(String? error) {
+    if (_completer.isCompleted) return;
+    _completer.completeError(
+      SingBoxStartException(error ?? 'The tunnel stopped before it connected.'),
+    );
+  }
+
+  void cancel() {
+    if (_completer.isCompleted) return;
+    _completer.completeError(
+      const SingBoxCancelledException('The connection request was superseded.'),
+    );
+  }
+
+  void dispose() {
+    _subscription.cancel();
+    // Nobody awaits a waiter that was cancelled before the platform call
+    // returned; keep its error from becoming unhandled.
+    _completer.future.ignore();
   }
 }

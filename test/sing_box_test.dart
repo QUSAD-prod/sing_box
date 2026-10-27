@@ -214,6 +214,174 @@ void main() {
     });
   });
 
+  group('connect result', () {
+    setUp(singBox.initialize);
+    final outbound = jsonEncode(_ssOutbound);
+
+    test('completes once the tunnel is connected', () async {
+      await singBox.connect(outbound);
+      expect(singBox.isConnected, isTrue);
+      expect(singBox.state.startedAt, isNotNull);
+    });
+
+    test('throws the core error when the tunnel stops instead', () async {
+      platform.runtimeError = 'start service: initialize outbound[2]: boom';
+      await expectLater(
+        singBox.connect(outbound),
+        throwsA(
+          isA<SingBoxStartException>()
+              .having((e) => e.code, 'code', SingBoxErrorCode.startFailed)
+              .having((e) => e.message, 'message', platform.runtimeError),
+        ),
+      );
+      expect(singBox.status, SingBoxConnectionStatus.disconnected);
+    });
+
+    test('reports an error emitted before start returned', () async {
+      platform
+        ..runtimeError = 'open tun: permission revoked'
+        ..failBeforeStartReturns = true;
+      await expectLater(
+        singBox.connect(outbound),
+        throwsA(
+          isA<SingBoxStartException>().having(
+            (e) => e.message,
+            'message',
+            'open tun: permission revoked',
+          ),
+        ),
+      );
+    });
+
+    test('times out when the tunnel keeps connecting', () async {
+      platform.connectOnStart = false;
+      await expectLater(
+        singBox.connect(outbound, timeout: const Duration(milliseconds: 50)),
+        throwsA(isA<SingBoxTimeoutException>()),
+      );
+      expect(singBox.status, SingBoxConnectionStatus.connecting);
+    });
+
+    test('can return as soon as the start was requested', () async {
+      platform.connectOnStart = false;
+      await singBox.connect(outbound, waitUntilConnected: false);
+      expect(platform.started, hasLength(1));
+      expect(singBox.isConnected, isFalse);
+    });
+
+    test('reloads a connected tunnel without waiting', () async {
+      await singBox.connect(outbound);
+      platform.connectOnStart = false;
+      await singBox.connect(outbound, timeout: const Duration(seconds: 1));
+      expect(platform.started, hasLength(2));
+      expect(singBox.isConnected, isTrue);
+    });
+
+    test('disconnect cancels a pending connect and runs after it', () async {
+      platform.connectOnStart = false;
+      final pending = singBox.connect(outbound);
+      final cancelled = expectLater(
+        pending,
+        throwsA(isA<SingBoxCancelledException>()),
+      );
+      await pumpEventQueue();
+      await singBox.disconnect();
+      await cancelled;
+      await pumpEventQueue();
+      expect(platform.calls.where((c) => c == 'start' || c == 'stop'), [
+        'start',
+        'stop',
+      ]);
+      expect(singBox.status, SingBoxConnectionStatus.disconnected);
+    });
+
+    test('rapid toggles end in the state of the last request', () async {
+      final first = singBox.connect(outbound);
+      final firstResult = expectLater(
+        first,
+        throwsA(isA<SingBoxCancelledException>()),
+      );
+      final stop = singBox.disconnect();
+      final second = singBox.connect(outbound);
+      await firstResult;
+      await stop;
+      await second;
+      expect(singBox.isConnected, isTrue);
+      // The first connect was superseded before it reached the platform.
+      expect(platform.calls.where((c) => c == 'start' || c == 'stop'), [
+        'stop',
+        'start',
+      ]);
+    });
+
+    test('a newer connect supersedes a pending one', () async {
+      platform.connectOnStart = false;
+      final first = singBox.connect(outbound);
+      final firstResult = expectLater(
+        first,
+        throwsA(isA<SingBoxCancelledException>()),
+      );
+      await pumpEventQueue();
+      platform.connectOnStart = true;
+      final second = singBox.connect(outbound);
+      await firstResult;
+      // The fake reloads a connecting tunnel; let it connect.
+      platform.emitState(
+        SingBoxConnectionStatus.connected,
+        startedAt: DateTime.now(),
+      );
+      await second;
+      expect(singBox.isConnected, isTrue);
+    });
+
+    test('waits for the previous session to stop first', () async {
+      await singBox.connect(outbound);
+      platform.emitState(SingBoxConnectionStatus.disconnecting);
+      await pumpEventQueue();
+      final pending = singBox.connect(outbound);
+      await pumpEventQueue();
+      expect(platform.started, hasLength(1));
+      // The previous session's final event must not fail the new start.
+      platform.emitState(SingBoxConnectionStatus.disconnected);
+      await pending;
+      expect(platform.started, hasLength(2));
+      expect(singBox.isConnected, isTrue);
+    });
+
+    test('connectToServer marks the profile active once requested', () async {
+      final server = SingBoxServerConfig.fromOutbound(
+        Map<String, dynamic>.from(_ssOutbound),
+        id: 'srv',
+        name: 'Server',
+      );
+      await singBox.addServerConfig(server);
+      platform.runtimeError = 'boom';
+      await expectLater(
+        singBox.connectToServer(server),
+        throwsA(isA<SingBoxStartException>()),
+      );
+      expect((await singBox.getActiveServerConfig())?.id, 'srv');
+      platform.configError = 'bad';
+      await singBox.setActiveServerConfig(null);
+      await expectLater(
+        singBox.connectToServer(server),
+        throwsA(isA<SingBoxConfigException>()),
+      );
+      expect(await singBox.getActiveServerConfig(), isNull);
+    });
+
+    test('restart stops, waits and connects again', () async {
+      await singBox.connect(outbound);
+      await singBox.restart();
+      expect(platform.calls.where((c) => c == 'start' || c == 'stop'), [
+        'start',
+        'stop',
+        'start',
+      ]);
+      expect(singBox.isConnected, isTrue);
+    });
+  });
+
   group('status and statistics', () {
     setUp(singBox.initialize);
 
