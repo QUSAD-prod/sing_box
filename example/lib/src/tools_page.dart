@@ -116,12 +116,27 @@ class _ToolsPageState extends State<ToolsPage> {
             onChanged: (v) =>
                 _set(SingBoxSettings.keyAutoReconnectOnDisconnect, v),
           ),
-          if (Platform.isAndroid)
+          if (Platform.isAndroid) ...[
             SwitchListTile(
               title: const Text('Start on boot'),
               value: _settings.startOnBoot,
               onChanged: (v) => _set(SingBoxSettings.keyStartOnBoot, v),
             ),
+            SwitchListTile(
+              title: const Text('Quick Settings tile'),
+              value: _settings.quickSettingsTile,
+              onChanged: (v) => _set(SingBoxSettings.keyQuickSettingsTile, v),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_to_home_screen),
+              title: const Text('Add tile to Quick Settings'),
+              onTap: () async {
+                final result = await _singBox.requestAddQuickSettingsTile();
+                if (context.mounted) showMessage(context, result.name);
+                await _reload();
+              },
+            ),
+          ],
           SwitchListTile(
             title: const Text('Kill switch'),
             subtitle: Text(

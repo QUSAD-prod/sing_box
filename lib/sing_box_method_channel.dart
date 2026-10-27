@@ -214,6 +214,13 @@ class MethodChannelSingBox extends SingBoxPlatform {
   @override
   Future<void> openVpnSettings() => _invoke<void>('openVpnSettings');
 
+  @override
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({
+    String? label,
+  }) async => SingBoxQuickTileResult.fromString(
+    await _invoke<String>('requestAddQuickSettingsTile', {'label': label}),
+  );
+
   // ---------------------------------------------------------------------------
   // Service control
   // ---------------------------------------------------------------------------

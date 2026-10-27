@@ -407,6 +407,25 @@ class SingBox {
     return _platform.openVpnSettings();
   }
 
+  /// Android 13+: asks the user to add the plugin's Quick Settings tile (a
+  /// VPN on/off toggle that uses the last configuration). Enables the tile
+  /// (`SingBoxSettings.quickSettingsTile`) first. Returns
+  /// [SingBoxQuickTileResult.unsupported] on iOS and older Android versions.
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({
+    String? label,
+  }) async {
+    _ensureInitialized();
+    final settings = await getSettings();
+    if (!settings.quickSettingsTile) {
+      await saveSettings(settings.copyWith(quickSettingsTile: true));
+    }
+    try {
+      return await _platform.requestAddQuickSettingsTile(label: label);
+    } on SingBoxUnsupportedException {
+      return SingBoxQuickTileResult.unsupported;
+    }
+  }
+
   // ===========================================================================
   // Connection
   // ===========================================================================

@@ -84,6 +84,11 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   Future<void> openVpnSettings() async => calls.add('openVpnSettings');
 
   @override
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({
+    String? label,
+  }) async => SingBoxQuickTileResult.added;
+
+  @override
   Future<void> start(String config, {bool disableMemoryLimit = false}) async {
     calls.add('start');
     if (configError != null) throw SingBoxConfigException(configError!);

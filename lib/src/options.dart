@@ -143,6 +143,7 @@ class SingBoxServiceOptions {
     this.includeAllNetworks = false,
     this.excludeLocalNetworks = true,
     this.excludeApns = true,
+    this.quickSettingsTile = false,
   });
 
   /// Android: start the VPN with the last configuration after the device
@@ -165,12 +166,41 @@ class SingBoxServiceOptions {
   /// tunnel when [includeAllNetworks] is enabled.
   final bool excludeApns;
 
+  /// Android: enables the plugin's Quick Settings tile, which toggles the VPN
+  /// with the last configuration. Use `SingBox.requestAddQuickSettingsTile()`
+  /// to prompt the user to add it (Android 13+).
+  final bool quickSettingsTile;
+
   /// Serializes the options for the platform channel.
   Map<String, dynamic> toMap() => {
+    'quickSettingsTile': quickSettingsTile,
     'startOnBoot': startOnBoot,
     'onDemand': onDemand,
     'includeAllNetworks': includeAllNetworks,
     'excludeLocalNetworks': excludeLocalNetworks,
     'excludeAPNs': excludeApns,
   };
+}
+
+/// Result of `SingBox.requestAddQuickSettingsTile()`.
+enum SingBoxQuickTileResult {
+  /// The user added the tile.
+  added,
+
+  /// The tile was already added.
+  alreadyAdded,
+
+  /// The user declined.
+  declined,
+
+  /// Not supported (Android below 13, iOS, or no foreground Activity).
+  unsupported;
+
+  /// Parses the wire value.
+  static SingBoxQuickTileResult fromString(String? value) {
+    for (final v in values) {
+      if (v.name == value) return v;
+    }
+    return unsupported;
+  }
 }

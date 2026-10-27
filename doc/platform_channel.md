@@ -145,6 +145,16 @@ Behaviour:
 | `includeAllNetworks` | bool | iOS 14+ | `protocolConfiguration.includeAllNetworks` (kill switch) |
 | `excludeLocalNetworks` | bool | iOS 14+ | `protocolConfiguration.excludeLocalNetworks` |
 | `excludeAPNs` | bool | iOS 16.4+ | `excludeAPNs` (push notifications bypass the tunnel) |
+| `quickSettingsTile` | bool | Android | Enables the plugin's Quick Settings `TileService` component (declared disabled in the manifest, toggled with `PackageManager.setComponentEnabledSetting`). The tile starts the VPN with the last config / stops it, reflects the live status, and opens the app (PendingIntent overload of `startActivityAndCollapse` on API 34+) when the VPN permission is missing |
+
+#### `requestAddQuickSettingsTile`
+
+Android 13+ only: enables the tile component if needed and calls
+`StatusBarManager.requestAddTileService`. Returns a String:
+`"added"`, `"alreadyAdded"`, `"declined"` or `"unsupported"` (below Android 13,
+on iOS, or when no Activity is attached). Arguments: `{label: String?}`
+(defaults to the app label). Tile icon: drawable `notificationIcon` from
+`initialize`, else the app icon.
 
 ### libbox command client operations
 

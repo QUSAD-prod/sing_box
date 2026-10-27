@@ -18,6 +18,7 @@ class SingBoxSettings {
     this.excludeLocalNetworks = true,
     this.excludeApns = true,
     this.disableMemoryLimit = false,
+    this.quickSettingsTile = false,
   });
 
   /// Setting key for [autoConnectOnStart], used by `SingBox.updateSetting()`.
@@ -41,8 +42,12 @@ class SingBoxSettings {
   /// Setting key for [disableMemoryLimit].
   static const keyDisableMemoryLimit = 'disableMemoryLimit';
 
+  /// Setting key for [quickSettingsTile].
+  static const keyQuickSettingsTile = 'quickSettingsTile';
+
   /// All valid setting keys.
   static const keys = [
+    keyQuickSettingsTile,
     keyAutoConnectOnStart,
     keyAutoReconnectOnDisconnect,
     keyKillSwitch,
@@ -83,6 +88,9 @@ class SingBoxSettings {
   /// extension is killed above ~50 MB).
   final bool disableMemoryLimit;
 
+  /// Android: show the plugin's Quick Settings tile (VPN toggle).
+  final bool quickSettingsTile;
+
   /// Creates settings from a map (for deserialization). Unknown keys are
   /// ignored.
   factory SingBoxSettings.fromMap(Map<dynamic, dynamic> map) {
@@ -99,6 +107,7 @@ class SingBoxSettings {
       excludeLocalNetworks: read(keyExcludeLocalNetworks, true),
       excludeApns: read(keyExcludeApns, true),
       disableMemoryLimit: read(keyDisableMemoryLimit, false),
+      quickSettingsTile: read(keyQuickSettingsTile, false),
     );
   }
 
@@ -111,6 +120,7 @@ class SingBoxSettings {
     keyExcludeLocalNetworks: excludeLocalNetworks,
     keyExcludeApns: excludeApns,
     keyDisableMemoryLimit: disableMemoryLimit,
+    keyQuickSettingsTile: quickSettingsTile,
   };
 
   /// Returns a copy with [key] set to [value].
@@ -133,6 +143,7 @@ class SingBoxSettings {
     includeAllNetworks: killSwitch,
     excludeLocalNetworks: excludeLocalNetworks,
     excludeApns: excludeApns,
+    quickSettingsTile: quickSettingsTile,
   );
 
   /// Creates a copy with modified fields.
@@ -144,6 +155,7 @@ class SingBoxSettings {
     bool? excludeLocalNetworks,
     bool? excludeApns,
     bool? disableMemoryLimit,
+    bool? quickSettingsTile,
   }) {
     return SingBoxSettings(
       autoConnectOnStart: autoConnectOnStart ?? this.autoConnectOnStart,
@@ -154,6 +166,7 @@ class SingBoxSettings {
       excludeLocalNetworks: excludeLocalNetworks ?? this.excludeLocalNetworks,
       excludeApns: excludeApns ?? this.excludeApns,
       disableMemoryLimit: disableMemoryLimit ?? this.disableMemoryLimit,
+      quickSettingsTile: quickSettingsTile ?? this.quickSettingsTile,
     );
   }
 
@@ -166,7 +179,8 @@ class SingBoxSettings {
       other.startOnBoot == startOnBoot &&
       other.excludeLocalNetworks == excludeLocalNetworks &&
       other.excludeApns == excludeApns &&
-      other.disableMemoryLimit == disableMemoryLimit;
+      other.disableMemoryLimit == disableMemoryLimit &&
+      other.quickSettingsTile == quickSettingsTile;
 
   @override
   int get hashCode => Object.hash(
@@ -177,6 +191,7 @@ class SingBoxSettings {
     excludeLocalNetworks,
     excludeApns,
     disableMemoryLimit,
+    quickSettingsTile,
   );
 
   @override

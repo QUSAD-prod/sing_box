@@ -117,6 +117,13 @@ abstract class SingBoxPlatform extends PlatformInterface {
     throw UnimplementedError('openVpnSettings() has not been implemented.');
   }
 
+  /// Android 13+: asks the user to add the Quick Settings tile.
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({String? label}) {
+    throw UnimplementedError(
+      'requestAddQuickSettingsTile() has not been implemented.',
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Service control
   // ---------------------------------------------------------------------------
