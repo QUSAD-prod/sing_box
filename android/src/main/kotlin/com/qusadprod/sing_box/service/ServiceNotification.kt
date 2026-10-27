@@ -124,7 +124,7 @@ internal class ServiceNotification(
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         AppInfo.launchPendingIntent(service)?.let { created.setContentIntent(it) }
-        if (options.showStopAction) {
+        if (options.showStopAction && !service.isLockdown) {
             val stopIntent = Intent(SingBoxVpnService.actionStop(service)).setPackage(service.packageName)
             created.addAction(
                 NotificationCompat.Action.Builder(

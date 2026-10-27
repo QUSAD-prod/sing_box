@@ -98,6 +98,7 @@ internal object DefaultNetworkMonitor {
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             defaultNetwork = network
+            setUnderlyingNetwork(network)
             checkDefaultInterfaceUpdate(network)
         }
 
@@ -112,9 +113,20 @@ internal object DefaultNetworkMonitor {
         override fun onLost(network: Network) {
             if (network == defaultNetwork) {
                 defaultNetwork = null
+                setUnderlyingNetwork(null)
                 checkDefaultInterfaceUpdate(null)
             }
         }
+    }
+
+    /**
+     * Tells the system which network carries the tunnel, so the VPN inherits its
+     * capabilities (metered, transport); `null` falls back to the system default.
+     */
+    private fun setUnderlyingNetwork(network: Network?) {
+        val service = SingBoxVpnService.instance ?: return
+        runCatching { service.setUnderlyingNetworks(network?.let { arrayOf(it) }) }
+            .onFailure { Log.w(TAG, "set underlying networks", it) }
     }
 
     /** Runs on the callback thread: probes the interface with retries (never on the main thread). */

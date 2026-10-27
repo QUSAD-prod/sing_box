@@ -83,6 +83,24 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
 
         internal const val ACTION_START = "com.qusadprod.sing_box.action.START"
 
+        /** Set when the plugin stops a start whose service has not been created yet. */
+        @Volatile
+        private var pendingStop = false
+
+        internal fun cancelPendingStop() {
+            pendingStop = false
+        }
+
+        /**
+         * Stops a start requested with [start] before the service exists: the state
+         * becomes `Stopped` now and the service quits as soon as it is created.
+         */
+        internal fun requestPendingStop(context: Context) {
+            pendingStop = true
+            ServiceSettings(context).wasRunning = false
+            ServiceState.update { it.copy(status = ServiceStatus.Stopped, startedAt = null) }
+        }
+
         /** Shared by all service instances so that cleanup survives `onDestroy`. */
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
@@ -101,8 +119,15 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
     private var pendingStart = false
     private var receiverRegistered = false
 
+    /** A [doStart] of this instance is queued or running (main thread only). */
+    private var startInProgress = false
+
     @Volatile
     internal var systemProxyAvailable = false
+
+    /** Always-on VPN with "Block connections without VPN": stopping would cut the device off. */
+    internal val isLockdown: Boolean
+        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isLockdownEnabled
 
     override fun onCreate() {
         super.onCreate()
@@ -170,11 +195,26 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             notification.show()
         } catch (e: Exception) {
             Log.e(TAG, "startForeground", e)
-            if (ServiceState.status == ServiceStatus.Stopped) {
-                ServiceState.update { it.copy(error = "android: cannot start foreground service: ${e.libboxMessage}") }
+            if (commandServer == null && !startInProgress) {
+                ServiceState.update {
+                    it.copy(
+                        status = ServiceStatus.Stopped,
+                        startedAt = null,
+                        error = "android: cannot start foreground service: ${e.libboxMessage}",
+                    )
+                }
                 stopSelf()
             }
             return
+        }
+        if (pendingStop) {
+            // The plugin stopped this start before the service existed.
+            pendingStop = false
+            if (commandServer == null && !startInProgress) {
+                notification.close()
+                stopSelf()
+                return
+            }
         }
         when (ServiceState.status) {
             ServiceStatus.Stopped -> Unit
@@ -182,12 +222,19 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
                 pendingStart = true
                 return
             }
-            ServiceStatus.Starting, ServiceStatus.Started -> return
+            ServiceStatus.Started -> return
+            // The plugin reports `connecting` before the service is created.
+            ServiceStatus.Starting -> if (startInProgress) return
         }
+        startInProgress = true
         ServiceState.update { it.copy(status = ServiceStatus.Starting, startedAt = null) }
         scope.launch(Dispatchers.IO) {
             settings.wasRunning = true
-            lifecycle.withLock { doStart() }
+            try {
+                lifecycle.withLock { doStart() }
+            } finally {
+                withContext(Dispatchers.Main) { startInProgress = false }
+            }
         }
     }
 
@@ -300,13 +347,6 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         }
     }
 
-    /** Fire-and-forget reload (used by `start` while running). */
-    internal fun reloadAsync() {
-        scope.launch(Dispatchers.IO) {
-            runCatching { reload() }.onFailure { Log.w(TAG, "reload", it) }
-        }
-    }
-
     private fun closeTun() {
         val fd = tunFd
         tunFd = null
@@ -355,7 +395,11 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             .setSession(notificationOptions.sessionName ?: AppInfo.label(this))
             .setMtu(options.mtu)
         AppInfo.launchPendingIntent(this, 1)?.let { builder.setConfigureIntent(it) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+        // false = "metered only if the underlying network is" (set below), not "always unmetered".
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(false)
+            DefaultNetworkMonitor.defaultNetwork?.let { builder.setUnderlyingNetworks(arrayOf(it)) }
+        }
 
         val inet4Address = options.inet4Address.toPrefixes()
         val inet6Address = options.inet6Address.toPrefixes()
