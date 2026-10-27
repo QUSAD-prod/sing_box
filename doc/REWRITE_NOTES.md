@@ -1,5 +1,7 @@
 # sing_box rewrite — working notes (temporary, remove before publishing)
 
+> Superseded by doc/HANDOFF.md (read that first).
+
 Status file for the ongoing full rewrite so work can resume in a new session.
 Branch: `claude/singbox-flutter-plugin-review-22aa2f`.
 

@@ -33,3 +33,5 @@ doc/agent_notes/
 
 # Repository tooling
 .github/
+
+doc/HANDOFF.md
