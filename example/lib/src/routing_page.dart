@@ -75,8 +75,7 @@ class _RoutingPageState extends State<RoutingPage> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(note, style: Theme.of(context).textTheme.bodySmall),
           ),
-        if (values.isEmpty)
-          const ListTile(dense: true, title: Text('Empty')),
+        if (values.isEmpty) const ListTile(dense: true, title: Text('Empty')),
         for (final value in values)
           ListTile(
             dense: true,
@@ -120,7 +119,8 @@ class _RoutingPageState extends State<RoutingPage> {
             title: 'Bypass countries',
             hint: 'ISO code, e.g. ru',
             values: _rules.bypassCountries,
-            note: 'Sites and IPs of these countries are reached directly '
+            note:
+                'Sites and IPs of these countries are reached directly '
                 '(geoip/geosite rule-sets).',
             add: (v) => _singBox.updateRoutingRules(
               (r) => r.copyWith(
@@ -132,7 +132,9 @@ class _RoutingPageState extends State<RoutingPage> {
             ),
             remove: (v) => _singBox.updateRoutingRules(
               (r) => r.copyWith(
-                bypassCountries: r.bypassCountries.where((c) => c != v).toList(),
+                bypassCountries: r.bypassCountries
+                    .where((c) => c != v)
+                    .toList(),
               ),
             ),
           ),
@@ -161,7 +163,8 @@ class _RoutingPageState extends State<RoutingPage> {
             title: 'Bypass apps',
             hint: 'com.example.app',
             values: _rules.bypassApps,
-            note: androidOnly ?? 'Ignored while "Only these apps" is not empty.',
+            note:
+                androidOnly ?? 'Ignored while "Only these apps" is not empty.',
             add: _singBox.addAppToBypass,
             remove: _singBox.removeAppFromBypass,
           ),

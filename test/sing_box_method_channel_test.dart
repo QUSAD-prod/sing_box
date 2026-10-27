@@ -36,7 +36,10 @@ void main() {
         case 'start':
           throw PlatformException(code: 'PERMISSION_DENIED', message: 'denied');
         case 'reload':
-          throw PlatformException(code: 'SERVICE_NOT_RUNNING', message: 'stopped');
+          throw PlatformException(
+            code: 'SERVICE_NOT_RUNNING',
+            message: 'stopped',
+          );
         case 'getStatus':
           return 'connecting';
         case 'getStartedAt':
@@ -146,7 +149,12 @@ void main() {
             'selectable': true,
             'selected': 'a',
             'items': [
-              {'tag': 'a', 'type': 'vless', 'urlTestTime': 1, 'urlTestDelay': 50},
+              {
+                'tag': 'a',
+                'type': 'vless',
+                'urlTestTime': 1,
+                'urlTestDelay': 50,
+              },
             ],
           },
         ]),
@@ -177,10 +185,8 @@ void main() {
     messenger.setMockStreamHandler(
       platform.stunEventChannel,
       MockStreamHandler.inline(
-        onListen: (arguments, sink) => sink.error(
-          code: 'SERVICE_NOT_RUNNING',
-          message: 'not running',
-        ),
+        onListen: (arguments, sink) =>
+            sink.error(code: 'SERVICE_NOT_RUNNING', message: 'not running'),
       ),
     );
     await expectLater(

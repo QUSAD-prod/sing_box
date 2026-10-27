@@ -43,7 +43,8 @@ class _LogsPageState extends State<LogsPage> {
               IconButton(
                 tooltip: 'Clear',
                 icon: const Icon(Icons.delete_sweep_outlined),
-                onPressed: () => SingBox.instance.clearLogs().catchError((_) {}),
+                onPressed: () =>
+                    SingBox.instance.clearLogs().catchError((_) {}),
               ),
             ],
           ),

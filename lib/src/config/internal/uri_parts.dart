@@ -27,7 +27,7 @@ class HostPort {
 /// Throws a [FormatException] when the port is present but not a number in
 /// `1..65535` and [allowPortList] is `false`.
 HostPort splitHostPort(String value, {bool allowPortList = false}) {
-  var input = value.trim();
+  final input = value.trim();
   String host;
   var portText = '';
   if (input.startsWith('[')) {
@@ -154,7 +154,7 @@ LinkParts splitLink(String link, {bool allowPortList = false}) {
     if (i >= 0 && i < end) end = i;
   }
   final authority = rest.substring(0, end);
-  var tail = rest.substring(end);
+  final tail = rest.substring(end);
   var path = '';
   var queryText = '';
   final q = tail.indexOf('?');

@@ -318,7 +318,9 @@ class SingBox {
             map.containsKey('route') ||
             map.containsKey('endpoints');
         if (isFull) {
-          return jsonEncode(applyRules ? builder.apply(map, rules: rules) : map);
+          return jsonEncode(
+            applyRules ? builder.apply(map, rules: rules) : map,
+          );
         }
         return jsonEncode(
           builder.build([map], rules: rules, selectedTag: selectedTag),
@@ -469,7 +471,11 @@ class SingBox {
       selectedTag: selectedTag,
     );
     await _startTunnel(finalConfig, requestPermission: requestPermission);
-    await _rememberInput(config, applyRules: applyRules, selectedTag: selectedTag);
+    await _rememberInput(
+      config,
+      applyRules: applyRules,
+      selectedTag: selectedTag,
+    );
   }
 
   /// Connects using the stored server profile [server] and makes it the
@@ -591,11 +597,16 @@ class SingBox {
     _ensureInitialized();
     final config = await _platform.getLastConfig();
     if (config == null) {
-      throw const SingBoxConfigException('There is no configuration to restart.');
+      throw const SingBoxConfigException(
+        'There is no configuration to restart.',
+      );
     }
     if (_state.status != SingBoxConnectionStatus.disconnected) {
       await disconnect();
-      await waitForStatus(SingBoxConnectionStatus.disconnected, timeout: timeout);
+      await waitForStatus(
+        SingBoxConnectionStatus.disconnected,
+        timeout: timeout,
+      );
     }
     await _startTunnel(config, requestPermission: false);
   }
@@ -756,7 +767,8 @@ class SingBox {
   /// Log entries of the core, one by one. The first batch after subscribing
   /// contains the lines buffered by the core so far.
   Stream<SingBoxLogEntry> watchLogs() => watchLogEvents().expand(
-    (event) => event is SingBoxLogBatch ? event.entries : const <SingBoxLogEntry>[],
+    (event) =>
+        event is SingBoxLogBatch ? event.entries : const <SingBoxLogEntry>[],
   );
 
   /// The log as a growing list (newest last, at most [maxEntries]), handling
@@ -858,7 +870,11 @@ class SingBox {
       await urlTest(tag);
       final item = await resultFuture;
       return item.urlTestDelay == null
-          ? SingBoxPingResult.failure('URL test failed', tag: tag, address: address)
+          ? SingBoxPingResult.failure(
+              'URL test failed',
+              tag: tag,
+              address: address,
+            )
           : SingBoxPingResult(
               ping: item.urlTestDelay!,
               success: true,
@@ -926,7 +942,13 @@ class SingBox {
     }
   }
 
-  static const _builtinTypes = {'direct', 'block', 'dns', 'selector', 'urltest'};
+  static const _builtinTypes = {
+    'direct',
+    'block',
+    'dns',
+    'selector',
+    'urltest',
+  };
 
   /// Resolves the outbound currently selected by the main group (following
   /// nested groups such as `proxy` → `auto` → server), or `null`.
@@ -966,7 +988,9 @@ class SingBox {
       final outbounds = decoded is Map ? decoded['outbounds'] : null;
       if (outbounds is! List) return null;
       for (final o in outbounds.whereType<Map<dynamic, dynamic>>()) {
-        if (tag != null ? o['tag'] == tag : !_builtinTypes.contains(o['type'])) {
+        if (tag != null
+            ? o['tag'] == tag
+            : !_builtinTypes.contains(o['type'])) {
           return Map<String, dynamic>.from(o);
         }
       }
@@ -1113,7 +1137,7 @@ class SingBox {
     return _synchronized(() async {
       _observer.onSettingsChanged(key, value);
       try {
-        return saveSettings((await getSettings()).withValue(key, value));
+        return await saveSettings((await getSettings()).withValue(key, value));
       } on ArgumentError catch (e, s) {
         _observer.error('Invalid setting', e, s);
         return false;
@@ -1214,7 +1238,11 @@ class SingBox {
   /// Routes ONLY the given Android apps through the VPN (all other apps go
   /// direct). An empty list routes every app through the VPN.
   Future<void> setProxyApps(List<String> packageNames) async {
-    final apps = packageNames.map(_package).whereType<String>().toSet().toList();
+    final apps = packageNames
+        .map(_package)
+        .whereType<String>()
+        .toSet()
+        .toList();
     await updateRoutingRules((r) => r.copyWith(proxyApps: apps));
   }
 

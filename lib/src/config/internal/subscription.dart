@@ -119,7 +119,7 @@ List<SingBoxOutbound>? _tryJson(String text) {
 }
 
 /// SIP008 online configuration (`{"version": 1, "servers": [...]}`).
-void _sip008(List servers, List<SingBoxOutbound> result) {
+void _sip008(List<dynamic> servers, List<SingBoxOutbound> result) {
   for (final server in servers) {
     if (server is! Map) continue;
     final host = readString(server['server']);

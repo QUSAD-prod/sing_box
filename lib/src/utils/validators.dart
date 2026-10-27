@@ -71,7 +71,9 @@ abstract final class SingBoxValidators {
     final at = domain.lastIndexOf('@');
     if (at >= 0) domain = domain.substring(at + 1);
     final colon = domain.lastIndexOf(':');
-    if (colon >= 0 && !domain.contains('[')) domain = domain.substring(0, colon);
+    if (colon >= 0 && !domain.contains('[')) {
+      domain = domain.substring(0, colon);
+    }
     while (domain.startsWith('*.') || domain.startsWith('.')) {
       domain = domain.substring(domain.startsWith('*.') ? 2 : 1);
     }

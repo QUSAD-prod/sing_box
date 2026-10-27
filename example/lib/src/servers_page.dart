@@ -217,7 +217,10 @@ class _ServersPageState extends State<ServersPage> {
                           }
                         },
                         itemBuilder: (context) => const [
-                          PopupMenuItem(value: 'connect', child: Text('Connect')),
+                          PopupMenuItem(
+                            value: 'connect',
+                            child: Text('Connect'),
+                          ),
                           PopupMenuItem(value: 'delete', child: Text('Delete')),
                         ],
                       ),
@@ -277,8 +280,8 @@ class _GroupsSection extends StatelessWidget {
                         item.urlTestDelay != null
                             ? '${item.urlTestDelay} ms'
                             : item.urlTestFailed
-                                ? 'timeout'
-                                : '—',
+                            ? 'timeout'
+                            : '—',
                       ),
                       onTap: group.selectable
                           ? () => singBox.selectOutbound(group.tag, item.tag)

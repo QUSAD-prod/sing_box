@@ -77,7 +77,10 @@ void main() {
     expect(batch.entries.single.level, SingBoxLogLevel.error);
     expect(batch.entries.single.plainMessage, 'ERROR failed');
     expect(SingBoxLogLevel.error.isAtLeast(SingBoxLogLevel.warn), isTrue);
-    expect(SingBoxLogEvent.fromMap({'type': 'clear'}), isA<SingBoxLogCleared>());
+    expect(
+      SingBoxLogEvent.fromMap({'type': 'clear'}),
+      isA<SingBoxLogCleared>(),
+    );
     expect(SingBoxLogEvent.fromMap({'type': 'unknown'}), isNull);
   });
 
@@ -146,10 +149,7 @@ void main() {
     final options = settings.toServiceOptions();
     expect(options.includeAllNetworks, isTrue);
     expect(options.startOnBoot, isTrue);
-    expect(
-      () => settings.withValue('nope', true),
-      throwsArgumentError,
-    );
+    expect(() => settings.withValue('nope', true), throwsArgumentError);
   });
 
   test('server config detects complete configs', () {
@@ -183,9 +183,14 @@ void main() {
     });
 
     test('domains and packages', () {
-      expect(SingBoxValidators.normalizeDomain('*.Example.com.'), 'example.com');
       expect(
-        SingBoxValidators.normalizeDomain('https://user@sub.example.com:8443/x'),
+        SingBoxValidators.normalizeDomain('*.Example.com.'),
+        'example.com',
+      );
+      expect(
+        SingBoxValidators.normalizeDomain(
+          'https://user@sub.example.com:8443/x',
+        ),
         'sub.example.com',
       );
       expect(SingBoxValidators.normalizeDomain('1.2.3.4'), isNull);

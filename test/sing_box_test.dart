@@ -44,7 +44,10 @@ void main() {
 
     test('applies stored service options', () async {
       await singBox.saveSettings(
-        const SingBoxSettings(killSwitch: true, autoReconnectOnDisconnect: true),
+        const SingBoxSettings(
+          killSwitch: true,
+          autoReconnectOnDisconnect: true,
+        ),
       );
       await singBox.initialize();
       expect(platform.serviceOptions?.includeAllNetworks, isTrue);
@@ -78,7 +81,7 @@ void main() {
   });
 
   group('connect', () {
-    setUp(() => singBox.initialize());
+    setUp(singBox.initialize);
 
     test('wraps a single outbound into a complete config', () async {
       await singBox.connect(jsonEncode(_ssOutbound));
@@ -103,7 +106,11 @@ void main() {
       await singBox.addDomainToBypass('example.org');
       final full = {
         'inbounds': [
-          {'type': 'tun', 'tag': 'tun-in', 'address': ['172.19.0.1/30']},
+          {
+            'type': 'tun',
+            'tag': 'tun-in',
+            'address': ['172.19.0.1/30'],
+          },
         ],
         'outbounds': [
           _ssOutbound,
@@ -175,6 +182,9 @@ void main() {
       );
       final b = a.copyWith(id: 'b', name: 'Server B');
       final c = a.copyWith(id: 'c', name: 'Server C', enabled: false);
+      for (final s in [a, b, c]) {
+        await singBox.addServerConfig(s);
+      }
       await singBox.connectToServers([a, b, c], selectedId: 'b');
       final outbounds = _outboundsOf(platform.started.single);
       final selector = outbounds.firstWhere(
@@ -205,25 +215,28 @@ void main() {
   });
 
   group('status and statistics', () {
-    setUp(() => singBox.initialize());
+    setUp(singBox.initialize);
 
-    test('status stream starts with the current value and is distinct', () async {
-      final events = <SingBoxConnectionStatus>[];
-      final sub = singBox.watchConnectionStatus().listen(events.add);
-      await pumpEventQueue();
-      platform
-        ..emitState(SingBoxConnectionStatus.connecting)
-        ..emitState(SingBoxConnectionStatus.connecting)
-        ..emitState(SingBoxConnectionStatus.connected);
-      await pumpEventQueue();
-      await sub.cancel();
-      expect(events, [
-        SingBoxConnectionStatus.disconnected,
-        SingBoxConnectionStatus.connecting,
-        SingBoxConnectionStatus.connected,
-      ]);
-      expect(singBox.status, SingBoxConnectionStatus.connected);
-    });
+    test(
+      'status stream starts with the current value and is distinct',
+      () async {
+        final events = <SingBoxConnectionStatus>[];
+        final sub = singBox.watchConnectionStatus().listen(events.add);
+        await pumpEventQueue();
+        platform
+          ..emitState(SingBoxConnectionStatus.connecting)
+          ..emitState(SingBoxConnectionStatus.connecting)
+          ..emitState(SingBoxConnectionStatus.connected);
+        await pumpEventQueue();
+        await sub.cancel();
+        expect(events, [
+          SingBoxConnectionStatus.disconnected,
+          SingBoxConnectionStatus.connecting,
+          SingBoxConnectionStatus.connected,
+        ]);
+        expect(singBox.status, SingBoxConnectionStatus.connected);
+      },
+    );
 
     test('statistics carry the session duration', () async {
       platform.emitState(
@@ -355,10 +368,13 @@ void main() {
   });
 
   group('routing rules', () {
-    setUp(() => singBox.initialize());
+    setUp(singBox.initialize);
 
     test('bypass and block lists are validated and persisted', () async {
-      expect(await singBox.addDomainToBypass('https://Example.COM/path'), isTrue);
+      expect(
+        await singBox.addDomainToBypass('https://Example.COM/path'),
+        isTrue,
+      );
       expect(await singBox.addDomainToBypass('example.com'), isFalse);
       expect(await singBox.addDomainToBypass('not a domain'), isFalse);
       expect(await singBox.getBypassDomains(), ['example.com']);
@@ -366,7 +382,10 @@ void main() {
       expect(await singBox.addSubnetToBypass('10.0.0.0/8'), isTrue);
       expect(await singBox.addSubnetToBypass('192.168.1.1'), isTrue);
       expect(await singBox.addSubnetToBypass('10.0.0.0/33'), isFalse);
-      expect(await singBox.getBypassSubnets(), ['10.0.0.0/8', '192.168.1.1/32']);
+      expect(await singBox.getBypassSubnets(), [
+        '10.0.0.0/8',
+        '192.168.1.1/32',
+      ]);
       expect(await singBox.removeSubnetFromBypass('192.168.1.1'), isTrue);
 
       expect(await singBox.addAppToBypass('com.example.app'), isTrue);
@@ -384,21 +403,36 @@ void main() {
     test('DNS servers are validated', () async {
       expect(await singBox.addDnsServer('1.1.1.1'), isTrue);
       expect(await singBox.addDnsServer('tls://dns.google'), isTrue);
-      expect(await singBox.setDnsServers(['8.8.8.8', 'https://dns.google/dns-query']), isTrue);
-      expect(await singBox.getDnsServers(), ['8.8.8.8', 'https://dns.google/dns-query']);
+      expect(
+        await singBox.setDnsServers([
+          '8.8.8.8',
+          'https://dns.google/dns-query',
+        ]),
+        isTrue,
+      );
+      expect(await singBox.getDnsServers(), [
+        '8.8.8.8',
+        'https://dns.google/dns-query',
+      ]);
       expect(await singBox.removeDnsServer('8.8.8.8'), isTrue);
     });
   });
 
   group('settings and server profiles', () {
-    setUp(() => singBox.initialize());
+    setUp(singBox.initialize);
 
     test('updateSetting validates keys and applies service options', () async {
-      expect(await singBox.updateSetting(SingBoxSettings.keyStartOnBoot, true), isTrue);
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyStartOnBoot, true),
+        isTrue,
+      );
       expect((await singBox.getSettings()).startOnBoot, isTrue);
       expect(platform.serviceOptions?.startOnBoot, isTrue);
       expect(await singBox.updateSetting('unknown', true), isFalse);
-      expect(await singBox.updateSetting(SingBoxSettings.keyKillSwitch, 'yes'), isFalse);
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyKillSwitch, 'yes'),
+        isFalse,
+      );
     });
 
     test('server profile CRUD and active selection', () async {
@@ -437,7 +471,7 @@ void main() {
   });
 
   group('commands', () {
-    setUp(() => singBox.initialize());
+    setUp(singBox.initialize);
 
     test('forward to the platform', () async {
       await singBox.selectOutbound('proxy', 'node');

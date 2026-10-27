@@ -103,7 +103,13 @@ class SingBoxServerConfig {
     );
   }
 
-  static const _nonProxyTypes = {'direct', 'block', 'dns', 'selector', 'urltest'};
+  static const _nonProxyTypes = {
+    'direct',
+    'block',
+    'dns',
+    'selector',
+    'urltest',
+  };
 
   static int _counter = 0;
 

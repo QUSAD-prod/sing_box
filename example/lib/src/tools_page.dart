@@ -268,7 +268,9 @@ class _ConnectionsSection extends StatelessWidget {
             for (final c in active)
               ListTile(
                 dense: true,
-                title: Text('${c.network.toUpperCase()} ${c.displayDestination}'),
+                title: Text(
+                  '${c.network.toUpperCase()} ${c.displayDestination}',
+                ),
                 subtitle: Text(
                   '${c.outbound} · ${c.rule}'
                   '${c.processName == null ? '' : ' · ${c.processName}'}\n'

@@ -102,10 +102,7 @@ sealed class SingBoxLogEvent {
             .whereType<Map<dynamic, dynamic>>()
             .map((e) => SingBoxLogEntry.fromMap(e, at: now))
             .toList(growable: false);
-        return SingBoxLogBatch(
-          entries,
-          reset: map['reset'] as bool? ?? false,
-        );
+        return SingBoxLogBatch(entries, reset: map['reset'] as bool? ?? false);
       case 'defaultLevel':
         return SingBoxLogDefaultLevel(
           SingBoxLogLevel.fromValue((map['level'] as num?)?.toInt()),

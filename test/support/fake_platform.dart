@@ -132,7 +132,8 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   }
 
   @override
-  Future<void> setClashMode(String mode) async => calls.add('setClashMode:$mode');
+  Future<void> setClashMode(String mode) async =>
+      calls.add('setClashMode:$mode');
 
   @override
   Future<void> closeConnection(String id) async =>

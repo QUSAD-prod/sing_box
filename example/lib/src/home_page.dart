@@ -77,12 +77,15 @@ class _HomePageState extends State<HomePage> {
 
   void _runSpeedTest() {
     _qualitySub?.cancel();
-    setState(() => _quality = const SingBoxNetworkQuality(
-          phase: SingBoxNetworkQualityPhase.idle,
-        ));
+    setState(
+      () => _quality = const SingBoxNetworkQuality(
+        phase: SingBoxNetworkQualityPhase.idle,
+      ),
+    );
     _qualitySub = _singBox.runNetworkQualityTest().listen(
       (q) => setState(() => _quality = q),
       onError: (Object e) {
+        if (!mounted) return;
         setState(() => _quality = null);
         showMessage(context, '$e', error: true);
       },
@@ -120,8 +123,8 @@ class _HomePageState extends State<HomePage> {
                         _ping == null
                             ? 'Tap to measure'
                             : _ping!.success
-                                ? '${_ping!.ping} ms via ${_ping!.tag}'
-                                : _ping!.errorMessage ?? 'Failed',
+                            ? '${_ping!.ping} ms via ${_ping!.tag}'
+                            : _ping!.errorMessage ?? 'Failed',
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.refresh),

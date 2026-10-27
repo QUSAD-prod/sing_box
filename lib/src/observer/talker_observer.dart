@@ -85,7 +85,8 @@ class SingBoxTalkerObserver extends SingBoxObserver {
   }
 
   @override
-  void onConnectionError(String error) => this.error('Connection error: $error');
+  void onConnectionError(String error) =>
+      this.error('Connection error: $error');
 
   @override
   void onConnectionStatsChanged(SingBoxConnectionStats stats) {

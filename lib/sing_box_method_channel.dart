@@ -122,9 +122,10 @@ class MethodChannelSingBox extends SingBoxPlatform {
     T Function(Map<dynamic, dynamic>) parse,
   ) {
     if (event is! List) return const [];
-    return event.whereType<Map<dynamic, dynamic>>().map(parse).toList(
-      growable: false,
-    );
+    return event
+        .whereType<Map<dynamic, dynamic>>()
+        .map(parse)
+        .toList(growable: false);
   }
 
   static Stream<T> _events<T>(
@@ -151,7 +152,10 @@ class MethodChannelSingBox extends SingBoxPlatform {
     );
   }
 
-  Future<T?> _invoke<T>(String method, [Map<String, Object?>? arguments]) async {
+  Future<T?> _invoke<T>(
+    String method, [
+    Map<String, Object?>? arguments,
+  ]) async {
     try {
       return await methodChannel.invokeMethod<T>(method, arguments);
     } on PlatformException catch (e) {

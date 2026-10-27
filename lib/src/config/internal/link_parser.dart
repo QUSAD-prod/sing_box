@@ -150,7 +150,9 @@ String? _nonEmpty(String? value) {
 
 String _requireHost(String host, String link) {
   final h = host.trim();
-  if (h.isEmpty) throw FormatException('Share link has no server address', link);
+  if (h.isEmpty) {
+    throw FormatException('Share link has no server address', link);
+  }
   if (h.contains(RegExp(r'[\s/\\?#@]'))) {
     throw FormatException('Invalid server address "$h"', link);
   }
@@ -294,7 +296,10 @@ Map<String, dynamic>? buildTransport({
     case 'grpc' || 'gun':
       var name = _nonEmpty(serviceName) ?? pathValue;
       if (name != null && name.startsWith('/')) name = name.substring(1);
-      return {'type': 'grpc', if (_nonEmpty(name) != null) 'service_name': name};
+      return {
+        'type': 'grpc',
+        if (_nonEmpty(name) != null) 'service_name': name,
+      };
     case 'http' || 'h2':
       return {
         'type': 'http',
@@ -311,7 +316,10 @@ Map<String, dynamic>? buildTransport({
         link,
       );
     case 'kcp' || 'mkcp':
-      throw FormatException('mKCP transport is not supported by sing-box', link);
+      throw FormatException(
+        'mKCP transport is not supported by sing-box',
+        link,
+      );
     default:
       throw FormatException('Unsupported transport "$network"', link);
   }
@@ -479,7 +487,9 @@ _Parsed _vmess(String link) {
       'uuid': uuid,
       'security': _vmessSecurity(p.param(['encryption', 'scy'])),
       'alter_id': ?_positive(readInt(p.param(['alterid', 'aid']))),
-      'packet_encoding': ?_nonEmpty(_packetEncoding(p.param(['packetencoding']))),
+      'packet_encoding': ?_nonEmpty(
+        _packetEncoding(p.param(['packetencoding'])),
+      ),
       'tls': ?tls,
       'transport': ?transport,
     },
@@ -647,7 +657,9 @@ _Parsed _shadowsocks(String link) {
   if (!beforeQuery.contains('@')) {
     // Legacy: ss://base64(method:password@host:port)#name
     var encoded = beforeQuery;
-    if (encoded.endsWith('/')) encoded = encoded.substring(0, encoded.length - 1);
+    if (encoded.endsWith('/')) {
+      encoded = encoded.substring(0, encoded.length - 1);
+    }
     final decoded = tryDecodeBase64(percentDecode(encoded));
     if (decoded == null || !decoded.contains('@')) {
       throw FormatException('Malformed Shadowsocks link', link);
@@ -799,7 +811,8 @@ _Parsed _hysteria2(String link) {
     }
     obfs = {
       'type': 'salamander',
-      'password': p.param(['obfs-password', 'obfs_password', 'obfspassword']) ?? '',
+      'password':
+          p.param(['obfs-password', 'obfs_password', 'obfspassword']) ?? '',
     };
   }
   final tls = buildTls(
@@ -850,7 +863,9 @@ _Parsed _hysteria(String link) {
     );
   }
   final obfs = p.param(['obfsparam', 'obfs-password', 'obfs_password']);
-  final auth = p.param(['auth', 'auth_str']) ?? _nonEmpty(percentDecode(p.userInfo ?? ''));
+  final auth =
+      p.param(['auth', 'auth_str']) ??
+      _nonEmpty(percentDecode(p.userInfo ?? ''));
   final tls = buildTls(
     security: 'tls',
     link: link,
@@ -882,7 +897,9 @@ _Parsed _tuic(String link) {
   final p = splitLink(link);
   final userInfo = p.userInfo ?? '';
   final colon = userInfo.indexOf(':');
-  final uuid = percentDecode(colon < 0 ? userInfo : userInfo.substring(0, colon));
+  final uuid = percentDecode(
+    colon < 0 ? userInfo : userInfo.substring(0, colon),
+  );
   var password = colon < 0 ? '' : percentDecode(userInfo.substring(colon + 1));
   if (password.isEmpty) password = p.param(['password']) ?? '';
   if (uuid.trim().isEmpty) throw FormatException('TUIC link has no UUID', link);
@@ -894,9 +911,11 @@ _Parsed _tuic(String link) {
   }
   final host = _requireHost(p.host, link);
   final port = _port(p.port, 443);
-  final congestion = p
-      .param(['congestion_control', 'congestion-control', 'congestion'])
-      ?.toLowerCase();
+  final congestion = p.param([
+    'congestion_control',
+    'congestion-control',
+    'congestion',
+  ])?.toLowerCase();
   final relay = p.param(['udp_relay_mode', 'udp-relay-mode'])?.toLowerCase();
   final alpn = _splitList(p.param(['alpn']));
   final tls = buildTls(
@@ -914,10 +933,13 @@ _Parsed _tuic(String link) {
       'server_port': port,
       'uuid': uuid.trim(),
       'password': password,
-      if (congestion == 'cubic' || congestion == 'new_reno' || congestion == 'bbr')
+      if (congestion == 'cubic' ||
+          congestion == 'new_reno' ||
+          congestion == 'bbr')
         'congestion_control': congestion,
       if (relay == 'native' || relay == 'quic') 'udp_relay_mode': relay,
-      if (p.flag(['reduce_rtt', 'zero_rtt_handshake'])) 'zero_rtt_handshake': true,
+      if (p.flag(['reduce_rtt', 'zero_rtt_handshake']))
+        'zero_rtt_handshake': true,
       'tls': ?tls,
     },
     p.fragment,
@@ -1020,7 +1042,9 @@ _Parsed _http(String link, String scheme) {
 _Parsed _anytls(String link) {
   final p = splitLink(link);
   final password = percentDecode(p.userInfo ?? '');
-  if (password.isEmpty) throw FormatException('AnyTLS link has no password', link);
+  if (password.isEmpty) {
+    throw FormatException('AnyTLS link has no password', link);
+  }
   final host = _requireHost(p.host, link);
   final port = _port(p.port, 443);
   final tls = buildTls(
@@ -1062,7 +1086,8 @@ List<int>? _reserved(String? value) {
   if (v == null) return null;
   if (v.contains(',') || RegExp(r'^\d+$').hasMatch(v)) {
     final bytes = [for (final s in v.split(',')) int.tryParse(s.trim())];
-    if (bytes.length == 3 && bytes.every((b) => b != null && b >= 0 && b < 256)) {
+    if (bytes.length == 3 &&
+        bytes.every((b) => b != null && b >= 0 && b < 256)) {
       return bytes.cast<int>();
     }
     return null;

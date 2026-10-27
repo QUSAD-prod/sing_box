@@ -189,9 +189,7 @@ abstract class SingBoxPlatform extends PlatformInterface {
 
   /// Closes all connections.
   Future<void> closeAllConnections() {
-    throw UnimplementedError(
-      'closeAllConnections() has not been implemented.',
-    );
+    throw UnimplementedError('closeAllConnections() has not been implemented.');
   }
 
   /// Clears the log buffer of the core.
