@@ -97,7 +97,6 @@ class SingBoxConfigBuilder {
     for (final raw in outbounds) {
       final outbound = SingBoxOutbound.fromJson(raw);
       final tag = uniqueTag(outbound.tag, taken);
-      taken.add(tag);
       final json = deepCopyMap(outbound.json)..['tag'] = tag;
       (outbound.isEndpoint ? endpoints : proxies).add(json);
     }
@@ -200,7 +199,9 @@ class SingBoxConfigBuilder {
   /// * A `direct` outbound is reused or added.
   /// * `route.auto_detect_interface` is enabled unless set explicitly.
   /// * Custom [SingBoxRoutingRules.dnsServers] become the final DNS servers,
-  ///   reached through the config's main outbound.
+  ///   reached through the config's main outbound (`route.final`, else the
+  ///   first proxy outbound), or directly when that is a `direct` or `block`
+  ///   outbound.
   /// * Blocked domains are answered with NXDOMAIN by DNS.
   Map<String, dynamic> apply(
     Map<String, dynamic> config, {
@@ -300,21 +301,25 @@ class SingBoxConfigBuilder {
         });
       }
       if (dnsServers.isNotEmpty) {
-        final detour = _mainOutboundTag(result);
+        final detour = _proxyDetourTag(result);
         final taken = servers.map((s) => s['tag']).whereType<String>().toSet();
+        String? localTag;
         String? first;
         for (final address in dnsServers) {
-          final tag = uniqueTag('dns-custom', taken);
           final server = SingBoxDnsServer.tryParse(
             address,
-            tag: tag,
+            tag: '',
             detour: detour,
           );
-          if (server == null || SingBoxDnsServer.needsDomainResolver(server)) {
-            continue;
-          }
-          taken.add(tag);
+          if (server == null) continue;
+          final tag = server['tag'] = uniqueTag('dns-custom', taken);
           servers.add(server);
+          // Without a proxy detour a host name based server is bootstrapped
+          // by the system resolver.
+          if (SingBoxDnsServer.needsDomainResolver(server)) {
+            localTag ??= _localDnsServerTag(servers, taken);
+            server['domain_resolver'] = localTag;
+          }
           first ??= tag;
         }
         if (first != null) dns['final'] = first;
@@ -368,15 +373,14 @@ class SingBoxConfigBuilder {
     if (remoteAddresses.isEmpty) remoteAddresses.add(dnsOptions.remote);
     String? remoteTag;
     for (final address in remoteAddresses) {
-      final tag = uniqueTag(dnsRemoteTag, taken);
       final server = SingBoxDnsServer.tryParse(
         address,
-        tag: tag,
+        tag: '',
         detour: proxyTag,
       );
       if (server == null) continue;
+      final tag = server['tag'] = uniqueTag(dnsRemoteTag, taken);
       if (server['type'] == 'local') server.remove('detour');
-      taken.add(tag);
       servers.add(server);
       remoteTag ??= tag;
     }
@@ -389,7 +393,6 @@ class SingBoxConfigBuilder {
         ),
       );
       remoteTag = dnsRemoteTag;
-      taken.add(remoteTag);
     }
 
     // Direct resolver for bypassed domains and proxy server host names.
@@ -567,6 +570,39 @@ class SingBoxConfigBuilder {
       include: include,
       exclude: include.isEmpty ? _validPackages(rules.bypassApps) : const [],
     );
+  }
+
+  /// The main outbound of [config] when it can carry DNS traffic: a detour
+  /// to an empty `direct` outbound fails at the first query and `block`
+  /// drops everything, so both yield `null`.
+  static String? _proxyDetourTag(Map<String, dynamic> config) {
+    final tag = _mainOutboundTag(config);
+    if (tag == null) return null;
+    final outbounds = config['outbounds'];
+    if (outbounds is List) {
+      for (final o in outbounds.whereType<Map<dynamic, dynamic>>()) {
+        if (o['tag'] != tag) continue;
+        final type = o['type'];
+        if (type == 'block' || (type == 'direct' && o['detour'] == null)) {
+          return null;
+        }
+      }
+    }
+    return tag;
+  }
+
+  /// Tag of a `local` DNS server in [servers], adding one when missing.
+  static String _localDnsServerTag(
+    List<Map<String, dynamic>> servers,
+    Set<String> taken,
+  ) {
+    for (final server in servers) {
+      final tag = server['tag'];
+      if (server['type'] == 'local' && tag is String) return tag;
+    }
+    final tag = uniqueTag(dnsLocalTag, taken);
+    servers.add({'type': 'local', 'tag': tag});
+    return tag;
   }
 
   static String? _mainOutboundTag(Map<String, dynamic> config) {
