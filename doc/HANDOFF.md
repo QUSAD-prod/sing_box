@@ -59,11 +59,11 @@ never push.
   speed/STUN tests run directly when the VPN is off.
 
 ## 4. State (verified 2026-10-28, session 4)
-- `dart format` clean, `flutter analyze` clean (plugin + example); `flutter test`: 246 pass + 3 skipped (the 3 need
-  `SING_BOX_BIN`; last full run with it: session 3); `flutter pub publish --dry-run`: 0 warnings; pana 150/160 (§6.4).
+- `dart format` clean, `flutter analyze` clean (plugin + example); `flutter test` with `SING_BOX_BIN`: 251 pass, none
+  skipped (session 4); `flutter pub publish --dry-run`: 0 warnings; pana 150/160 (§6).
 - Android: `flutter build apk --debug/--release` OK (universal release 235 MB). Manual lifecycle scenarios pass on the
   Android 17 emulator (Back/swipe, QS tile, boot start, update restart, Always-on + lockdown). Emulator e2e
-  `vpn_e2e_test.dart` 8/8 and `permission_e2e_test.dart` 1/1 were last run in session 3 (need the sing-box CLI).
+  `vpn_e2e_test.dart` 8/8 and `permission_e2e_test.dart` 1/1 (session 4).
 - iOS: SPM simulator debug + `--release --no-codesign` (140 MB) OK; `smoke_test.dart` 5/5 on the simulator (session 4);
   CocoaPods mode OK in session 3; `add_packet_tunnel.rb` applied to `example/ios` (idempotent).
 - Local dev copy `android/libs/libbox.aar` (gitignored) = `build/libbox/libbox.aar`; needed until the release exists.
@@ -91,6 +91,11 @@ never push.
   is false until `establish()` → the notification is rebuilt after connect; non-active QS tiles ignore
   `requestListeningState` and refresh only while the panel is open (`cmd statusbar expand-settings` before
   `click-tile`); `settings put secure always_on_vpn_*` needs a few seconds before `adb reboot` to persist.
+- sing-box 1.14 resolves outbound server names with the only DNS server when `route.default_domain_resolver` is
+  missing and **rejects** configs with several servers → `apply()` pins the previous resolver when adding DNS.
+- sing-box CLI for tests: clone v1.14.4 into the scratchpad, `go build -trimpath -tags
+  with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api -ldflags "-X github.com/sagernet/sing-box/constant.Version=1.14.4" ./cmd/sing-box`
+  (the user allowed it on 2026-10-28; the auto-mode classifier refuses it without that).
 - libbox release assets must be the files whose SHA-256 is committed; CI rebuilds never match (`release_libbox.sh`
   refuses to replace differing assets without `--force`).
 - flutter_vless lessons we follow: core in-process; truthful start result with exact error; serialized start/stop;
@@ -99,14 +104,11 @@ never push.
   never forced; provider shipped as a library class; XHTTP fails clearly.
 
 ## 6. Next tasks (in order)
-1. **sing-box CLI for `test/config`**: building it (`go build ./cmd/sing-box` from a v1.14.4 clone in the scratchpad)
-   was refused by the auto-mode classifier in session 4 — ask the user to allow it (or to build it), then run
-   `SING_BOX_BIN=… flutter test test/config` and the Android `vpn_e2e_test.dart` (needs the e2e server).
-2. **iOS on a device**: the session-4 `TunnelController` changes (synthetic `connecting` until iOS reports the start,
+1. **iOS on a device**: the session-4 `TunnelController` changes (synthetic `connecting` until iOS reports the start,
    errors of fast-failing starts, no stale `fetchLastDisconnectError` after `stop()`, `reload` error codes) compile and
    pass the simulator smoke test, but Network Extensions only run on a device — needs the user's paid team + iPhone.
-3. **CI**: the native jobs fail until the libbox release exists; the `dart` job now builds the sing-box CLI.
-4. Before publishing (on the user's request only): publish the libbox release (`scripts/release_libbox.sh --publish`,
+2. **CI**: the native jobs fail until the libbox release exists; the `dart` job now builds the sing-box CLI.
+3. Before publishing (on the user's request only): publish the libbox release (`scripts/release_libbox.sh --publish`,
    current `build/libbox` files — never a CI rebuild, see `libbox.yml`), remove `doc/agent_notes/`, decide licensing
    (§7), bump version, squash if asked. pana is 150/160 only because `origin/main` still has the old `repository`
    URL in pubspec — 160/160 once this branch is on main.
