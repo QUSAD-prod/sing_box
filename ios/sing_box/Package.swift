@@ -14,7 +14,7 @@ import PackageDescription
 // the iOS libbox binary: `ios/libbox.rb` (CocoaPods) parses them, and the
 // release script rewrites them. Keep the `let name = "value"` format.
 let libboxVersion = "1.14.4"
-let libboxChecksum = "0413d065d147c1cb7c55c59315b60e5507a5e0bfb2e3c95696c5fa7c25a2da68"
+let libboxChecksum = "8bca7d8f5f8615df5d719a0e50fd2364d041cd2182ebda2d981d1e7494c71c40"
 let libboxBaseURL = "https://github.com/QUSAD-prod/sing_box/releases/download"
 
 // Local development: `scripts/build_libbox.sh apple --install` puts the

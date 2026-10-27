@@ -107,7 +107,8 @@ final class NotificationStreamHandler: NSObject, FlutterStreamHandler {
 
 // MARK: - sing_box/network_quality and sing_box/stun
 
-/// One-shot test stream: progress events, one result, end of stream.
+/// One-shot test stream: progress events, one result, end of stream. Runs
+/// through the tunnel while it is active and directly in the app otherwise.
 final class OneShotTestStreamHandler: NSObject, FlutterStreamHandler {
     enum Kind {
         case networkQuality, stun
@@ -121,6 +122,8 @@ final class OneShotTestStreamHandler: NSObject, FlutterStreamHandler {
     private var client: LibboxCommandClient?
     private var networkQualitySession: LibboxNetworkQualityTestSession?
     private var stunSession: LibboxSTUNTestSession?
+    private var directNetworkQuality: LibboxNetworkQualityTest?
+    private var directStun: LibboxSTUNTest?
 
     init(kind: Kind, isServiceActive: @escaping () -> Bool) {
         self.kind = kind
@@ -133,15 +136,13 @@ final class OneShotTestStreamHandler: NSObject, FlutterStreamHandler {
         sink = events
         let token = generation
         let args = arguments as? [String: Any] ?? [:]
-        guard isServiceActive() else {
-            DispatchQueue.main.async { [weak self] in
-                self?.finish(token: token, error: PluginError.serviceNotRunning().flutterError)
-            }
-            return nil
-        }
         let networkQualityHandler = NetworkQualityHandler(self, token: token)
         let stunHandler = StunHandler(self, token: token)
         let kind = kind
+        guard isServiceActive() else {
+            startDirect(args: args, networkQualityHandler: networkQualityHandler, stunHandler: stunHandler)
+            return nil
+        }
         queue.async { [weak self] in
             guard let client = LibboxNewStandaloneCommandClient() else {
                 DispatchQueue.main.async {
@@ -188,6 +189,35 @@ final class OneShotTestStreamHandler: NSObject, FlutterStreamHandler {
         return nil
     }
 
+    /// Measures the connection without the tunnel (`outboundTag` is ignored).
+    private func startDirect(
+        args: [String: Any],
+        networkQualityHandler: NetworkQualityHandler,
+        stunHandler: StunHandler
+    ) {
+        switch kind {
+        case .networkQuality:
+            guard let test = LibboxNewNetworkQualityTest() else { return }
+            directNetworkQuality = test
+            queue.async {
+                // start() blocks until the test finishes.
+                test.start(
+                    args.string("configUrl") ?? LibboxNetworkQualityDefaultConfigURL,
+                    serial: args.bool("serial") ?? false,
+                    maxRuntimeSeconds: Int32(args.int("maxRuntimeSeconds") ?? Int(LibboxNetworkQualityDefaultMaxRuntimeSeconds)),
+                    http3: args.bool("http3") ?? false,
+                    handler: networkQualityHandler
+                )
+            }
+        case .stun:
+            guard let test = LibboxNewSTUNTest() else { return }
+            directStun = test
+            queue.async {
+                test.start(args.string("server") ?? LibboxSTUNDefaultServer, handler: stunHandler)
+            }
+        }
+    }
+
     private func attach(token: UInt64, client: LibboxCommandClient, networkQuality: LibboxNetworkQualityTestSession?, stun: LibboxSTUNTestSession?) {
         guard token == generation, sink != nil else {
             queue.async {
@@ -211,6 +241,10 @@ final class OneShotTestStreamHandler: NSObject, FlutterStreamHandler {
         self.client = nil
         networkQualitySession = nil
         stunSession = nil
+        directNetworkQuality?.cancel()
+        directStun?.cancel()
+        directNetworkQuality = nil
+        directStun = nil
         if client != nil || networkQuality != nil || stun != nil {
             queue.async {
                 try? networkQuality?.close()
@@ -260,7 +294,7 @@ private class TestHandlerBase: NSObject {
         }
     }
 
-    func onError(_ message: String?) {
+    @objc func onError(_ message: String?) {
         let error = PluginError.commandFailed(message ?? "test failed").flutterError
         main { $0.finish(token: $1, error: error) }
     }

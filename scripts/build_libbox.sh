@@ -142,6 +142,8 @@ build_apple() {
       -tags "$LIBBOX_TAGS,$APPLE_EXTRA_TAGS" \
       ./experimental/libbox
   )
+  # gomobile emits versioned (macOS style) frameworks; iOS needs shallow bundles.
+  "$ROOT_DIR/scripts/flatten_xcframework.sh" "$OUT_DIR/Libbox.xcframework" 15.0
   (
     cd "$OUT_DIR"
     rm -f Libbox.xcframework.zip
