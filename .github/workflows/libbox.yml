@@ -1,16 +1,19 @@
 name: libbox
 
-# Builds the sing-box native libraries. Pushing a tag `libbox-v<version>`
-# (matching LIBBOX_VERSION) publishes them as release assets, which the
-# plugin downloads at build time.
+# Builds the sing-box native libraries (libbox) from source on a clean
+# machine and uploads them as a workflow artifact, together with the
+# checksum files updated by scripts/release_libbox.sh.
+#
+# This workflow does not publish the release. The plugin pins the SHA-256 of
+# the release assets (android/libbox.properties, ios/sing_box/Package.swift)
+# and the builds are not byte-for-byte reproducible (toolchain drift, zip
+# timestamps), so a fresh CI build never matches the committed checksums.
+# To release: take the artifact (or a local build), copy libbox.aar and
+# Libbox.xcframework.zip to build/libbox/, commit the updated checksum files
+# and run `scripts/release_libbox.sh --publish` from that commit.
 
 on:
   workflow_dispatch:
-  push:
-    tags: ['libbox-v*']
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -32,7 +35,21 @@ jobs:
       - name: Build libbox
         run: scripts/build_libbox.sh android apple
       - name: Update checksums
-        run: scripts/release_libbox.sh
+        run: |
+          scripts/release_libbox.sh
+          {
+            echo '### libbox checksums'
+            echo
+            echo '```'
+            cat build/libbox/libbox.aar.sha256 build/libbox/Libbox.xcframework.zip.sha256
+            echo '```'
+            echo
+            echo 'Committed checksums differ from this build:'
+            echo
+            echo '```diff'
+            git diff -- android/libbox.properties ios/sing_box/Package.swift
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: libbox
@@ -40,11 +57,6 @@ jobs:
             build/libbox/libbox.aar
             build/libbox/Libbox.xcframework.zip
             build/libbox/*.sha256
+            LIBBOX_VERSION
             android/libbox.properties
             ios/sing_box/Package.swift
-      - name: Publish release assets
-        if: startsWith(github.ref, 'refs/tags/libbox-v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: scripts/release_libbox.sh --publish

@@ -4,8 +4,9 @@
 # plugin downloads at build time.
 #
 # Usage:
-#   scripts/release_libbox.sh            # update version/checksums in the repo
-#   scripts/release_libbox.sh --publish  # ... and create/upload the GitHub release
+#   scripts/release_libbox.sh                    # update version/checksums in the repo
+#   scripts/release_libbox.sh --publish          # ... and create the GitHub release
+#   scripts/release_libbox.sh --publish --force  # ... replacing different assets
 #
 # Expects build/libbox/libbox.aar and build/libbox/Libbox.xcframework.zip
 # (produced by scripts/build_libbox.sh). Updates:
@@ -15,7 +16,11 @@
 # The CocoaPods specs read the values from Package.swift.
 #
 # Publishing requires the GitHub CLI (`gh auth login`) with write access to
-# the repository; the release tag is `libbox-v<version>`.
+# the repository; the release tag is `libbox-v<version>`. Publish the very
+# files whose checksums are committed: every released plugin version pins
+# them, so an existing release is never overwritten with different files
+# unless `--force` is given (which breaks the plugin versions pinning the old
+# checksums - bump the libbox version instead).
 
 set -euo pipefail
 
@@ -26,7 +31,15 @@ VERSION="${SING_BOX_VERSION:-$(tr -d '[:space:]' < "$ROOT_DIR/LIBBOX_VERSION")}"
 VERSION="${VERSION#v}"
 TAG="libbox-v$VERSION"
 PUBLISH=0
-[[ "${1:-}" == "--publish" ]] && PUBLISH=1
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --publish) PUBLISH=1 ;;
+    --force) FORCE=1 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 
 die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 log() { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
@@ -74,8 +87,30 @@ NOTES="sing-box $VERSION native libraries for the sing_box Flutter plugin.
 Built with scripts/build_libbox.sh from https://github.com/SagerNet/sing-box/tree/v$VERSION (GPL-3.0-or-later)."
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  log "Release $TAG exists, uploading assets (overwriting)"
-  gh release upload "$TAG" "$AAR" "$ZIP" --repo "$REPO" --clobber
+  PUBLISHED="$(mktemp -d)"
+  trap 'rm -rf "$PUBLISHED"' EXIT
+  gh release download "$TAG" --repo "$REPO" --dir "$PUBLISHED" \
+    --pattern libbox.aar --pattern Libbox.xcframework.zip 2>/dev/null || true
+  UPLOAD=()
+  for asset in "$AAR" "$ZIP"; do
+    name="$(basename "$asset")"
+    new_sha="$(shasum -a 256 "$asset" | cut -d' ' -f1)"
+    old_sha=missing
+    [[ -f "$PUBLISHED/$name" ]] && old_sha="$(shasum -a 256 "$PUBLISHED/$name" | cut -d' ' -f1)"
+    [[ "$old_sha" == "$new_sha" ]] && continue
+    if [[ "$old_sha" != missing && $FORCE -eq 0 ]]; then
+      die "release $TAG already has a different $name ($old_sha).
+Published plugin versions pin that checksum; replacing the file breaks them.
+Publish the matching file, bump the libbox version, or pass --force."
+    fi
+    UPLOAD+=("$asset")
+  done
+  if [[ ${#UPLOAD[@]} -eq 0 ]]; then
+    log "Release $TAG already has these exact files, nothing to upload"
+    exit 0
+  fi
+  log "Release $TAG exists, uploading: ${UPLOAD[*]##*/}"
+  gh release upload "$TAG" "${UPLOAD[@]}" --repo "$REPO" --clobber
 else
   log "Creating release $TAG"
   gh release create "$TAG" "$AAR" "$ZIP" --repo "$REPO" \

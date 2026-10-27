@@ -20,12 +20,36 @@ jobs:
         with:
           channel: stable
           cache: true
+      # The config tests run `sing-box check` on every generated config when
+      # SING_BOX_BIN points to the CLI of the libbox version in use.
+      - uses: actions/cache@v4
+        id: sing-box-cli
+        with:
+          path: ~/.cache/sing-box-cli
+          key: sing-box-cli-${{ hashFiles('LIBBOX_VERSION') }}
+      - uses: actions/setup-go@v5
+        if: steps.sing-box-cli.outputs.cache-hit != 'true'
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Build the sing-box CLI
+        if: steps.sing-box-cli.outputs.cache-hit != 'true'
+        run: |
+          version="$(tr -d '[:space:]' < LIBBOX_VERSION)"
+          mkdir -p ~/.cache/sing-box-cli
+          git clone --quiet --depth 1 --branch "v$version" https://github.com/SagerNet/sing-box.git "$RUNNER_TEMP/sing-box"
+          cd "$RUNNER_TEMP/sing-box"
+          go build -trimpath -tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api \
+            -o ~/.cache/sing-box-cli/sing-box ./cmd/sing-box
+      - run: echo "SING_BOX_BIN=$HOME/.cache/sing-box-cli/sing-box" >> "$GITHUB_ENV"
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test example/lib
+      - run: dart format --output=none --set-exit-if-changed lib test example/lib example/integration_test
       - run: flutter analyze
       - run: flutter test --coverage
       - run: flutter pub publish --dry-run
 
+  # The native jobs download libbox from the `libbox-v<version>` GitHub
+  # release (see scripts/release_libbox.sh); they fail until it is published.
   android:
     name: Build example (Android)
     runs-on: ubuntu-latest
@@ -71,8 +95,10 @@ jobs:
           fi
       - uses: actions/cache@v4
         with:
-          path: ~/Library/Caches/sing_box
-          key: libbox-ios-${{ hashFiles('ios/sing_box/Package.swift') }}
+          path: |
+            ~/Library/Caches/sing_box
+            ~/Library/Caches/org.swift.swiftpm/artifacts
+          key: libbox-ios-${{ matrix.mode }}-${{ hashFiles('ios/sing_box/Package.swift') }}
       - name: Build for the simulator
         working-directory: example
         run: flutter build ios --simulator --debug
