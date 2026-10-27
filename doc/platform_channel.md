@@ -105,7 +105,7 @@ Arguments:
 | Key | Type | Description |
 | --- | --- | --- |
 | `config` | String | Complete sing-box JSON configuration (required) |
-| `disableMemoryLimit` | bool | Calls `Libbox.setMemoryLimit(!value)` before starting (default false) |
+| `disableMemoryLimit` | bool | iOS: starts the extension with the libbox OOM killer disabled (`SetupOptions.oomKillerEnabled = false`). Android: accepted and ignored (the OOM killer is always off there, like in sing-box-for-android). Default false |
 
 Behaviour:
 
@@ -119,6 +119,13 @@ Behaviour:
 * Android: throws `PERMISSION_DENIED` if `VpnService.prepare` returns an
   intent; otherwise starts the foreground VPN service and resolves as soon as
   the service was asked to start (the status stream reports progress).
+* Both platforms: when the tunnel was not running, the `connecting` status
+  event must be emitted **before** the method result is delivered, and the
+  outcome follows on the status stream: `connected`, or `disconnected` with
+  `error` set to the exact core/OS error. The Dart `connect()` waits for this
+  outcome; a `disconnected` event without a preceding `connecting` and before
+  the result is treated as the end of the previous session unless it carries
+  a new `error`.
 * iOS: throws `PERMISSION_DENIED` if the profile is missing; enables the
   manager, applies `serviceOptions` (on-demand, includeAllNetworks, …), saves
   it and calls `startVPNTunnel`.

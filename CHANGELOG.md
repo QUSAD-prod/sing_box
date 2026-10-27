@@ -10,10 +10,19 @@ A complete rewrite on top of **sing-box 1.14.4** (`libbox`).
   format), routing with rule actions, selector + URL test groups, cache file,
   clash API.
 - Share link and subscription parsing (`SingBoxShareLink`): VLESS (Reality,
-  Vision), VMess, Trojan, Shadowsocks, Hysteria/Hysteria2, TUIC, SOCKS, HTTP;
-  export back to links.
+  Vision; ws, gRPC, HTTP/2, HTTPUpgrade), VMess (v2rayN, Xray and
+  Shadowrocket formats), Trojan, Shadowsocks (SIP002, SIP022, legacy,
+  plugins), Hysteria/Hysteria2 (port hopping), TUIC, SOCKS, HTTP(S), AnyTLS,
+  WireGuard; base64/plain/JSON/SIP008 subscriptions; export back to links.
+  Unsupported transports such as XHTTP fail with a clear message. Every
+  generated configuration is checked against `sing-box check` in the tests.
 - `connect()` accepts links, subscriptions, outbound JSON or complete
   configs; `connectToServers()` combines profiles for instant switching.
+- `connect()` completes once the tunnel is really connected and throws
+  `SingBoxStartException` (exact core error), `SingBoxTimeoutException` or
+  `SingBoxCancelledException`; start/stop requests are serialized so rapid
+  toggles cannot leave a stale state (`waitUntilConnected: false` returns
+  right after the request).
 - Streams: connection state with error and start time, traffic statistics,
   logs (`watchLogs`, `watchLogBuffer`), outbound groups and outbounds with
   latencies, clash mode, connections, core notifications.

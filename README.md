@@ -255,6 +255,19 @@ The final configuration is validated by sing-box before the tunnel starts.
 To inspect it without connecting use `buildConfig()`, `checkConfig()`,
 `validateConfig()` and `formatConfig()`.
 
+`connect()` completes once the tunnel is **actually connected**. If the core
+fails to start (unreachable rule-set, a broken outbound, a revoked
+permission, …) it throws a `SingBoxStartException` whose `message` is the
+exact sing-box error; if the tunnel is still connecting after `timeout`
+(30 s by default) it throws a `SingBoxTimeoutException` and leaves the tunnel
+connecting. Pass `waitUntilConnected: false` to return as soon as the start
+was requested and follow `watchConnectionState()` instead.
+
+Start and stop requests are executed in order, so rapid toggling always
+ends in the state of the last call: a `connect()` that is still waiting when
+`disconnect()` or another `connect()` is called throws a
+`SingBoxCancelledException` (usually safe to ignore).
+
 `connect()` asks for the VPN permission when needed (pass
 `requestPermission: false` to handle it yourself with
 `hasVpnPermission()` / `requestVpnPermission()`). On Android 13+ also call
@@ -419,6 +432,9 @@ Every failure is a `SingBoxException` with a `code`:
 | --- | --- |
 | `SingBoxConfigException` | Invalid input or the config was rejected by sing-box (message = sing-box error) |
 | `SingBoxPermissionException` | VPN permission / profile not granted |
+| `SingBoxStartException` | The tunnel failed to start or stopped before it connected (message = sing-box error) |
+| `SingBoxTimeoutException` | `connect()` timed out while the tunnel was still connecting |
+| `SingBoxCancelledException` | A waiting `connect()` was superseded by `disconnect()` or another `connect()` |
 | `SingBoxServiceNotRunningException` | The operation needs a running tunnel |
 | `SingBoxUnsupportedException` | Not available on this platform |
 | `SingBoxNotInitializedException` | `initialize()` was not called |
