@@ -268,6 +268,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
                     ServiceState.update {
                         it.copy(status = ServiceStatus.Started, startedAt = now, error = null, generation = it.generation + 1)
                     }
+                    notification.refresh()
                     notification.startTrafficUpdates()
                     updateIdleMode()
                 }

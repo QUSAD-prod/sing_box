@@ -106,14 +106,54 @@ await SingBox.instance.initialize(const SingBoxOptions(
 * The service declares `SUPPORTS_ALWAYS_ON`. Send users to the system page
   with `openVpnSettings()` to enable *Always-on VPN* / *Block connections
   without VPN*. The system then starts the service with the last
-  configuration, also without the Flutter engine.
+  configuration (after boot and after app updates), also without the Flutter
+  engine. Under *Block connections without VPN* the notification has no Stop
+  action, since stopping would cut the device off.
 * `SingBoxSettings.startOnBoot` (or `setServiceOptions(startOnBoot: true)`)
   starts the VPN after `BOOT_COMPLETED` when the VPN permission is granted,
   and after an app update when the VPN was running before.
 * `SingBoxSettings.quickSettingsTile` enables a tile that toggles the VPN with
   the last configuration and shows its state; `requestAddQuickSettingsTile()`
   asks the user to add it (Android 13+). When the permission is missing the
-  tile opens the app.
+  tile opens the app. The system refreshes the tile while the Quick Settings
+  panel is open.
+* Closing the app (Back, swiping it away from Recents) keeps the VPN
+  running; when the app is opened again `initialize()` reports the running
+  tunnel as `connected`.
+* Configurations with `wifi_ssid` / `wifi_bssid` rules need location
+  permissions to read the Wi-Fi name; after a boot or Always-on start (no
+  visible Activity) Android only grants that with background location access.
+
+### Checking the lifecycle on a device
+
+`example/lib/e2e_harness.dart` is a tiny entry point for these scenarios. It
+connects through a `direct` outbound (no server needed) and prints every state
+change to logcat:
+
+```bash
+cd example
+flutter build apk --debug -t lib/e2e_harness.dart \
+  --dart-define=HARNESS_ACTION=connect \
+  --dart-define=HARNESS_TILE=true --dart-define=HARNESS_START_ON_BOOT=true
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n com.qusadprod.sing_box_example/.MainActivity
+adb logcat -s flutter | grep SING_BOX_HARNESS
+
+# Quick Settings tile (open the panel first so the tile shows the current state)
+TILE=com.qusadprod.sing_box_example/com.qusadprod.sing_box.service.SingBoxTileService
+adb shell cmd statusbar add-tile $TILE
+adb shell cmd statusbar expand-settings
+adb shell cmd statusbar click-tile $TILE
+
+# Boot start; is the tunnel up?
+adb reboot
+adb shell ip addr show tun0
+```
+
+On an emulator Always-on VPN with lockdown can be set with
+`adb shell settings put secure always_on_vpn_app com.qusadprod.sing_box_example`
+and `adb shell settings put secure always_on_vpn_lockdown 1` followed by a
+reboot (wait a few seconds after `settings put`, the value is written lazily).
 
 ## Metered networks
 

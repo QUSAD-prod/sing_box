@@ -56,7 +56,7 @@ Arguments (map):
 | `notificationContent` | String? | `"Connected"`; the service may append traffic speed |
 | `notificationIcon` | String? | drawable resource name in the host app, e.g. `"ic_vpn"`; falls back to the app icon |
 | `showTrafficInNotification` | bool | `true` - updates the notification with ↑/↓ speed every second |
-| `showStopAction` | bool | `true` - adds a "Stop" action button |
+| `showStopAction` | bool | `true` - adds a "Stop" action button (never shown under Always-on lockdown) |
 | `stopActionTitle` | String | `"Stop"` |
 | `sessionName` | String? | `VpnService.Builder.setSession`, defaults to the app label |
 

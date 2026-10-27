@@ -110,7 +110,11 @@ class SingBoxTileService : TileService() {
             context.packageManager.getComponentEnabledSetting(component(context)) ==
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED
 
-        /** Asks the system to bind the tile so it can show the new state. */
+        /**
+         * Asks the system to bind the tile so it can show the new state. SystemUI
+         * may ignore this for tiles that are not active tiles (verified on
+         * Android 17); they refresh in [onStartListening] when the panel opens.
+         */
         internal fun requestUpdate(context: Context) {
             runCatching { requestListeningState(context.applicationContext, component(context)) }
         }

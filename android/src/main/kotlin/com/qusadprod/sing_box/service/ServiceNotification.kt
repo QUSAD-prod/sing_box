@@ -51,6 +51,20 @@ internal class ServiceNotification(
         service.startForeground(NOTIFICATION_ID, builder().setContentText(options.content).build())
     }
 
+    /**
+     * Rebuilds the notification once the tunnel is up. `isLockdownEnabled()`
+     * is only true for an established VPN, so the notification shown by [show]
+     * (before `establish()`) still carries the Stop action under lockdown.
+     */
+    fun refresh() {
+        if (closed) return
+        builder = null
+        runCatching {
+            @Suppress("MissingPermission")
+            manager.notify(NOTIFICATION_ID, builder().setContentText(options.content).build())
+        }.onFailure { Log.v(TAG, "update notification: ${it.message}") }
+    }
+
     /** Starts live ↑/↓ updates once the service is connected. */
     fun startTrafficUpdates() {
         if (!options.showTraffic || trafficSession != null) return
