@@ -23,6 +23,14 @@ Status: IN PROGRESS (2026-10-27) — design done, writing sources.
 - Notifications: extension posts local notification + appends to app-group defaults
   `sing_box.pending_notifications` + Darwin notify `<appGroup>.sing_box.notification`.
 
+## Lead's pitfall list (flutter_vless) — must address + document
+1. "Cycle inside Runner": "Embed Foundation Extensions" phase must precede Flutter "Thin Binary"/"Run Script".
+2. SPM: link tunnel product via Flutter's `ios/Flutter/ephemeral/Packages/.packages/sing_box` (identity = folder name); document path.
+3. Fail loudly when app group container nil; log + return resolved appGroup/tunnelBundleIdentifier in initialize result.
+4. cancelTunnelWithError on ServiceStop + reload failures; sleep/wake -> pause/wake; NWPathMonitor default iface.
+5. with_low_memory + oomKillerEnabled in SetupOptions; no big Swift buffers.
+6. Keep async startTunnel simple (no fatalError guards).
+
 ## Next steps
 1. Write sources + Package.swift + podspecs.
 2. `flutter build ios --config-only` in example, inspect ephemeral/Packages.

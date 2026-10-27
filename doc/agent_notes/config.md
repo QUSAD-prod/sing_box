@@ -1,6 +1,8 @@
 # Config module agent notes (lib/src/config/**, test/config/**)
 
-Status: IN PROGRESS — research done, writing code now.
+Status: IN PROGRESS — writing code. Done on disk: config.dart (barrel), config_options.dart, routing_rules.dart,
+rule_sets.dart, dns_server.dart, outbound.dart, internal/json_utils.dart, internal/uri_parts.dart.
+TODO: share_link.dart (+internal/link_parser.dart, link_writer.dart, subscription.dart), config_builder.dart, tests.
 
 ## Binary
 - sing-box CLI (v1.14 source checkout, tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api):
@@ -32,6 +34,14 @@ Status: IN PROGRESS — research done, writing code now.
 - tun 1.14: connections to the tun DNS address are hijacked automatically; we still add a hijack-dns rule (protocol dns OR port 53).
 - Clash mode manager exists in libbox regardless; clash_api without external_controller does not listen.
 - Endpoints (wireguard) can be referenced by selector/urltest tags.
+
+## Design decisions (implemented)
+- DNS tags: dns-remote (detour proxy, final), dns-direct (route.default_domain_resolver), dns-fakeip, dns-local (bootstrap
+  for a hostname-based direct server), custom rules.dnsServers -> dns-remote, dns-remote-2...
+- Rule-sets: one remote binary def per tag, http_client = top-level http_clients tag 'rule-set-download'
+  (no detour when ruleSetDownloadDetour == direct). URL templates with {tag} in SingBoxConfigOptions.
+- Countries: SingBoxRuleSets.countryRuleSets(cc) -> curated geosite (cn, ru->category-ru, ir->category-ir) + geoip-cc.
+- Blocked domains in DNS: predefined NXDOMAIN.
 
 ## Next steps
 1. Write lib files + barrel. 2. Tests. 3. format/analyze/test + sing-box check. 4. Final report.

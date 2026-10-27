@@ -1,1211 +1,536 @@
 # sing_box
 
-A Flutter plugin for sing-box, providing platform-specific implementations for Android and iOS.
+[![pub package](https://img.shields.io/pub/v/sing_box.svg)](https://pub.dev/packages/sing_box)
+[![likes](https://img.shields.io/pub/likes/sing_box)](https://pub.dev/packages/sing_box/score)
+[![platform](https://img.shields.io/badge/platform-android%20%7C%20ios-blue)](#platform-support)
+[![sing-box](https://img.shields.io/badge/sing--box-1.14.4-informational)](https://github.com/SagerNet/sing-box)
 
-> **⚠️ Warning**: This is an unstable project currently under testing. The API may change, and there may be bugs. Any help, feedback, and contributions are welcome!
+A Flutter VPN plugin powered by [sing-box](https://sing-box.sagernet.org), the
+universal proxy platform. It runs the official sing-box core (`libbox`) inside
+an Android `VpnService` and an iOS Packet Tunnel Network Extension and exposes
+everything a VPN client app needs through a typed Dart API.
+
+```dart
+await SingBox.instance.initialize();
+await SingBox.instance.connect('vless://…@example.com:443?security=reality&…#My server');
+SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpeed} B/s'));
+```
 
 ## Features
 
-- ✅ Platform-specific implementations for Android and iOS
-- ✅ VPN connection management (connect/disconnect)
-- ✅ Connection status monitoring (real-time Stream)
-- ✅ Connection statistics (speed, bytes sent/received, ping, connection duration)
-- ✅ Speed testing
-- ✅ Ping measurement (current server)
-- ✅ App and domain bypass management
-- ✅ Subnet bypass management (CIDR notation)
-- ✅ DNS servers management
-- ✅ Server switching
-- ✅ Settings persistence (auto-connect, auto-reconnect, kill switch)
-- ✅ Multiple server configurations with different protocols
-- ✅ Blocked apps and domains management
-- ✅ Observer pattern for logging (with Talker integration support)
-- ✅ Notifications from sing-box
+- **All sing-box protocols**: VLESS (Reality, Vision), VMess, Trojan, Shadowsocks
+  (incl. 2022 and plugins), Hysteria / Hysteria2, TUIC, WireGuard, AnyTLS,
+  ShadowTLS, SOCKS, HTTP, SSH and more, with WebSocket, gRPC, HTTP/2,
+  HTTPUpgrade and QUIC transports, uTLS fingerprints and multiplexing.
+- **Share links and subscriptions**: import `vless://`, `vmess://`, `trojan://`,
+  `ss://`, `hysteria2://`, `tuic://`, `socks://`, `http://` links and base64
+  subscriptions; export profiles back to links.
+- **Config generation**: a complete, validated sing-box 1.14 configuration
+  (TUN, DNS, routing, URL test groups, cache, clash API) is generated from a
+  link or outbound - or bring your own full config.
+- **Connection control**: connect, disconnect, reload in place, instant server
+  switching without reconnecting, automatic best-server selection (URL test).
+- **Live data streams**: status with error reasons and session start time,
+  traffic speed and totals, core logs, outbound groups with latencies,
+  active connections (close individually), clash mode.
+- **Tests**: real latency (HTTP through the proxy, not ICMP), speed test
+  (download/upload capacity and responsiveness, RFC-style network quality),
+  STUN NAT type / UDP test.
+- **Routing rules**: bypass or block apps (Android), domains and subnets,
+  "only these apps use the VPN", bypass LAN, bypass whole countries (geoip /
+  geosite rule-sets), ad blocking, custom DNS (UDP, TCP, DoT, DoH, DoQ, DoH3).
+- **Persistence**: settings, server profiles and routing rules are stored
+  natively and applied automatically.
+- **Platform integration**: Android foreground notification with live speed
+  and a Stop button, Quick Settings tile, start on boot, Always-on VPN support;
+  iOS VPN On Demand (auto reconnect) and `includeAllNetworks` kill switch.
+- **Diagnostics**: typed exceptions with the exact sing-box error message,
+  observer hooks (with a [Talker](https://pub.dev/packages/talker) adapter).
 
-## Requirements
+## Platform support
 
-### Minimum Versions
+| | Android | iOS |
+| --- | --- | --- |
+| Minimum version | 7.0 (API 24) | 15.0 |
+| VPN mechanism | `VpnService` (foreground service) | Packet Tunnel Network Extension |
+| Per-app routing | ✅ | ❌ (requires MDM) |
+| Kill switch | System setting (*Block connections without VPN*) | `includeAllNetworks` |
+| Auto reconnect | Always-on VPN / sticky service | VPN On Demand |
+| Start on boot | ✅ | via On Demand |
+| Quick Settings tile | ✅ (Android 7+, add prompt on 13+) | – |
+| Simulator / emulator | Emulator: full support | Simulator: UI only, Network Extensions do not run |
 
-- **Android**: API 23+ (Android 6.0+)
-- **iOS**: iOS 15.0+
-- **Flutter**: 3.3.0 or higher
-
-### Development Tools
-
-- **Flutter SDK**: Install Flutter SDK (version 3.3.0 or higher)
-- **Android Studio / Xcode**: For Android/iOS development
-- **Physical Device or Emulator**: VPN functionality requires a real device or emulator
+The bundled core is **sing-box 1.14.4** built with `with_gvisor`, `with_quic`,
+`with_wireguard`, `with_utls`, `with_clash_api` (Apple adds `with_dhcp` and
+`with_low_memory`). Tailscale, naive and other heavy components are not
+included; see [Building libbox](#building-libbox-yourself).
 
 ## Installation
 
-### Add Dependency
-
-Add this to your package's `pubspec.yaml` file:
-
 ```yaml
 dependencies:
-  sing_box: ^0.0.1
+  sing_box: ^0.1.0
 ```
 
-Then run:
+The native libraries (~85 MB AAR, ~200 MB XCFramework) are too large for
+pub.dev. They are downloaded automatically on the first build from this
+repository's [GitHub releases](https://github.com/QUSAD-prod/sing_box/releases)
+and verified with SHA-256:
 
-```bash
-flutter pub get
-```
+- **Android**: by Gradle, cached in `~/.gradle/caches/sing_box/`.
+- **iOS (Swift Package Manager)**: by SwiftPM as a binary target.
+- **iOS (CocoaPods)**: by the podspec during `pod install`, cached in
+  `~/Library/Caches/sing_box/`.
 
-### Platform Setup
+Offline or custom builds: see [Using your own libbox build](#using-your-own-libbox-build).
 
-#### Android
+### Android setup
 
-1. **Minimum SDK**: Android API 23 (Android 6.0) or higher
+Nothing is required for a basic setup: the plugin declares the VPN service,
+the foreground service type, and the permissions it needs (`INTERNET`,
+`ACCESS_NETWORK_STATE`, `CHANGE_NETWORK_STATE`, `ACCESS_WIFI_STATE`,
+`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SYSTEM_EXEMPTED`,
+`POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`).
 
-2. **Permissions**: The plugin automatically declares required permissions in `AndroidManifest.xml`:
-   - `INTERNET`
-   - `BIND_VPN_SERVICE`
-   - `FOREGROUND_SERVICE`
-   - `POST_NOTIFICATIONS`
-   - `ACCESS_NETWORK_STATE`
-   - `ACCESS_WIFI_STATE`
+Recommended:
 
-3. **VPN Permission**: The plugin will request VPN permission when you call `connect()`. The user must grant this permission for VPN to work.
+1. **minSdk 24** (the Flutter default).
+2. **Notification icon**: add a monochrome vector drawable, e.g.
+   `android/app/src/main/res/drawable/ic_vpn.xml`, and pass
+   `SingBoxAndroidOptions(notificationIcon: 'ic_vpn')`.
+3. **App size**: libbox is ~60 MB per ABI. Publish an App Bundle
+   (`flutter build appbundle`) or split APKs per ABI
+   (`flutter build apk --split-per-abi`); you can also drop ABIs you do not
+   need with `ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }`.
+4. **Wi-Fi rules**: sing-box rules that match Wi-Fi SSID/BSSID need location
+   permissions (`ACCESS_FINE_LOCATION`, and `ACCESS_BACKGROUND_LOCATION` on
+   Android 10+), which the plugin intentionally does not declare.
 
-#### iOS
+See [doc/android.md](doc/android.md) for details (Always-on VPN, ProGuard,
+offline builds).
 
-1. **Minimum iOS Version**: iOS 15.0 or higher
+### iOS setup
 
-2. **Download Libbox.xcframework**: 
-   
-   The iOS framework (`Libbox.xcframework`) is distributed via GitHub Releases due to size limitations. You need to download it manually:
-   
-   **Option 1: Using the installation script (recommended)**
-   ```bash
-   # In your Flutter project root
-   # Note: Requires git-lfs (install with: brew install git-lfs)
-   curl -L https://raw.githubusercontent.com/qusadprod/sing_box/main/install_ios_framework.sh | bash
+A VPN on iOS runs in a separate **Packet Tunnel Network Extension** process,
+so the host app needs an extra target. This requires a paid Apple Developer
+account (the Network Extension capability is not available to free personal
+teams), and VPN tunnels do not run in the iOS Simulator.
+
+1. **App Group** - in the Apple Developer portal (or Xcode → Signing &
+   Capabilities) create an App Group, e.g. `group.com.example.myapp`.
+2. **Runner target** → *Signing & Capabilities*: add **Network Extensions**
+   (check *Packet Tunnel*) and **App Groups** (select your group).
+3. **Create the extension**: Xcode → *File → New → Target… → Network
+   Extension*, name it `PacketTunnel`, provider type *Packet Tunnel*,
+   language Swift. Its bundle id must be `<app bundle id>.PacketTunnel`
+   (or pass another one in `SingBoxIosOptions.tunnelBundleIdentifier`). Set
+   its deployment target to the same version as Runner (15.0+) and add the
+   same two capabilities with the same App Group.
+4. **Fix the build phase order** of the Runner target: drag *Embed Foundation
+   Extensions* above *Thin Binary* (otherwise Xcode reports
+   *"Cycle inside Runner"*).
+5. **Link the tunnel library** to the extension target:
+   - *Swift Package Manager* (Flutter's default): in the `PacketTunnel` target
+     → *General → Frameworks and Libraries* → **+** → choose `SingBoxTunnel`.
+   - *CocoaPods*: add to `ios/Podfile` and run `pod install`:
+     ```ruby
+     target 'PacketTunnel' do
+       use_frameworks!
+       pod 'SingBoxTunnel', :path => '.symlinks/plugins/sing_box/ios'
+     end
+     ```
+6. **Replace the generated `PacketTunnelProvider.swift`** with:
+   ```swift
+   import SingBoxTunnel
+
+   class PacketTunnelProvider: SingBoxPacketTunnelProvider {}
    ```
-   
-   **Option 2: Manual installation**
-   ```bash
-   # Clone repository (shallow clone to save time)
-   git clone --depth=1 https://github.com/qusadprod/sing_box.git temp_repo
-   
-   # Copy framework
-   mkdir -p ios/Frameworks
-   cp -R temp_repo/ios/Frameworks/Libbox.xcframework ios/Frameworks/
-   
-   # Cleanup
-   rm -rf temp_repo
-   ```
+7. In the extension's `Info.plist` add `SingBoxAppGroup` with your App Group id
+   (a fallback for system-initiated starts).
 
-3. **Network Extension**: The plugin uses Network Extension for VPN functionality. You need to:
-   - Enable Network Extension capability in Xcode
-   - Configure App Groups for communication between main app and extension
-   - The extension is automatically configured during build
+The defaults match these conventions (`group.<bundle id>` and
+`<bundle id>.PacketTunnel`); otherwise pass them explicitly:
 
-4. **Permissions**: The plugin automatically handles required permissions.
-
-## Quick Start
-
-### 1. Initialize Plugin
-
-The plugin uses Singleton pattern and must be initialized before using other methods, preferably before application start:
-
-```dart
-import 'package:flutter/widgets.dart';
-import 'package:sing_box/sing_box.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize plugin
-  await SingBox.instance.initialize();
-  
-  runApp(MyApp());
-}
-```
-
-### 2. Basic Connection
-
-```dart
-import 'package:sing_box/sing_box.dart';
-
-final singBox = SingBox.instance;
-
-// Connect to VPN with JSON configuration
-final config = '''
-{
-  "outbounds": [
-    {
-      "type": "vmess",
-      "tag": "proxy",
-      "server": "example.com",
-      "server_port": 443,
-      "uuid": "your-uuid-here",
-      "security": "auto"
-    }
-  ]
-}
-''';
-
-final connected = await singBox.connect(config);
-if (connected) {
-  print('Connected successfully!');
-}
-
-// Disconnect
-await singBox.disconnect();
-```
-
-### 3. Monitor Connection Status
-
-```dart
-// Listen to connection status changes
-singBox.watchSingBoxConnectionStatus().listen((status) {
-  print('Status: ${status.name}');
-  // Status values: disconnected, connecting, connected, disconnecting, 
-  // disconnectedByUser, connectionLost, error
-});
-```
-
-### 4. Monitor Statistics
-
-```dart
-// Listen to connection statistics in real-time
-singBox.watchSingBoxConnectionStats().listen((stats) {
-  print('Download: ${stats.downloadSpeed} B/s');
-  print('Upload: ${stats.uploadSpeed} B/s');
-  print('Ping: ${stats.ping} ms');
-  print('Duration: ${stats.connectionDuration} ms');
-});
-```
-
-## API Documentation
-
-### Initialization
-
-#### `initialize()`
-
-Initialize the plugin. Must be called before using other methods.
-
-```dart
-Future<bool> initialize()
-```
-
-**Returns**: `true` if initialization successful, `false` otherwise.
-
-**Example**:
-```dart
-final success = await SingBox.instance.initialize();
-```
-
----
-
-### Platform Information
-
-#### `getPlatformVersion()`
-
-Get the platform version string.
-
-```dart
-Future<String?> getPlatformVersion()
-```
-
-**Returns**: Platform version string (e.g., "Android 12" or "iOS 15.0").
-
-**Example**:
-```dart
-final version = await singBox.getPlatformVersion();
-print('Platform: $version');
-```
-
----
-
-### VPN Connection
-
-#### `connect(String config)`
-
-Connect to VPN with specified configuration.
-
-```dart
-Future<bool> connect(String config)
-```
-
-**Parameters**:
-- `config` (String): JSON string with server configuration (sing-box format)
-
-**Returns**: `true` if connection started successfully, `false` otherwise.
-
-**Example**:
-```dart
-final config = '{"outbounds": [{"type": "vmess", ...}]}';
-final connected = await singBox.connect(config);
-```
-
-**Note**: On Android, this will request VPN permission if not already granted.
-
-#### `disconnect()`
-
-Disconnect from VPN.
-
-```dart
-Future<bool> disconnect()
-```
-
-**Returns**: `true` if disconnection started successfully, `false` otherwise.
-
-**Example**:
-```dart
-await singBox.disconnect();
-```
-
-#### `getConnectionStatus()`
-
-Get current connection status.
-
-```dart
-Future<SingBoxConnectionStatus> getConnectionStatus()
-```
-
-**Returns**: Current connection status enum.
-
-**Status Values**:
-- `disconnected` - Not connected
-- `connecting` - Connecting in progress
-- `connected` - Connected
-- `disconnecting` - Disconnecting in progress
-- `disconnectedByUser` - Disconnected by user
-- `connectionLost` - Connection lost with server
-- `error` - Connection error
-
-**Example**:
-```dart
-final status = await singBox.getConnectionStatus();
-if (status == SingBoxConnectionStatus.connected) {
-  print('VPN is connected');
-}
-```
-
-#### `watchSingBoxConnectionStatus()`
-
-Subscribe to connection status changes. Returns a Stream that emits status updates.
-
-```dart
-Stream<SingBoxConnectionStatus> watchSingBoxConnectionStatus()
-```
-
-**Returns**: Stream of connection status updates.
-
-**Example**:
-```dart
-singBox.watchSingBoxConnectionStatus().listen((status) {
-  switch (status) {
-    case SingBoxConnectionStatus.connected:
-      print('Connected!');
-      break;
-    case SingBoxConnectionStatus.disconnected:
-      print('Disconnected');
-      break;
-    // ... other cases
-  }
-});
-```
-
----
-
-### Connection Statistics
-
-#### `getConnectionStats()`
-
-Get current connection statistics.
-
-```dart
-Future<SingBoxConnectionStats> getConnectionStats()
-```
-
-**Returns**: `SingBoxConnectionStats` object with:
-- `downloadSpeed` (int): Current download speed in bytes per second
-- `uploadSpeed` (int): Current upload speed in bytes per second
-- `bytesSent` (int): Total bytes sent
-- `bytesReceived` (int): Total bytes received
-- `ping` (int?): Current ping in milliseconds (nullable)
-- `connectionDuration` (int): Connection duration in milliseconds
-
-**Example**:
-```dart
-final stats = await singBox.getConnectionStats();
-print('Download: ${stats.downloadSpeed} B/s');
-print('Upload: ${stats.uploadSpeed} B/s');
-print('Ping: ${stats.ping} ms');
-```
-
-#### `watchSingBoxConnectionStats()`
-
-Subscribe to connection statistics changes. Returns a Stream that emits statistics updates every second.
-
-```dart
-Stream<SingBoxConnectionStats> watchSingBoxConnectionStats()
-```
-
-**Returns**: Stream of connection statistics updates.
-
-**Example**:
-```dart
-singBox.watchSingBoxConnectionStats().listen((stats) {
-  // Update UI with real-time statistics
-  setState(() {
-    downloadSpeed = stats.downloadSpeed;
-    uploadSpeed = stats.uploadSpeed;
-    ping = stats.ping;
-  });
-});
-```
-
----
-
-### Speed Testing
-
-#### `testSpeed()`
-
-Measure connection speed.
-
-```dart
-Future<SingBoxSpeedTestResult> testSpeed()
-```
-
-**Returns**: `SingBoxSpeedTestResult` with:
-- `downloadSpeed` (int): Download speed in bytes per second
-- `uploadSpeed` (int): Upload speed in bytes per second
-- `success` (bool): Whether test was successful
-- `errorMessage` (String?): Error message if test failed
-
-**Example**:
-```dart
-final result = await singBox.testSpeed();
-if (result.success) {
-  print('Download: ${result.downloadSpeed} B/s');
-  print('Upload: ${result.uploadSpeed} B/s');
-} else {
-  print('Error: ${result.errorMessage}');
-}
-```
-
----
-
-### Ping
-
-#### `pingCurrentServer()`
-
-Measure ping to current server.
-
-```dart
-Future<SingBoxPingResult> pingCurrentServer()
-```
-
-**Returns**: `SingBoxPingResult` with:
-- `ping` (int): Ping in milliseconds
-- `success` (bool): Whether ping was successful
-- `errorMessage` (String?): Error message if ping failed
-- `address` (String?): Server address
-
-**Example**:
-```dart
-final result = await singBox.pingCurrentServer();
-if (result.success) {
-  print('Ping: ${result.ping} ms to ${result.address}');
-} else {
-  print('Error: ${result.errorMessage}');
-}
-```
-
----
-
-### Bypass Management
-
-#### `addAppToBypass(String packageName)`
-
-Add app to bypass list (app will not use VPN).
-
-```dart
-Future<bool> addAppToBypass(String packageName)
-```
-
-**Parameters**:
-- `packageName` (String): App package name (Android) or bundle ID (iOS)
-
-**Returns**: `true` if added successfully, `false` otherwise.
-
-**Example**:
-```dart
-await singBox.addAppToBypass('com.example.app');
-```
-
-#### `removeAppFromBypass(String packageName)`
-
-Remove app from bypass list.
-
-```dart
-Future<bool> removeAppFromBypass(String packageName)
-```
-
-**Example**:
-```dart
-await singBox.removeAppFromBypass('com.example.app');
-```
-
-#### `getBypassApps()`
-
-Get list of apps in bypass.
-
-```dart
-Future<List<String>> getBypassApps()
-```
-
-**Returns**: List of package names/bundle IDs.
-
-**Example**:
-```dart
-final apps = await singBox.getBypassApps();
-print('Bypass apps: $apps');
-```
-
-#### `addDomainToBypass(String domain)`
-
-Add domain/site to bypass list (domain will not use VPN).
-
-```dart
-Future<bool> addDomainToBypass(String domain)
-```
-
-**Parameters**:
-- `domain` (String): Domain name or IP address
-
-**Example**:
-```dart
-await singBox.addDomainToBypass('example.com');
-```
-
-#### `removeDomainFromBypass(String domain)`
-
-Remove domain from bypass list.
-
-```dart
-Future<bool> removeDomainFromBypass(String domain)
-```
-
-#### `getBypassDomains()`
-
-Get list of domains in bypass.
-
-```dart
-Future<List<String>> getBypassDomains()
-```
-
-**Example**:
-```dart
-final domains = await singBox.getBypassDomains();
-```
-
-#### `addSubnetToBypass(String subnet)`
-
-Add subnet to bypass list (subnet will not use VPN).
-
-```dart
-Future<bool> addSubnetToBypass(String subnet)
-```
-
-**Parameters**:
-- `subnet` (String): Subnet in CIDR notation (e.g., "192.168.1.0/24", "10.0.0.0/8")
-
-**Example**:
-```dart
-await singBox.addSubnetToBypass('192.168.1.0/24');
-await singBox.addSubnetToBypass('10.0.0.0/8');
-```
-
-#### `removeSubnetFromBypass(String subnet)`
-
-Remove subnet from bypass list.
-
-```dart
-Future<bool> removeSubnetFromBypass(String subnet)
-```
-
-#### `getBypassSubnets()`
-
-Get list of subnets in bypass.
-
-```dart
-Future<List<String>> getBypassSubnets()
-```
-
-**Example**:
-```dart
-final subnets = await singBox.getBypassSubnets();
-```
-
----
-
-### DNS Servers Management
-
-#### `addDnsServer(String dnsServer)`
-
-Add DNS server.
-
-```dart
-Future<bool> addDnsServer(String dnsServer)
-```
-
-**Parameters**:
-- `dnsServer` (String): DNS server IP address (e.g., "8.8.8.8", "1.1.1.1")
-
-**Example**:
-```dart
-await singBox.addDnsServer('8.8.8.8'); // Google DNS
-await singBox.addDnsServer('1.1.1.1'); // Cloudflare DNS
-```
-
-#### `removeDnsServer(String dnsServer)`
-
-Remove DNS server.
-
-```dart
-Future<bool> removeDnsServer(String dnsServer)
-```
-
-#### `getDnsServers()`
-
-Get list of DNS servers.
-
-```dart
-Future<List<String>> getDnsServers()
-```
-
-**Example**:
-```dart
-final dnsServers = await singBox.getDnsServers();
-```
-
-#### `setDnsServers(List<String> dnsServers)`
-
-Set DNS servers (replaces all existing DNS servers).
-
-```dart
-Future<bool> setDnsServers(List<String> dnsServers)
-```
-
-**Parameters**:
-- `dnsServers` (List<String>): List of DNS server IP addresses
-
-**Example**:
-```dart
-await singBox.setDnsServers(['8.8.8.8', '8.8.4.4']);
-```
-
----
-
-### Server Switching
-
-#### `switchServer(String config)`
-
-Switch current server. Stops current connection, changes configuration and connects to new server.
-
-```dart
-Future<bool> switchServer(String config)
-```
-
-**Parameters**:
-- `config` (String): JSON string with new server configuration
-
-**Example**:
-```dart
-final newConfig = '{"outbounds": [{"type": "vless", ...}]}';
-final switched = await singBox.switchServer(newConfig);
-```
-
----
-
-### Settings Management
-
-#### `saveSettings(SingBoxSettings settings)`
-
-Save settings.
-
-```dart
-Future<bool> saveSettings(SingBoxSettings settings)
-```
-
-**Parameters**:
-- `settings` (SingBoxSettings): Settings object to save
-
-**Example**:
-```dart
-final settings = SingBoxSettings(
-  autoConnectOnStart: true,
-  autoReconnectOnDisconnect: true,
-  killSwitch: true,
-);
-await singBox.saveSettings(settings);
-```
-
-#### `loadSettings()`
-
-Load settings.
-
-```dart
-Future<SingBoxSettings> loadSettings()
-```
-
-**Returns**: `SingBoxSettings` object.
-
-**Example**:
-```dart
-final settings = await singBox.loadSettings();
-```
-
-#### `getSettings()`
-
-Get current settings.
-
-```dart
-Future<SingBoxSettings> getSettings()
-```
-
-**Example**:
-```dart
-final settings = await singBox.getSettings();
-```
-
-#### `updateSetting(String key, dynamic value)`
-
-Update individual setting parameter.
-
-```dart
-Future<bool> updateSetting(String key, dynamic value)
-```
-
-**Parameters**:
-- `key` (String): Parameter key (`autoConnectOnStart`, `autoReconnectOnDisconnect`, `killSwitch`)
-- `value` (dynamic): Parameter value
-
-**Example**:
-```dart
-await singBox.updateSetting('autoConnectOnStart', true);
-await singBox.updateSetting('killSwitch', false);
-```
-
-**Settings Keys**:
-- `autoConnectOnStart` (bool): Automatically connect on application start
-- `autoReconnectOnDisconnect` (bool): Automatically reconnect on connection loss
-- `killSwitch` (bool): Block all internet when VPN is disconnected
-
----
-
-### Server Configurations Management
-
-#### `addServerConfig(SingBoxServerConfig config)`
-
-Add server configuration.
-
-```dart
-Future<bool> addServerConfig(SingBoxServerConfig config)
-```
-
-**Parameters**:
-- `config` (SingBoxServerConfig): Server configuration object
-
-**Example**:
-```dart
-final config = SingBoxServerConfig(
-  id: 'server1-vmess',
-  name: 'Server 1 - VMESS',
-  config: '{"outbounds": [{"type": "vmess", ...}]}',
-  protocol: 'vmess',
-  server: 'server1.com',
-  port: 443,
-);
-await singBox.addServerConfig(config);
-```
-
-#### `removeServerConfig(String configId)`
-
-Remove server configuration.
-
-```dart
-Future<bool> removeServerConfig(String configId)
-```
-
-**Parameters**:
-- `configId` (String): Configuration identifier
-
-**Example**:
-```dart
-await singBox.removeServerConfig('server1-vmess');
-```
-
-#### `updateServerConfig(SingBoxServerConfig config)`
-
-Update server configuration.
-
-```dart
-Future<bool> updateServerConfig(SingBoxServerConfig config)
-```
-
-**Example**:
-```dart
-final updatedConfig = config.copyWith(name: 'Updated Name');
-await singBox.updateServerConfig(updatedConfig);
-```
-
-#### `getServerConfigs()`
-
-Get all server configurations.
-
 ```dart
-Future<List<SingBoxServerConfig>> getServerConfigs()
-```
-
-**Returns**: List of server configurations.
-
-**Example**:
-```dart
-final configs = await singBox.getServerConfigs();
-for (final config in configs) {
-  print('${config.name} (${config.protocol})');
-}
-```
-
-#### `getServerConfig(String configId)`
-
-Get server configuration by ID.
-
-```dart
-Future<SingBoxServerConfig?> getServerConfig(String configId)
-```
-
-**Returns**: Server configuration or `null` if not found.
-
-**Example**:
-```dart
-final config = await singBox.getServerConfig('server1-vmess');
-if (config != null) {
-  print('Found: ${config.name}');
-}
-```
-
-#### `setActiveServerConfig(String configId)`
-
-Set active server configuration.
-
-```dart
-Future<bool> setActiveServerConfig(String configId)
-```
-
-**Parameters**:
-- `configId` (String): Configuration identifier (can be `null` to reset)
-
-**Example**:
-```dart
-await singBox.setActiveServerConfig('server1-vmess');
-```
-
-#### `getActiveSingBoxServerConfig()`
-
-Get active server configuration.
-
-```dart
-Future<SingBoxServerConfig?> getActiveSingBoxServerConfig()
-```
-
-**Returns**: Active server configuration or `null` if none is set.
-
-**Example**:
-```dart
-final activeConfig = await singBox.getActiveSingBoxServerConfig();
-if (activeConfig != null) {
-  print('Active: ${activeConfig.name}');
-}
-```
-
----
-
-### Blocked Apps and Domains
-
-#### `addBlockedApp(String packageName)`
-
-Add app to blocked list (app will not use VPN).
-
-```dart
-Future<bool> addBlockedApp(String packageName)
-```
-
-**Parameters**:
-- `packageName` (String): App package name (Android) or bundle ID (iOS)
-
-**Example**:
-```dart
-await singBox.addBlockedApp('com.banking.app');
-```
-
-#### `removeBlockedApp(String packageName)`
-
-Remove app from blocked list.
-
-```dart
-Future<bool> removeBlockedApp(String packageName)
-```
-
-#### `getBlockedApps()`
-
-Get list of blocked apps.
-
-```dart
-Future<List<String>> getBlockedApps()
-```
-
-**Example**:
-```dart
-final blockedApps = await singBox.getBlockedApps();
-```
-
-#### `addBlockedDomain(String domain)`
-
-Add domain/site to blocked list (domain will not use VPN).
-
-```dart
-Future<bool> addBlockedDomain(String domain)
-```
-
-**Parameters**:
-- `domain` (String): Domain name or IP address
-
-**Example**:
-```dart
-await singBox.addBlockedDomain('malicious-site.com');
-```
-
-#### `removeBlockedDomain(String domain)`
-
-Remove domain from blocked list.
-
-```dart
-Future<bool> removeBlockedDomain(String domain)
-```
-
-#### `getBlockedDomains()`
-
-Get list of blocked domains.
-
-```dart
-Future<List<String>> getBlockedDomains()
-```
-
-**Example**:
-```dart
-final blockedDomains = await singBox.getBlockedDomains();
-```
-
----
-
-### Notifications
-
-#### `watchNotifications()`
-
-Subscribe to notifications from sing-box. Returns a Stream that emits notification updates.
-
-```dart
-Stream<SingBoxNotification> watchNotifications()
-```
-
-**Returns**: Stream of notification updates.
-
-**Notification Properties**:
-- `identifier` (String): Notification identifier
-- `typeName` (String): Notification type name
-- `typeId` (int): Notification type ID
-- `title` (String): Notification title
-- `subtitle` (String): Notification subtitle
-- `body` (String): Notification body
-- `openUrl` (String?): URL to open when notification is tapped
-
-**Example**:
-```dart
-singBox.watchNotifications().listen((notification) {
-  print('Notification: ${notification.title}');
-  print('Body: ${notification.body}');
-  if (notification.openUrl != null) {
-    // Open URL
-  }
-});
-```
-
----
-
-### Observer Pattern
-
-#### `setObserver(SingBoxObserver observer)`
-
-Set observer for logging events.
-
-```dart
-void setObserver(SingBoxObserver observer)
-```
-
-**Example with Talker**:
-```dart
-import 'package:talker/talker.dart';
-import 'package:sing_box/sing_box.dart';
-import 'package:sing_box/src/observer/talker_observer.dart';
-
-final talker = Talker();
-final observer = SingBoxTalkerObserver(talker);
-SingBox.instance.setObserver(observer);
-```
-
-**Custom Observer**:
-```dart
-import 'package:sing_box/sing_box.dart';
-import 'package:sing_box/src/observer/sing_box_observer.dart';
-
-class MyObserver implements SingBoxObserver {
-  @override
-  void info(String message, [Map<String, dynamic>? data]) {
-    print('INFO: $message');
-  }
-  
-  @override
-  void warning(String message, [Map<String, dynamic>? data]) {
-    print('WARNING: $message');
-  }
-  
-  @override
-  void error(String message, [Object? error, StackTrace? stackTrace]) {
-    print('ERROR: $message');
-  }
-  
-  @override
-  void debug(String message, [Map<String, dynamic>? data]) {
-    print('DEBUG: $message');
-  }
-  
-  // Implement remaining methods...
-}
-
-SingBox.instance.setObserver(MyObserver());
+await SingBox.instance.initialize(const SingBoxOptions(
+  ios: SingBoxIosOptions(
+    appGroup: 'group.com.example.shared',
+    tunnelBundleIdentifier: 'com.example.myapp.VPN',
+    profileName: 'My VPN',
+  ),
+));
 ```
 
----
+The example app contains a complete, working setup. See
+[doc/ios.md](doc/ios.md) for a scripted setup, troubleshooting and memory
+notes.
 
-## Complete Example
+## Quick start
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:sing_box/sing_box.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize plugin
-  await SingBox.instance.initialize();
-  
-  runApp(MyApp());
+  await SingBox.instance.initialize(const SingBoxOptions(
+    android: SingBoxAndroidOptions(notificationTitle: 'My VPN'),
+  ));
+  runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
-  @override
-  _MyAppState createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
+Future<void> toggleVpn() async {
   final singBox = SingBox.instance;
-  SingBoxConnectionStatus _status = SingBoxConnectionStatus.disconnected;
-  SingBoxConnectionStats? _stats;
-
-  @override
-  void initState() {
-    super.initState();
-    
-    // Listen to status changes
-    singBox.watchSingBoxConnectionStatus().listen((status) {
-      setState(() {
-        _status = status;
-      });
-    });
-    
-    // Listen to statistics
-    singBox.watchSingBoxConnectionStats().listen((stats) {
-      setState(() {
-        _stats = stats;
-      });
-    });
-  }
-
-  Future<void> _connect() async {
-    final config = '''
-    {
-      "outbounds": [
-        {
-          "type": "vmess",
-          "tag": "proxy",
-          "server": "example.com",
-          "server_port": 443,
-          "uuid": "your-uuid-here",
-          "security": "auto"
-        }
-      ]
-    }
-    ''';
-    
-    await singBox.connect(config);
-  }
-
-  Future<void> _disconnect() async {
+  if (singBox.status.isActive) {
     await singBox.disconnect();
+    return;
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(title: Text('Sing-Box Example')),
-        body: Column(
-          children: [
-            Text('Status: ${_status.name}'),
-            if (_stats != null) ...[
-              Text('Download: ${_stats!.downloadSpeed} B/s'),
-              Text('Upload: ${_stats!.uploadSpeed} B/s'),
-              Text('Ping: ${_stats!.ping} ms'),
-            ],
-            ElevatedButton(
-              onPressed: _status == SingBoxConnectionStatus.connected 
-                  ? _disconnect 
-                  : _connect,
-              child: Text(_status == SingBoxConnectionStatus.connected 
-                  ? 'Disconnect' 
-                  : 'Connect'),
-            ),
-          ],
-        ),
-      ),
-    );
+  try {
+    // A share link, several links, a subscription, an outbound JSON object
+    // or a complete sing-box config.
+    await singBox.connect('ss://YWVzLTEyOC1nY206cGFzcw@203.0.113.1:8388#Demo');
+  } on SingBoxPermissionException {
+    // The user declined the VPN permission dialog.
+  } on SingBoxConfigException catch (e) {
+    // e.message is the exact error reported by sing-box.
   }
 }
 ```
 
-## Running the Example
-
-### Steps
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/qusadprod/sing_box.git
-   cd sing_box
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   flutter pub get
-   ```
-
-3. **Run on Android**:
-   ```bash
-   flutter run
-   ```
-   
-   Or specify device:
-   ```bash
-   flutter devices
-   flutter run -d <device-id>
-   ```
-
-4. **Run on iOS**:
-   ```bash
-   flutter run
-   ```
-
-   **Note**: For iOS, you may need to:
-   - Open `ios/Runner.xcworkspace` in Xcode
-   - Configure signing and capabilities
-   - Build and run from Xcode if needed
-
-### Building for Release
-
-#### Android Release Build
-
-```bash
-flutter build apk --release
-# or
-flutter build appbundle --release
+```dart
+StreamBuilder<SingBoxConnectionStatus>(
+  stream: SingBox.instance.watchConnectionStatus(),
+  builder: (context, snapshot) => Text(snapshot.data?.name ?? '…'),
+);
 ```
 
-#### iOS Release Build
+## Usage guide
 
-```bash
-flutter build ios --release
+### Initialization
+
+Call `initialize()` once before using the API, ideally in `main()`. It sets up
+the core, the Android notification channel and the iOS VPN profile, starts
+tracking the tunnel state (a tunnel that is already running is picked up
+automatically), applies the stored settings and, if
+`SingBoxSettings.autoConnectOnStart` is enabled, connects to the active
+server.
+
+```dart
+await SingBox.instance.initialize(const SingBoxOptions(
+  logMaxLines: 3000,
+  android: SingBoxAndroidOptions(
+    notificationTitle: 'My VPN',
+    notificationIcon: 'ic_vpn',
+    showTrafficInNotification: true,
+    stopActionTitle: 'Disconnect',
+  ),
+  ios: SingBoxIosOptions(profileName: 'My VPN'),
+));
 ```
 
-Then open Xcode and archive the app.
+### Connecting
+
+`connect()` accepts several kinds of input:
+
+| Input | Result |
+| --- | --- |
+| A share link (`vless://…`) | Parsed and wrapped into a complete config |
+| Several links / a base64 subscription | All servers in a `proxy` selector with an automatic `auto` (URL test) member |
+| An outbound JSON object | Wrapped into a complete config |
+| A JSON array of outbounds | Same as several links |
+| A complete sing-box config | Used as is, with your routing rules applied (`applyRules: false` to disable) |
+
+```dart
+await singBox.connect(link);
+await singBox.connect(jsonEncode({'type': 'trojan', 'tag': 'tr', 'server': 'example.com', 'server_port': 443, 'password': 'p', 'tls': {'enabled': true}}));
+await singBox.connect(myFullConfigJson, applyRules: false);
+
+await singBox.switchServer(otherLink); // reloads in place when connected
+await singBox.reload();                // reload the running config
+await singBox.restart();               // stop + start
+await singBox.disconnect();
+```
+
+The final configuration is validated by sing-box before the tunnel starts.
+To inspect it without connecting use `buildConfig()`, `checkConfig()`,
+`validateConfig()` and `formatConfig()`.
+
+`connect()` asks for the VPN permission when needed (pass
+`requestPermission: false` to handle it yourself with
+`hasVpnPermission()` / `requestVpnPermission()`). On Android 13+ also call
+`requestNotificationPermission()` so the VPN notification is visible.
+
+### Status and statistics
+
+```dart
+singBox.status;            // cached SingBoxConnectionStatus
+singBox.state.startedAt;   // session start
+singBox.watchConnectionStatus().listen((status) { … });
+singBox.watchConnectionState().listen((state) {
+  if (state.error != null) print('Stopped: ${state.error}');
+});
+singBox.watchConnectionStats().listen((s) {
+  print('${s.downloadSpeed} B/s down, ${s.uploadTotal} bytes up, '
+      '${s.connectionsOut} connections, session ${s.duration}');
+});
+await singBox.waitForStatus(SingBoxConnectionStatus.connected);
+```
+
+### Server profiles and subscriptions
+
+```dart
+final imported = await singBox.importServerConfigs(subscriptionBody, subscriptionId: 'main');
+await singBox.setActiveServerConfig(imported.first.id);
+await singBox.connectToActiveServer();
+
+final server = SingBoxServerConfig.fromOutbound(outboundJson, name: 'Office');
+await singBox.addServerConfig(server);
+await singBox.updateServerConfig(server.copyWith(name: 'Office (new)'));
+await singBox.removeServerConfig(server.id);
+final all = await singBox.getServerConfigs();
+
+final link = SingBoxShareLink.toLink(server.outbound!); // export
+```
+
+### Groups, instant switching and latency
+
+Connect with several servers at once to switch between them without
+reconnecting and to let sing-box pick the fastest one:
+
+```dart
+await singBox.connectToServers(await singBox.getServerConfigs());
+
+singBox.watchGroups().listen((groups) {
+  for (final group in groups) {
+    print('${group.tag}: ${group.selected}');
+    for (final item in group.items) {
+      print('  ${item.tag}: ${item.urlTestDelay ?? '-'} ms');
+    }
+  }
+});
+
+await singBox.selectOutbound(SingBoxConfigBuilder.proxyTag, 'Server B');
+await singBox.selectOutbound(SingBoxConfigBuilder.proxyTag, SingBoxConfigBuilder.autoTag);
+await singBox.urlTest(SingBoxConfigBuilder.proxyTag);           // test every member
+final ping = await singBox.pingCurrentServer();                 // SingBoxPingResult
+final group = await singBox.testGroup(SingBoxConfigBuilder.proxyTag);
+```
+
+Latency is measured with an HTTP request through the proxy
+(`SingBoxConfigOptions.urlTestUrl`, default
+`https://www.gstatic.com/generate_204`), which reflects real proxy latency.
+
+### Speed and NAT tests
+
+```dart
+final result = await singBox.testSpeed();
+print('${result.downloadMbps} / ${result.uploadMbps} Mbps');
+
+singBox.runNetworkQualityTest().listen((q) {
+  print('${q.phase.name}: ${q.downloadMbps} Mbps, RPM ${q.downloadRpm}');
+});
+
+await for (final r in singBox.runStunTest()) {
+  print('${r.externalAddress} mapping=${r.natMapping.name}');
+}
+```
+
+### Routing rules
+
+Rules are stored natively, applied to every generated or user supplied
+config, and re-applied to a running tunnel immediately
+(`SingBox.reloadOnRulesChange`).
+
+```dart
+await singBox.addAppToBypass('com.bank.app');        // Android: not via VPN
+await singBox.setProxyApps(['org.telegram.messenger']); // Android: only these via VPN
+await singBox.addBlockedApp('com.tracker.app');      // Android: traffic rejected
+await singBox.addDomainToBypass('example.ru');
+await singBox.addSubnetToBypass('10.0.0.0/8');
+await singBox.addBlockedDomain('ads.example.com');
+await singBox.setDnsServers(['https://1.1.1.1/dns-query', 'tls://8.8.8.8']);
+
+await singBox.updateRoutingRules((r) => r.copyWith(
+  bypassLan: true,
+  bypassCountries: ['ru'], // geoip-ru + geosite-ru rule-sets go direct
+  blockAds: true,          // geosite-category-ads-all
+));
+```
+
+### Configuration options
+
+`SingBox.configOptions` controls generated configs:
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  logLevel: SingBoxConfigLogLevel.warn,
+  tun: SingBoxTunOptions(mtu: 9000, stack: SingBoxTunStack.mixed, enableIpv6: true),
+  dns: SingBoxDnsOptions(remote: 'https://1.1.1.1/dns-query', strategy: SingBoxDnsStrategy.preferIpv4),
+  urlTestInterval: Duration(minutes: 3),
+  enableClashModes: true,
+);
+```
+
+Use `SingBoxConfigBuilder` directly to generate configs without connecting:
+
+```dart
+final builder = SingBoxConfigBuilder(options);
+final config = builder.build([SingBoxShareLink.parse(link).json], rules: rules);
+final patched = builder.apply(userConfig, rules: rules);
+```
+
+### Clash modes, connections, logs
+
+```dart
+singBox.watchClashMode().listen((m) => print('${m.current} of ${m.modes}'));
+await singBox.setClashMode('Global'); // Rule / Global / Direct
+
+singBox.watchConnections().listen((list) { … });
+await singBox.closeConnection(id);
+await singBox.closeAllConnections();
+
+singBox.watchLogBuffer(maxEntries: 1000).listen((entries) { … });
+singBox.watchLogs().where((e) => e.level.isAtLeast(SingBoxLogLevel.warn)).listen(print);
+await singBox.clearLogs();
+
+singBox.watchNotifications().listen((n) => print(n.title)); // core notifications
+```
+
+### Settings
+
+```dart
+await singBox.saveSettings(const SingBoxSettings(
+  autoConnectOnStart: true,          // connect to the active server on app start
+  autoReconnectOnDisconnect: true,   // iOS: VPN On Demand
+  killSwitch: true,                  // iOS: includeAllNetworks
+  startOnBoot: true,                 // Android
+  quickSettingsTile: true,           // Android
+));
+await singBox.updateSetting(SingBoxSettings.keyKillSwitch, false);
+await singBox.openVpnSettings();     // Android: Always-on VPN / Block connections without VPN
+await singBox.requestAddQuickSettingsTile(); // Android 13+
+```
+
+### Error handling
+
+Every failure is a `SingBoxException` with a `code`:
+
+| Exception | When |
+| --- | --- |
+| `SingBoxConfigException` | Invalid input or the config was rejected by sing-box (message = sing-box error) |
+| `SingBoxPermissionException` | VPN permission / profile not granted |
+| `SingBoxServiceNotRunningException` | The operation needs a running tunnel |
+| `SingBoxUnsupportedException` | Not available on this platform |
+| `SingBoxNotInitializedException` | `initialize()` was not called |
+
+Runtime failures that stop the tunnel are reported in
+`SingBoxConnectionState.error`.
+
+### Logging
+
+```dart
+class MyObserver extends SingBoxObserver {
+  @override
+  void error(String message, [Object? error, StackTrace? stackTrace]) =>
+      debugPrint('[sing_box] $message: $error');
+}
+
+SingBox.instance.setObserver(MyObserver());
+// or with Talker:
+SingBox.instance.setObserver(SingBoxTalkerObserver(talker));
+```
+
+### Testing your app
+
+`SingBoxPlatform.instance` can be replaced with a fake in unit tests:
+
+```dart
+class FakeSingBox extends SingBoxPlatform with MockPlatformInterfaceMixin { … }
+
+setUp(() => SingBoxPlatform.instance = FakeSingBox());
+```
+
+See `test/support/fake_platform.dart` in this repository for a complete
+in-memory implementation.
+
+## Supported share links
+
+| Scheme | Notes |
+| --- | --- |
+| `vless://` | TLS / Reality (`pbk`, `sid`, `spx`), Vision flow, `tcp`, `ws`, `grpc`, `http`/`h2`, `httpupgrade`, uTLS `fp`. XHTTP is not supported by sing-box. |
+| `vmess://` | v2rayN base64 JSON format |
+| `trojan://` | TLS, transports as VLESS |
+| `ss://` | SIP002 and legacy formats, `obfs-local` / `v2ray-plugin` |
+| `hysteria2://`, `hy2://` | obfs `salamander`, port hopping, bandwidth |
+| `hysteria://` | v1 |
+| `tuic://` | v5 |
+| `socks://`, `socks5://`, `http://`, `https://` | Plain proxies |
+
+## Building libbox yourself
+
+```bash
+scripts/build_libbox.sh android apple --install
+```
+
+The script fetches the sing-box version from `LIBBOX_VERSION`, installs
+SagerNet's `gomobile` and builds `build/libbox/libbox.aar` and
+`build/libbox/Libbox.xcframework(.zip)` with SHA-256 files. `--install` copies
+them into the plugin so local builds skip the download. Requirements: Go 1.25+,
+Android SDK + NDK, JDK 17/21, Xcode. Set `LIBBOX_TAGS` to change the compiled
+features.
+
+### Using your own libbox build
+
+- Android: set the Gradle property `singBox.libboxAar=/path/to/libbox.aar`
+  (in `android/gradle.properties`) or the environment variable
+  `SING_BOX_LIBBOX_AAR`.
+- iOS: put `Libbox.xcframework` into the plugin's `ios/sing_box/Frameworks/`
+  (for a pub dependency: `.symlinks/plugins/sing_box/ios/sing_box/Frameworks/`),
+  or point downloads to a mirror with `SING_BOX_LIBBOX_BASE_URL`.
 
 ## Troubleshooting
 
-### Android Issues
+- **Android: VPN starts but there is no traffic** - check the logs
+  (`watchLogs()`); most often the server is unreachable or the credentials are
+  wrong. `checkConfig()` reports configuration errors with the exact sing-box
+  message.
+- **Android: the notification is not shown** - request
+  `requestNotificationPermission()` on Android 13+.
+- **iOS: `requestVpnPermission()` fails** - the Network Extension capability,
+  the App Group or the extension bundle id do not match. The Runner and the
+  extension must be signed by the same team and share the App Group.
+- **iOS: "Cycle inside Runner"** - move *Embed Foundation Extensions* above
+  *Thin Binary* in the Runner build phases.
+- **iOS: the extension is killed under load** - Network Extensions are limited
+  to about 50 MB of memory. The bundled core is built for low memory use;
+  avoid huge rule-sets and keep `disableMemoryLimit` off.
+- **The first build is slow** - the native library is downloaded once and
+  cached.
 
-1. **VPN Permission Not Granted**:
-   - The plugin will request VPN permission automatically
-   - User must grant permission in system settings if denied
+## Migrating from 0.0.x
 
-2. **Service Not Starting**:
-   - Check AndroidManifest.xml permissions
-   - Ensure VPN permission is granted
+0.1.0 is a rewrite on top of sing-box 1.14:
 
-### iOS Issues
-
-1. **Framework Not Found**:
-   - Make sure you've downloaded `Libbox.xcframework` from GitHub Releases
-   - Verify it's in `ios/Frameworks/Libbox.xcframework`
-   - Run the installation script: `curl -L https://raw.githubusercontent.com/qusadprod/sing_box/main/install_ios_framework.sh | bash`
-   - See [INSTALL_IOS_FRAMEWORK.md](INSTALL_IOS_FRAMEWORK.md) for detailed instructions
-
-2. **Network Extension Not Working**:
-   - Ensure App Groups are configured
-   - Check Network Extension capability is enabled
-   - Verify signing and provisioning profiles
-
-3. **Build Errors**:
-   - Run `pod install` in `ios/` directory
-   - Clean build: `flutter clean && flutter pub get`
-   - Make sure `Libbox.xcframework` is properly linked in Xcode
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Acknowledgments
-
-This plugin uses the following open-source projects:
-
-### sing-box
-
-- **Repository**: [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
-- **License**: GPL-3.0 (see [sing-box LICENSE](https://github.com/SagerNet/sing-box/blob/master/LICENSE))
-- **Usage**:
-  - Android: Uses `libbox` library from `experimental/libbox` directory (compiled to `libbox.aar`)
-  - iOS: Uses `Libbox.xcframework` compiled from `experimental/libbox` directory
-- **Source Location**:
-  - Android sources: `android/libbox/`
-  - iOS sources: `ios/libbox/`
-
-The `libbox` library provides the core VPN functionality and protocol implementations for both Android and iOS platforms.
-
-### Other Dependencies
-
-- **Flutter SDK**: Flutter framework and plugin system
-- **Kotlin Coroutines**: For asynchronous operations on Android
-- **AndroidX Core**: Android support libraries
-- **Gson**: JSON serialization for Android
-- **plugin_platform_interface**: Flutter plugin platform interface
+- Action methods (`connect`, `disconnect`, …) return `Future<void>` and throw
+  `SingBoxException`s instead of returning `false`.
+- `watchSingBoxConnectionStatus` / `watchSingBoxConnectionStats` /
+  `getActiveSingBoxServerConfig` are deprecated in favour of
+  `watchConnectionStatus` / `watchConnectionStats` / `getActiveServerConfig`.
+- `SingBoxConnectionStatus` has four values (`disconnected`, `connecting`,
+  `connected`, `disconnecting`); the failure reason is in
+  `SingBoxConnectionState.error`.
+- `SingBoxConnectionStats` uses `uploadSpeed`, `downloadSpeed`,
+  `uploadTotal`, `downloadTotal`, `duration` (old names are deprecated getters).
+- Routing lists moved from `SingBoxSettings` to `SingBoxRoutingRules`.
+  "Blocked" apps/domains are now really blocked; use the bypass lists to
+  exclude them from the VPN.
+- iOS needs the Packet Tunnel extension target described above.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+The Dart and native wrapper code of this plugin is released under the
+[MIT License](LICENSE). The bundled sing-box core (`libbox`) is licensed under
+**GPL-3.0-or-later**; apps that ship it must comply with the GPL. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-**Note**: This plugin uses `libbox` from [SagerNet/sing-box](https://github.com/SagerNet/sing-box), which is licensed under GPL-3.0. Please refer to the [sing-box LICENSE](https://github.com/SagerNet/sing-box/blob/master/LICENSE) for details.
+This project is not affiliated with SagerNet or the sing-box project.
