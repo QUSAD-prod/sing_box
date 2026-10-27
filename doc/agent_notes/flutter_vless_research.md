@@ -431,3 +431,16 @@ Notable upstream problems (all Android unless noted):
 17. Balancer/auto-select (urltest), TLS fragment (#49; sing-box tls fragment support UNVERIFIED for 1.14).
 18. Working VoIP/UDP (WhatsApp, Telegram calls).
 19. Option to prevent start from iOS Settings.
+
+## Coverage check by lead (2026-10-27, after the agent was cut off by the usage limit)
+- GitHub tracker re-listed via API: 28 items (#1–#27, #29; #28 does not exist). Every one is covered above.
+- GitHub Discussions: enabled, 0 discussions.
+- Upstream flutter_v2ray (115 items) and forks flutter_v2ray_client / flutter_v2ray_plus: covered above.
+- main-branch CHANGELOG 1.1.7 (unreleased train) re-read. Additional lessons not listed in C:
+  - Validate a new config before replacing a working session; keep the old one if the new start fails.
+  - Ignore native events from an earlier session (session/generation id), including network callbacks queued before Stop.
+  - Cancel pending/superseded starts on Stop or a newer Start (fixed error code, no private details).
+  - Preserve unknown JSON fields at every depth when patching user configs; never normalise away caller data.
+  - Single monotonic deadline for watchdog/health probes; cancel probes on session end.
+  - Reset speed baselines across gaps/restarts (no spikes after reconnect).
+  - CI: 16 KiB ELF checks for Android runtimes; real traffic tests in an emulator and on a physical iPhone.
