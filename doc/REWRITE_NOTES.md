@@ -71,3 +71,14 @@ in the next session with these briefs (full context: doc/platform_channel.md + t
 4. Research flutter_vless (pub.dev + github.com/XIIIFOX/flutter_vless issues) -> doc/agent_notes/flutter_vless_research.md.
 Note: scratchpad (/private/tmp/...) may be wiped; re-clone sing-box v1.14.4 and the SFA/SFI repos at the commits above
 and rebuild libbox with scripts/build_libbox.sh if build/libbox is gone.
+
+## Checkpoint 4 (session 2)
+- Agents relaunched (Android, iOS, config, research); each keeps doc/agent_notes/<area>.md.
+- Lead done: lib/src/sing_box.dart facade, lib/sing_box.dart exports, pubspec 0.1.0 (sdk ^3.12, flutter >=3.44,
+  QUSAD-prod URLs), LICENSE = pure MIT + THIRD_PARTY_NOTICES.md, analysis_options, .pubignore (example included),
+  tests: test/sing_box_test.dart (fake platform in test/support), test/sing_box_method_channel_test.dart, test/models_test.dart.
+- Example pages written in example/lib/src/ (app.dart, home/servers/routing/logs/tools pages). example/lib/main.dart is
+  still a placeholder: replace with `await SingBox.instance.initialize(); runApp(const ExampleApp());` once
+  lib/src/config/config.dart exists and `flutter analyze` is clean.
+- Remaining lead work: README, CHANGELOG, doc/ guides (android.md, ios.md), CI workflow (.github/workflows), release script
+  for libbox assets (gh release), run tests/analyze/pana, integrate agent results.
