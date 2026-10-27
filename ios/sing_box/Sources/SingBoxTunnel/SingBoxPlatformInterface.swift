@@ -313,11 +313,11 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
         tunnel.protocolConfiguration.includeAllNetworks
     }
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool {
+    func usePlatformAutoDetectControl() -> Bool {
         false
     }
 
-    func autoDetectInterfaceControl(_: Int32) throws {}
+    func autoDetectControl(_: Int32) throws {}
 
     func clearDNSCache() {
         guard let networkSettings else {

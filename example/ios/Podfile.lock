@@ -1,16 +1,21 @@
 PODS:
   - Flutter (1.0.0)
+  - SingBoxTunnel (0.1.0)
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
+  - SingBoxTunnel (from `.symlinks/plugins/sing_box/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
+  SingBoxTunnel:
+    :path: ".symlinks/plugins/sing_box/ios"
 
 SPEC CHECKSUMS:
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  SingBoxTunnel: e48c61215e12c116882d6fc6b7e8a54a42ddc754
 
-PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
+PODFILE CHECKSUM: eda4e778181882ef5268c5e58abf7cfabaee8dbc
 
 COCOAPODS: 1.17.0
