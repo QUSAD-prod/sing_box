@@ -12,8 +12,6 @@
 //   HARNESS_LINK           share link to connect with (default: direct)
 //   HARNESS_START_ON_BOOT  `true`/`false`: sets SingBoxSettings.startOnBoot
 //   HARNESS_TILE           `true`/`false`: sets SingBoxSettings.quickSettingsTile
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:sing_box/sing_box.dart';
 

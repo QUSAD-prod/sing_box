@@ -44,6 +44,13 @@ final class TunnelController {
     private var observers: [NSObjectProtocol] = []
     private var listeners: [UUID: (TunnelState) -> Void] = [:]
     private var lastEmitted: TunnelState?
+    /// `startVPNTunnel` succeeded but iOS has not reported a status change
+    /// yet. Reported as `connecting` (the contract emits `connecting` before
+    /// the `start` result), and the next `disconnected` ends this attempt.
+    private var startPending = false
+    private var startToken = UUID()
+    /// `stop()` was called: the following disconnect is not a failure.
+    private var stopRequested = false
     /// Called after a successful reload and when the tunnel became connected.
     var onServiceRestarted: (() -> Void)?
 
@@ -109,7 +116,11 @@ final class TunnelController {
     }
 
     var statusString: String {
-        Self.statusString(vpnStatus)
+        let status = vpnStatus
+        if startPending, status == .disconnected || status == .invalid {
+            return "connecting"
+        }
+        return Self.statusString(status)
     }
 
     var startedAt: Int64? {
@@ -168,6 +179,10 @@ final class TunnelController {
         let status = vpnStatus
         let previous = lastStatus
         lastStatus = status
+        // iOS reported on the requested start (the status is read live, so a
+        // start failing fast may already read `disconnected` here).
+        let endsStart = startPending
+        startPending = false
         switch status {
         case .connected:
             if lastError != nil {
@@ -177,8 +192,9 @@ final class TunnelController {
                 onServiceRestarted?()
             }
         case .disconnected, .invalid:
-            if previous == .connecting || previous == .connected || previous == .reasserting || previous == .disconnecting {
-                collectDisconnectError()
+            if endsStart || previous == .connecting || previous == .connected || previous == .reasserting || previous == .disconnecting {
+                collectDisconnectError(userStopped: stopRequested)
+                stopRequested = false
             }
         default:
             break
@@ -187,14 +203,16 @@ final class TunnelController {
     }
 
     /// Reads why the last session ended: the message written by the
-    /// extension, else `fetchLastDisconnectError` (iOS 16+).
-    private func collectDisconnectError() {
+    /// extension, else `fetchLastDisconnectError` (iOS 16+). The latter may
+    /// still hold the error of an earlier session, so it is not consulted
+    /// after `stop()`.
+    private func collectDisconnectError(userStopped: Bool) {
         if let message = paths.readLastError() {
             lastError = message
             emit()
             return
         }
-        guard #available(iOS 16.0, *), let connection = manager?.connection else {
+        guard !userStopped, #available(iOS 16.0, *), let connection = manager?.connection else {
             return
         }
         Task { @MainActor in
@@ -370,6 +388,8 @@ final class TunnelController {
         if isActive {
             do {
                 try await sendReload()
+            } catch let error as PluginError {
+                throw error
             } catch {
                 throw PluginError.startFailed(error.localizedDescription)
             }
@@ -394,6 +414,7 @@ final class TunnelController {
         }
 
         lastError = nil
+        stopRequested = false
         paths.writeLastError(nil)
         do {
             try manager.connection.startVPNTunnel(options: [
@@ -409,6 +430,18 @@ final class TunnelController {
             throw PluginError.startFailed("Starting the VPN failed: \(error.localizedDescription)")
         }
         lastStatus = vpnStatus
+        if vpnStatus == .disconnected || vpnStatus == .invalid {
+            startPending = true
+            let token = UUID()
+            startToken = token
+            // Safety net: report the real status if iOS never reacts.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard let self, self.startToken == token, self.startPending else { return }
+                self.startPending = false
+                self.emit()
+            }
+        }
         emit()
     }
 
@@ -418,6 +451,11 @@ final class TunnelController {
         }
         guard let manager else {
             return
+        }
+        stopRequested = isActive || startPending || vpnStatus == .disconnecting
+        if startPending {
+            startPending = false
+            emit()
         }
         if manager.isOnDemandEnabled {
             manager.isOnDemandEnabled = false
@@ -431,6 +469,10 @@ final class TunnelController {
     }
 
     func reload(config: String?) async throws {
+        // A failed call leaves the last config untouched (as on Android).
+        guard isActive else {
+            throw PluginError.serviceNotRunning()
+        }
         if let config {
             do {
                 try await runInBackground { try SingBoxLibbox.checkConfig(config) }
@@ -443,13 +485,14 @@ final class TunnelController {
                 throw PluginError.internalError("Writing the configuration failed: \(error.localizedDescription)")
             }
         }
-        guard isActive else {
-            throw PluginError.serviceNotRunning()
-        }
         do {
             try await sendReload()
+        } catch let error as PluginError {
+            throw error
         } catch {
-            throw PluginError.commandFailed(error.localizedDescription)
+            // As on Android: a failed reload stops the tunnel (the extension
+            // cancels it) and is reported as a start failure.
+            throw PluginError.startFailed(error.localizedDescription)
         }
     }
 

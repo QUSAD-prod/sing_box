@@ -137,7 +137,7 @@ Behaviour:
 | Method | Arguments | Behaviour |
 | --- | --- | --- |
 | `stop` | – | Stops the tunnel. Resolves once the stop was requested. iOS also disables on-demand so the system does not reconnect |
-| `reload` | `{config: String?}` | If `config` is given it replaces the last config (validated first). Reloads the running service with `CommandServer.startOrReloadService`. Throws `SERVICE_NOT_RUNNING` if stopped |
+| `reload` | `{config: String?}` | If `config` is given it replaces the last config (validated first). Reloads the running service with `CommandServer.startOrReloadService`. Throws `SERVICE_NOT_RUNNING` if stopped; a failed reload stops the tunnel (status `disconnected` with `error`) and throws `START_FAILED` |
 | `getStatus` | – | String status |
 | `getStartedAt` | – | int? - epoch milliseconds when the current session started, `null` when not running |
 | `getLastConfig` | – | String? - last persisted config |

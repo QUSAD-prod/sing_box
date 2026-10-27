@@ -777,7 +777,10 @@ class SingBox {
   /// Reloads the running tunnel without tearing down the VPN interface,
   /// optionally with a new complete [config] (used verbatim).
   ///
-  /// Throws a [SingBoxServiceNotRunningException] when the tunnel is stopped.
+  /// Throws a [SingBoxServiceNotRunningException] when the tunnel is stopped,
+  /// a [SingBoxConfigException] when sing-box rejects [config] and a
+  /// [SingBoxStartException] when the core fails to start with it (the
+  /// tunnel is stopped then and the error is reported in [state]).
   Future<void> reload([String? config]) {
     _ensureInitialized();
     return _platform.reload(config);
