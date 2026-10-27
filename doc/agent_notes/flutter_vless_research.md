@@ -1,6 +1,6 @@
 # flutter_vless research (for our sing-box/libbox Flutter plugin)
 
-Status: IN PROGRESS (research agent, 2026-10-27). Sections appended incrementally.
+Status: COMPLETE (research agent, 2026-10-27). Raw notes first; FINAL REPORT (A/B/C) at the bottom.
 
 Sources: https://github.com/XIIIFOX/flutter_vless (cloned depth 1 at 2026-10-27, last push 2026-10-25),
 GitHub REST API issues/PRs, pub.dev.
@@ -131,3 +131,303 @@ Notable upstream problems (all Android unless noted):
 - Licenses: Xray-core = MPL-2.0 (so flutter_vless can be MIT). sing-box = GPL-3.0-or-later + extra term "no derivative work may use the name or imply association with this application without prior consent" (README). → our plugin linking libbox is GPL-bound; App Store + GPL tension; can't call it "sing-box ..." without consent.
 - flutter_vless docs contain nothing on App Store / Play review, privacy manifest, macOS Developer ID / System Extension distribution (grep empty).
 - security.md: iOS profile sets includeAllNetworks, disables excludeLocalNetworks/excludeAPNs/excludeCellularServices "where supported"; on-demand restart after provider termination is iOS-scheduled.
+
+==========================================================================================
+# FINAL REPORT (A/B/C) — research complete 2026-10-27
+==========================================================================================
+
+## A. Package overview
+
+### A1. Identity and history
+- XIIIFOX/flutter_vless (13FOX Studio / tfox.dev), MIT. Not a GitHub fork, but its code descends from blueboy-tm/flutter_v2ray (Android, Java). The Android code still uses V2RAY_STATE / V2RAY_CONNECTION_INFO / ":RunSoLib…Daemon". 1.0.0 shipped 2dust libv2ray.aar plus a tun2socks executable. The iOS setup copies the flutter_v2ray_client approach: XRay.xcframework + Tun2SocksKit/HEV.
+- Releases: 1.0.0 (2025-09) to 1.0.4 (2025-12). Then a five-month gap with iOS build issues unanswered. Then 1.0.5 (2026-05-23: SwiftPM, base bundle id) and 1.1.0 (federated split; macOS and Windows, proxy-only). 1.1.3 added WireGuard/Hysteria2 import and fixed macOS. 1.1.5 (07-27) fixed the #17 drops and blockedApps. 1.1.6 (09-15) is the latest root package: mandatory kill-switch, Keychain storage, local proxy auth, geoAssetsDirectory, h2 memory cap. Platform packages are at 1.1.7 (2026-10-17), but the README says the pub 1.1.7 packages "contain older wrapper code". The real 1.1.7 lives only on git main.
+- Core: Xray-core, pinned per release (26.6.x → 26.10.21). It is shipped as separately published binaries: Maven Central AAR dev.tfox.fluttervless:xray-android:<ver>-protect1, GitHub-release XCFrameworks for iOS and macOS fetched by SwiftPM/CocoaPods with checksums, and a user-supplied xray.exe + tun2socks.exe + wintun.dll on Windows. No Linux and no web (#25 open).
+
+### A2. Architecture per platform
+- **Android** (Kotlin, flutter_vless_android):
+  - libxray.so and libtun2socks.so are executables started with ProcessBuilder from nativeLibraryDir. Apps therefore need packaging.jniLibs.useLegacyPackaging=true / extractNativeLibs=true.
+  - VpnService runs in process ":RunSoLibXrayDaemon". FGS type specialUse with subtype "vpn"; SUPPORTS_ALWAYS_ON=true.
+  - Builder: MTU 1500; 26.26.26.1/30 and fd26:26:26::1/126; default routes for v4 and v6; setMetered(false) unconditionally; addDisallowedApplication(blockedApps); virtual DNS 10.0.85.53. No setUnderlyingNetworks call found (grep).
+  - The TUN fd goes to tun2socks over a LocalSocket (SCM_RIGHTS). tun2socks talks to an authenticated loopback SOCKS inbound that the plugin injects into the Xray JSON.
+  - Since 1.1.6 the app UID is no longer excluded. Core sockets bypass the VPN through a Go "protect broker" overlay instead.
+  - Recovery keeps the TUN up (kill-switch) and retries with capped backoff, reporting CONNECTING meanwhile. A NetworkCallback (INTERNET + NOT_VPN) triggers recovery. A Keystore-encrypted profile allows Always-on/sticky restarts without the app.
+  - Status: a 1 s tick sends a broadcast. The plugin's BroadcastReceiver is registered on the Activity only, and forwards to the EventChannel as a positional list.
+  - Traffic: each tick spawns `libxray.so api statsquery`, i.e. one process per second while connected.
+  - Quick Settings tile (1.1.7 main) also runs in the daemon process.
+  - Manifest declares READ_EXTERNAL_STORAGE, which is not needed.
+- **iOS** (root package, Swift):
+  - A gomobile XRay.xcframework (wrapper: Start/StartPrivate, Stop, SetAssetLocation, SetMemoryLimit = GC 10% + 30 MB, QueryStats; MeasureDelay is a STUB returning 0) plus HEV/Tun2SocksKit 5.15, both inside a Packet Tunnel extension.
+  - The integrator must create a target named exactly "XrayTunnel" (bundle id = base + ".XrayTunnel", hardcoded suffix), share an App Group and a Keychain group (1.1.6+), target iOS 15+, and COPY the example PacketTunnelProvider.swift (1364 lines) into it.
+  - Provider settings: remote 254.1.1.1; MTU 1500 (9000 in 1.0.x); IPv4 10.0.85.2/24 with default route; DNS 10.0.85.53 with matchDomains [""]; IPv6 captured and blocked (AAAA NODATA); server IPs excluded from routes.
+  - Manager settings: includeAllNetworks=true, excludeLocalNetworks=false, APNs/cellular exclusions disabled. This is mandatory with no opt-out, and non-empty bypassSubnets are rejected. On-Demand Connect rule is used for recovery; explicit stop disables On Demand first.
+  - Config is stored in a Keychain item, referenced from providerConfiguration. Before 1.1.6 it was plaintext Data in providerConfiguration.
+  - Status/traffic: the app polls with a 1 s Timer using sendProviderMessage("xray_traffic"), which returns HEV counters. Delay uses "xray_delay<url>".
+  - Proxy-only runs Xray inside the app process. Inference: it dies when the app is backgrounded.
+- **macOS**: Packet Tunnel app extension (macOS 13+), plus a system-proxy proxy-only mode via networksetup. `dart run flutter_vless:setup_macos_vpn --bundle-id --group-id --team-id`. There is no documentation on Developer ID / System Extension distribution.
+- **Windows**: xray.exe + tun2socks.exe + Wintun, IPv4-only VPN that needs admin. WFP filters act as a kill switch that survives app crashes; the admin must restart the app and press stop to clear them. Proxy-only edits the registry proxy. Stats come from the Xray gRPC Stats API. Standalone delay is unsupported and returns -1.
+
+### A3. Dart API (main)
+- `FlutterVless({onStatusChanged})`: callback only. No Stream and no getStatus()/current-state query.
+- `initializeVless({notificationIconResourceType/Name, providerBundleIdentifier (base id), groupIdentifier, keychainAccessGroup?, options: VlessOptions?})`
+- `requestPermission()` → bool
+- `startVless({remark, config: Xray JSON string, notificationDisconnectButtonName, blockedApps, bypassSubnets, proxyOnly, geoAssetsDirectory, certificateAssetsDirectory, androidDnsPolicy{config, proxy}, androidDnsProxyOutboundTag, vpnRouting(sourceInboundIndex, defaultOutboundTag)})`
+- `startVlessWithReport(...)` → VlessPreparationReport (closed codes). `stopVless()`.
+- `getServerDelay({config, url = google generate_204})` → ms or -1. `getConnectedServerDelay({url})`.
+- `getCoreVersion()`, `getProviderDebugSnapshot()`, `getCapabilities()`, `requestAddQuickTile()`, `clearQuickAccessProfile()`.
+- Static `parse` / `parseMany` / `parseFromURL` → FlutterVlessURL (remark, getFullConfiguration, mutable maps). Typed XrayConfigDocument plus a validator.
+- `VlessStatus{duration s, uploadSpeed, downloadSpeed, upload, download, state raw, connectionState connected|connecting|disconnected|disconnecting|unknown}`. It has no error or reason field.
+- `VlessOptions`: Notification(icon, buttonLabel, action disconnect/openApp/none), QuickAccess(surface tile/menu/tray/Control Center, label, toggle/openApp, requireUnlock, icons), Reconnect(enabled, initialDelay, maxDelay, maxAttempts), Protection(killSwitch, onDemand, alwaysOn), Diagnostics(maxBytes/lines).
+- Errors are PlatformException codes: INVALID_CONFIG (generic), INCOMPATIBLE_ROUTING, VPN_KEYCHAIN_ERROR, VPN_STOP_ERROR, VPN_START_CANCELLED. A Dart generation counter cancels superseded starts.
+
+### A4. Configs and links
+- Parsing is done in Dart into a full Xray JSON. Inputs: vmess/vless/trojan/ss/socks/hysteria2/hy2 links, raw Xray JSON or JSON array, base64 subscriptions, Clash YAML, sing-box JSON (WireGuard/Hysteria2 via YAML/sing-box). Unsupported protocols are skipped.
+- The generated config is one socks inbound (HEV contract) + proxy outbound + direct + block, with empty routing.
+- Native layers then rewrite the JSON heavily: injected auth SOCKS adapter, stats API, DNS outbound/rules, UDP/443 block (older macOS), private tags and ports.
+- Known gaps:
+  - Some ss:// variants don't work on iOS (#10, fork #18).
+  - VLESS mlkem encryption is not representable in links; raw JSON is required.
+  - Core rejects security=none + encryption=none to public hosts (#29).
+
+### A5. Delay and traffic implementation
+- **Android delay:** spawns a whole extra Xray process per test (temporary config + auth SOCKS) and retries 20×100 ms. It times ONE `HEAD` request, including SOCKS connect and TLS, as a single sample. Returns -1 on any error.
+- **iOS delay:**
+  - Connected: a Swift raw SOCKS5 + TLS + GET client inside the NE, 8–10 s timeout. Its TLS-1.2-only path returns -1 for TLS-1.3-only URLs.
+  - Standalone: a second Go core in the app process, which returns -1 while proxy-only is active.
+  - Older builds: logs show "XRay internal delay … 0ms" from the stub. UNVERIFIED whether 1.0.x getConnectedServerDelay returned 0.
+- **Traffic:** speed = counter delta per 1 s tick. Upstream and fork reports: mostly 0 or jumpy (#86), cumulative values shown as speed (fork #14).
+
+### A6. Example app
+- Clipboard import, config preview/editor, routing editor (domain direct/proxy), proxy-only vs VPN toggle, counters, core version, blockedApps, Delay vs Profile delay, VPN Diagnostics, preparation report, Quick tile / menu / tray settings.
+- The example hardcodes ids (dev.tfox.flutterXrayExample, group.dev.tfox.flutterXray), which users copied by mistake (#13).
+
+## B. Issue catalogue (flutter_vless: all 28 issues and PRs read with comments)
+
+### B1. Build and integration
+- **#3** iOS, closed. "No such module 'XRay'". The xcframework had to be dragged into the pod target manually. Auto-download via SwiftPM/CocoaPods came in 1.0.5.
+- **#5 and #6** iOS, closed (#6 filed by our user). SwiftCompile fails with an internal compiler error ("PHINode…", Swift 6.2.1 / Xcode 26.1.1) in the copied PacketTunnelProvider's `async startTunnel` with guard/fatalError and nested closures. Maintainer answered after five months ("see updated example").
+  - Working fix from fork #3: use the completion-handler `startTunnel` and drop fatalError.
+  - Required order: setTunnelNetworkSettings → wait → start core → wait for SOCKS → start tun2socks. Otherwise Safari shows "connection not private".
+- **#7** iOS, closed. "Cycle inside Runner" when embedding the .appex. Fix (1.0.4 IOS_SETUP): move "Embed Foundation Extensions" below "Copy Bundle Resources".
+- **#8** iOS, closed. How to build the xcframework → build_xray_ios.sh (gomobile).
+- **#12** macOS/iOS 1.1.1, closed. SwiftPM can't resolve `.packages/flutter_vless_macos` / `../FlutterFramework`, which was missing from the published package. Fix: fallback package in 1.1.2. Workaround: use the Flutter-generated `.packages/flutter_vless-<ver>` path; deployment target ≥15.
+- **#13** macOS 1.1.2, 30 comments, closed. `cannot find type XRayLoggerProtocol` because Swift sources and the bundled binary were out of sync.
+  - Further hurdles in the same thread:
+    - The prepare_apple_swiftpm.sh script was required.
+    - The repo folder had to be named exactly `flutter_vless`, because SwiftPM takes package identity from the folder name.
+    - Package.resolved PinsStorage v3 broke older Xcode, so they added Xcode 15 project files.
+    - CLT-only installs fail.
+  - Then the runtime didn't work. Cause: Runner and XrayTunnel need the same Team and App Group, and initializeVless needs the app's own base id, not the example's. Fixed in 1.1.3.
+- **#14** Windows, closed 2026-09. generated_plugin_registrant includes `<flutter_vless_windows/flutter_vless_plugin.h>`, but the header lives under `flutter_vless/`. The workaround meant editing a generated file after every build. Fixed with a forwarding header (PR #27). Even after the workaround, the user said VPN mode "does not fulfill its main task".
+- Fork-reported Android equivalents:
+  - VPN fails only when installed from Google Play → useLegacyPackaging + extractNativeLibs (fork #4). Upstream #94/#116/#111/#72 and flutter_v2ray_client #21/#24 are the same: "connected, no internet" with minSdk ≥23, targetSdk 34 or Flutter >3.29.
+  - Kotlin syntax errors shipped in a release (fork #6): no CI.
+
+### B2. iOS "connected but no traffic" and status bugs
+- **#4** closed without a fix. Shows connected, no traffic in either mode. A user switched to SwiftyXrayKit.
+- **#10** wontfix. ss:// connects but carries no traffic (vmess works); "not all ss:// configs compatible". Same as fork #18 (CONNECTING → DISCONNECTED).
+- **#20** closed, not a bug. Reality+Vision HTTP failed on macOS/iOS; the account was served different node keys. Its debug log reveals the 1.1.5 internals: QUIC (UDP/443) blocked to force TCP; KVC packetFlow fd read failing with a fallback to utun fd scanning; multiple health checks.
+- Fork #10: status stuck CONNECTED with duration 0 after rapid connect/disconnect; stop doesn't help.
+- Fork #13: WhatsApp doesn't work through the iOS tunnel (open).
+- Fork #17: users can start the VPN from iOS Settings without the app.
+
+### B3. Connection drops, reconnect, lifecycle
+- **#17** iOS, filed by our user, closed. After a while (app in foreground or background) the tunnel either shows connected with no traffic, or disconnects entirely. Not present in the Dec-2025 build.
+  - Causes: the HEV thread exits without cancelTunnel (zombie "connected"); HEV read-write-timeout of 60 s killed idle TCP; health check ran only once at start; sleep()/wake() were no-ops.
+  - Fixed in a412b0026 / 1.1.5: exit detection → cancelTunnelWithError; periodic plus wake/path-change health checks; bounded logs. Timeout raised to 300 s. User confirmed on iOS.
+- 1.1.6/1.1.7 changelog-only themes:
+  - Distinguish manual system disconnect from failure.
+  - Disable On Demand on user stop.
+  - Serialize start/stop/permission and use provider reply deadlines.
+  - Avoid signalling HEV after exit (shutdown hang).
+  - Ignore events from earlier sessions.
+  - Deliver status on the platform thread.
+  - Cold Always-on restore.
+
+### B4. Memory (iOS NE, 50 MB jetsam)
+- **#23 and PR #24**, closed. Jetsam kill on Reality+XHTTP stream-up with many concurrent uploads.
+  - Cause: the Go h2 client per-stream upload scratch buffer is min(server MAX_FRAME_SIZE, 512 KB). The Xray server advertises 1 MB, so 35–45 streams cost 18–23 MB.
+  - On Go ≥1.25 x/net/http2 wraps the stdlib, so the fix is patching a GOROOT clone (`const max = 512<<10` → 128 KiB) before gomobile bind. Upstream XTLS/Xray-core#6663.
+- Also: SetMemoryLimit uses GC 10% and a 30 MB limit. Bounded log rotation was added in 1.1.5 because extension I/O and memory grew unbounded.
+
+### B5. Routing, per-app, bypass, geo, DNS
+- **#15 and PR #18**, Android, closed. blockedApps accepted but never applied to the builder (lost in the Java→Kotlin rewrite; same as fork #7). Fixed 1.1.5.
+- **#19** iOS, closed. Runtime-updatable geoip/geosite from the App Group. setenv(XRAY_LOCATION_ASSET) after Go init has no effect, so Xray looks only in the NE bundle. Added geoAssetsDirectory, which calls SetAssetLocation inside Go.
+  - Fork #15 (Android): copyAssets overwrote custom .dat on every connect, and Xray crashes if a referenced category is missing.
+- **DNS history:**
+  - The 1.0.x provider hardcoded 8.8.8.8 + 114.114.114.114, a Chinese resolver.
+  - 1.1.6 routes DNS through the proxy with a virtual resolver and no physical fallback. Android has a DNS policy option (config vs proxy).
+  - IPv6 is blocked everywhere with AAAA NODATA; the 1.1.7 changelog says "IPv6 payload captured", but forwarding is still IPv4-only on Apple and Windows.
+- bypassSubnets: rejected on iOS VPN; converted to Xray direct rules on macOS/Windows.
+
+### B6. Config, link parsing, core validation
+- **#29** Android, closed. INVALID_CONFIG for streamSettings.security none, because Xray 26.9.9 rejects VLESS to a public address without TLS/Reality or VLESS encryption. The plugin's generic message hid the core's actual reason.
+- **#10**: see B2.
+- 1.0.5 notes: flat VLESS normalization; port conflict auto-handling; log path sanitization; "avoid reporting connected when core exits immediately". Fork #16 also reports that Android startVless always succeeds even if Xray fails.
+
+### B7. Desktop runtime
+- **#15** Windows. VPN mode flashed several CMD windows (route/netsh via shell), then either stalled or showed a runaway upload counter (a loop). A reboot fixed it. Later reworked: absolute exe paths, no shell, owned job objects, WFP kill switch, interface binding.
+- 1.1.0: macOS system proxy has no UDP support, so QUIC breaks; proxy settings are restored on exit.
+
+### B8. Feature requests
+- Desktop (#1, #9: delivered 1.1.0).
+- WireGuard (#16: 1.1.3).
+- Linux (#25: open).
+- Quick Settings tile (#22 and PR #21: still open after review). Reviewer blockers:
+  - Android 14 `TileService.startActivityAndCollapse(Intent)` throws for targetSdk 34+; use the PendingIntent overload.
+  - Don't request VPN consent for proxy-only.
+  - Tile state goes stale when the engine is dead; persist state in the VPN process and call requestListeningState.
+  - The maintainer then wrote his own tile implementation.
+- Dynamic geo files (#19: done).
+
+### B9. License
+- flutter_vless's maintainer forced fork flutter_v2ray_plus to add MIT attribution (fork #2).
+- NOTICE/TRADEMARKS demand that notices are preserved.
+
+### B10. Process
+- Long silences (Dec–May).
+- "Fixed on main, pub later" (#17 user asked when).
+- Pub 1.1.7 packages don't match main.
+- Binaries are versioned separately (Maven, GitHub releases, user-supplied exe) and drift from wrappers (#13).
+- Every native fix requires integrators to re-copy provider files.
+
+### Upstream and forks (blueboy-tm/flutter_v2ray, 115 items; amir-zr/flutter_v2ray_client; shafiquecbl/flutter_v2ray_plus)
+- **Android lifecycle crashes:**
+  - Null Intent in onStartCommand on sticky restart (#103).
+  - BackgroundServiceStartNotAllowedException when stopping via startService from the background (#66).
+  - ANR when notifications are blocked (#107).
+  - ANR "startForegroundService did not call startForeground" (client #22).
+  - NPE in onActivityResult with a null pending result (#98).
+  - requestPermission returned false without waiting for the user (#77).
+  - registerReceiver missing the EXPORTED flag on API 34 (#50).
+  - IntentReceiverLeaked when the app is killed (client #23).
+  - Disconnects after 3–20 s (#24/#26/#30, client #21/#19).
+  - Rapid start/stop breaks stop (#33).
+  - Slowdown 15 min after the app is terminated (#47).
+- **Packaging:**
+  - Executables not extracted (above).
+  - 16 KB page-size requirement from Google Play (#115/#119/#120).
+  - Duplicate libgojni.so when combined with other gomobile plugins (#118).
+  - Play Protect flags the APK (#121).
+  - SELinux denial for the tun2socks executable on Vivo kills VoIP UDP (client #33).
+- **Status and stats:**
+  - No initial status until connected (#90).
+  - Speed mostly 0 (#86) or stuck at 0 (#67; client #15: core built without stats).
+  - Proxy-only shows zero traffic (#6).
+  - Reset counters on disconnect (#7).
+- **Delay:**
+  - Blocks or crashes while connected (#8, #78).
+  - Users want batch ping of many configs concurrently, like v2rayNG (#78).
+- **Network:**
+  - YouTube over Wi-Fi / IPv6 / Irancell problems (#15/#18/#43; DNS fix).
+  - Release build gets no internet without a LAN bypass (#64).
+- **Requests:**
+  - Notification customization or disabling (#22/#23/#37/#101, speed shown in the notification).
+  - QS tile (#36).
+  - Per-app include/exclude (#34/#36/#95).
+  - Routing, geoip/geosite, LAN/mainland bypass (#11/#29/#57/#80/#83).
+  - DoH (#60), fragment (#49), balancer (#109), hysteria (#63).
+  - Prompt core updates (#70/#91/#106).
+  - Hotspot sharing (#79).
+  - Background state/data monitoring with the app closed (#105).
+  - Core log access (client #3).
+  - iOS and desktop support were the most requested items (about 12 issues).
+
+## C. Lessons for our sing-box/libbox plugin (prioritized)
+
+### P0 — architecture
+1. **Run the core in-process (libbox gomobile AAR / Libbox.xcframework in the NE). Never exec binaries.** Feed the TUN fd directly through the libbox PlatformInterface (OpenTun/TunOptions). This removes the whole #1 failure class (useLegacyPackaging, AAB installs, minSdk ≥23, SELinux, Play Protect), the tun2socks/HEV layer and its bugs (#17), and per-second stats processes. It also removes the local SOCKS adapter.
+   - Pitfall: if any mixed/socks inbound exists in VPN mode, require auth or bind privately. flutter_vless 1.1.6 had to add auth because other apps could use the open localhost proxy.
+2. **Ship the Apple provider as a library class.** For example, an `open class` in a SwiftPM/CocoaPods product that the integrator subclasses in about 3 lines, never a copied 1300-line file.
+   - Version-lock binaries with wrapper code in one release, with checksums. Avoid #13-style skew.
+   - Make the extension bundle id fully configurable (no hardcoded ".XrayTunnel").
+   - Provide a setup CLI: target, entitlements, App Group, embed-phase order (avoid the #7 build cycle), deployment targets.
+   - Run a runtime self-check that reports mismatched Team, App Group or bundle id as typed errors.
+3. **Truthful state.**
+   - `start()` resolves only after libbox has started and the TUN is up, or throws a typed error carrying the core's message (sing-box CheckConfig/start error text). No generic INVALID_CONFIG (#29) and no success-on-failure (fork #16).
+   - Expose `checkConfig()`.
+   - Status = Stream + `getStatus()`, with an initial emit on subscribe (#90). States: connecting, connected, reasserting/recovering, disconnecting, disconnected, plus a lastError (code + message) and a stop reason (user / system / error / revoked).
+4. **Use the libbox CommandServer/CommandClient (unix socket in the app data dir / App Group) for status, traffic, logs, connections, groups and URL tests.**
+   - This works across the Android `:service` process and the iOS NE, needs no Activity-scoped receivers (IntentReceiverLeaked, RECEIVER_NOT_EXPORTED) and no 1 s provider-message polling.
+   - Report traffic as rates over real time deltas plus totals (#86, fork #14), reset per session (#7), and expose the libbox memory/goroutine/connection counts.
+5. **Serialize start/stop/restart in native code** (single queue + generation tokens). Make them idempotent, with deadlines on provider IPC. Avoid stuck CONNECTED after rapid toggles (upstream #33, fork #10).
+6. **Licensing:** sing-box is GPL-3.0-or-later with an extra name-use term. A plugin bundling libbox inherits GPL obligations: App Store + GPL tension, and we cannot use the "sing-box" name to imply association. Xray is MPL-2.0, which is why flutter_vless is MIT. Decide the license up front. If we reuse any flutter_vless parsers, keep their MIT notice; they enforce attribution (fork #2).
+
+### P1 — Android specifics
+1. Call startForeground immediately in onStartCommand, even without POST_NOTIFICATIONS (#107, client #22).
+   - Handle a null Intent (sticky restart or Always-on start without the app, #103). Restore the last authorized profile from encrypted storage.
+   - Stop via a binder/in-process command, not startService from the background (#66).
+   - Make the VPN-permission flow lifecycle-safe (#98, #77).
+2. FGS type: flutter_vless uses specialUse/"vpn". Decide between specialUse and systemExempted and verify against the Play FGS policy. UNVERIFIED which one SFA uses; check the sing-box-for-android manifest.
+3. Per-app: support both include and exclude modes, mapped to libbox TunOptions include/exclude packages. Add a test that the Builder actually receives them (#15/#18/fork #7). Don't exclude our own UID by default; libbox protects its own sockets (autoDetectInterfaceControl → VpnService.protect).
+4. Implement the DefaultNetworkMonitor / setUnderlyingNetworks properly. Don't hardcode setMetered(false), which flutter_vless does unconditionally and which mislabels cellular as unmetered. React to network changes (libbox resets the network).
+5. Always-on / lockdown: declare SUPPORTS_ALWAYS_ON, hide Disconnect under lockdown, expose isAlwaysOn/isLockdown capability.
+6. Notification: fully customizable title, text, icon, channel name, button label/action, optional live speed. Also allow opting out of the plugin's content or supplying your own (#37/#101).
+7. Quick Settings tile: optional. Use the PendingIntent startActivityAndCollapse on API 34+. No consent prompt for proxy-only. Persist tile state from the service process and call requestListeningState (PR #21 review).
+8. Packaging:
+   - Verify 16 KB alignment of libbox .so (Play requirement).
+   - libbox's gomobile output is libgojni.so, which collides with other gomobile AARs (#118). Check whether the SagerNet gomobile fork can rename the library (UNVERIFIED).
+   - Declare no superfluous permissions (flutter_vless declares READ_EXTERNAL_STORAGE).
+
+### P1 — iOS/macOS specifics
+1. Memory (50 MB NE):
+   - Use the libbox memory-limit mode (LibboxSetMemoryLimit) and bounded logs/rotation.
+   - Audit Go h2 client transports (sing-box HTTP/gRPC v2ray transports) for the #23 scratch-buffer pattern. UNVERIFIED whether sing-box 1.14 hits it.
+   - Test with connection-heavy apps (speedtest, banking).
+2. Provider robustness:
+   - When the core dies, call cancelTunnelWithError; no zombies (#17).
+   - Handle wake() and path changes by resetting connections.
+   - Bound IPC replies.
+   - Prefer the completion-handler startTunnel (the Swift 6.2 ICE in #5/#6). Compile the provider in CI on the latest Xcode.
+   - Apply network settings before starting traffic (fork #3).
+3. includeAllNetworks, excludeLocalNetworks, excludeAPNs, excludeCellularServices, enforceRoutes and On Demand must be **options** with documented trade-offs. flutter_vless forced includeAllNetworks=true with all exclusions disabled. That blocks LAN and has full-device-outage risk when the provider dies. Possibly relevant to the WhatsApp/push issues (fork #13; UNVERIFIED).
+   - Disable On Demand on user stop.
+   - Optional: refuse provider starts not initiated by the app ("prevent connect from Settings", fork #17; idea: inspect startTunnel options, UNVERIFIED).
+4. DNS: never hardcode public resolvers (the 1.0.x template had 114.114.114.114). Use the sing-box TUN DNS address + hijack-dns. Make IPv6 configurable instead of hard-blocking: sing-box TUN supports IPv6 natively, and IPv6 problems were common upstream.
+5. Shared data:
+   - Call LibboxSetup(basePath/workingPath/tempPath in the App Group) before any Go use. Lesson from #19: env set after Go init is ignored.
+   - Rule-sets (.srs) local/remote with update interval replace geoip/geosite .dat updating.
+   - Store the config in the App Group (file protection) or the Keychain with AfterFirstUnlock (flutter_vless VPN_KEYCHAIN_ERROR before first unlock). Not plaintext in providerConfiguration.
+6. Check fd acquisition: libbox gets the utun fd by scanning descriptors (the method flutter_vless dropped on macOS in favour of NEPacketTunnelFlow + socketpair). It is used by the official sing-box app, but test it on each iOS/macOS version.
+7. Proxy-only on iOS runs in the app process. Document that it stops in the background, or don't offer it.
+8. macOS: decide app-extension (App Store) vs System Extension (Developer ID) distribution; flutter_vless has no guidance. Document Team/App Group consistency checks (#13).
+
+### P1 — delay/ping
+1. Use libbox URL test on the running instance (urltest/selector groups, concurrent, streamed per outbound).
+2. For not-running profiles, provide a batch API with a concurrency limit, per-item timeout and results streamed as they arrive. This was the main v2rayNG-style request (#78).
+3. Return a typed result (ms | timeout | dns | tls | refused | unsupported), never a bare -1 or a stub 0.
+4. Make the URL configurable (default gstatic generate_204). Document what is measured (handshake vs. warmed second request); consider several samples.
+5. Never block the UI thread or crash while connected (#8).
+6. Must work while the VPN is up; flutter_vless needed workarounds for listener-port clashes.
+
+### P2 — config and links
+1. Provide link → sing-box outbound conversion with real-world test corpora: vless (reality, vision, ws/grpc/httpupgrade/http), vmess, trojan, ss (SIP002 + legacy base64 + plugins; #10 and fork #18 show ss breakage), socks, hysteria2/hy2, tuic, wireguard. Also base64 subscriptions, Clash YAML and native sing-box JSON.
+2. **Gap to flag:** flutter_vless users rely on Xray-only features: XHTTP/SplitHTTP (in #20 and #23), VLESS mlkem encryption, raw Xray JSON. sing-box can't run these. Fail clearly with "unsupported transport/feature" instead of producing broken configs.
+3. Keep raw-config passthrough for advanced users and expose the libbox format/check.
+
+### P2 — process and quality
+- CI that builds the example and a fresh `flutter create` consumer using the published artifacts on every platform. Bugs that slipped through without it: #12, #13, #14, fork #6.
+- Device test matrix.
+- Prompt releases to pub after fixes.
+- A changelog that flags required integrator actions.
+- Keep docs for Play/App Store review: VPN disclosure, privacy policy, Play FGS declaration (UNVERIFIED specifics), Apple NE entitlement.
+
+### Features flutter_vless / flutter_v2ray users requested that we should support
+1. Android + iOS + macOS + Windows, and Linux (#25).
+2. VPN mode and proxy-only mode (with LAN-share/hotspot option, #79).
+3. Protocols: VLESS-Reality/Vision, VMess, Trojan, SS (incl. SS2022), SOCKS, Hysteria2, WireGuard, TUIC (plus clear handling of XHTTP).
+4. Import: share links, base64 subscriptions (with update), Clash YAML, sing-box JSON.
+5. Per-app include/exclude.
+6. Domain/IP/geo/rule-set routing, LAN/private bypass, runtime-updatable rule data.
+7. Custom DNS incl. DoH/DoT, FakeIP; no DNS leaks.
+8. IPv6 support.
+9. Kill switch / Always-on / On-Demand / auto-reconnect with backoff.
+10. Status stream + getStatus + error reasons.
+11. Live speed + totals, also when the app was closed (#105).
+12. Ping: connected, per profile, and batch.
+13. Core version.
+14. Core/provider logs with redaction (client #3, getProviderDebugSnapshot).
+15. Customizable notification incl. speed and actions.
+16. Android Quick Settings tile / iOS Control Center / desktop tray.
+17. Balancer/auto-select (urltest), TLS fragment (#49; sing-box tls fragment support UNVERIFIED for 1.14).
+18. Working VoIP/UDP (WhatsApp, Telegram calls).
+19. Option to prevent start from iOS Settings.
