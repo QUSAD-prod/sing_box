@@ -1,9 +1,12 @@
 # sing_box rewrite — HANDOFF (start here in a new chat)
 
-Updated 2026-10-27 (end of session 3). Branch **`claude/package-study-navigators-83455e`** (all work committed).
+Updated 2026-10-28 (end of session 4). Branch **`claude/package-research-navigators-9311b3`** contains all
+previous work branches (`claude/package-study-navigators-83455e`, `claude/singbox-flutter-plugin-review-22aa2f`).
 Worktree `/Users/qusadprod/projects/sing_box/.claude/worktrees/singbox-flutter-plugin-review-22aa2f`.
 If a new chat starts on a fresh branch cut from `main`, fast-forward it first (main has LFS files, git-lfs is absent):
-`git -c filter.lfs.process= -c filter.lfs.clean= -c filter.lfs.smudge= -c filter.lfs.required=false merge --ff-only claude/package-study-navigators-83455e`
+`git -c filter.lfs.process= -c filter.lfs.clean= -c filter.lfs.smudge= -c filter.lfs.required=false merge --ff-only claude/package-research-navigators-9311b3`
+Commits are authored by the user's git identity without Claude co-author trailers; **only the user pushes** —
+never push.
 
 ## 0. Rules from the user
 - Goal: a fully working, fully featured `sing_box` Flutter VPN plugin (sing-box/libbox 1.14.4) with pub.dev-level
@@ -12,6 +15,7 @@ If a new chat starts on a fresh branch cut from `main`, fast-forward it first (m
 - **Do not publish the libbox GitHub release** until the user says so (asked 2026-10-27).
 - Avoid flutter_vless mistakes (§5; full study `doc/agent_notes/flutter_vless_research.md`, read only if needed).
 - Local servers for tests must bind **127.0.0.1** (0.0.0.0 is blocked by the auto-mode classifier).
+- Commits: no `Co-Authored-By: Claude` trailer, author = user's git config; **never push** (the user pushes).
 
 ## 1. Where things are
 | What | Where |
@@ -54,13 +58,15 @@ If a new chat starts on a fresh branch cut from `main`, fast-forward it first (m
   `SingBoxCancelledException`; start/stop serialized; `pingServers()` (TCP without tunnel, URL test with it);
   speed/STUN tests run directly when the VPN is off.
 
-## 4. State (all verified 2026-10-27)
-- `flutter analyze` clean (plugin + example); `flutter test`: 246 pass + 3 skipped (with `SING_BOX_BIN`: all pass);
-  `flutter pub publish --dry-run`: 244 KB, 0 warnings.
-- Android: `flutter build apk --debug/--release` OK (universal release 235 MB). Emulator e2e `vpn_e2e_test.dart` 8/8,
-  `permission_e2e_test.dart` 1/1.
-- iOS: SPM simulator debug + `--release --no-codesign` (140 MB) OK; CocoaPods mode OK; `smoke_test.dart` 5/5 on the
-  simulator; `add_packet_tunnel.rb` applied to `example/ios` (idempotent).
+## 4. State (verified 2026-10-28, session 4)
+- `dart format` clean, `flutter analyze` clean (plugin + example); `flutter test`: 246 pass + 3 skipped (the 3 need
+  `SING_BOX_BIN`; last full run with it: session 3); `flutter pub publish --dry-run`: 0 warnings; pana 150/160 (§6.4).
+- Android: `flutter build apk --debug/--release` OK (universal release 235 MB). Manual lifecycle scenarios pass on the
+  Android 17 emulator (Back/swipe, QS tile, boot start, update restart, Always-on + lockdown). Emulator e2e
+  `vpn_e2e_test.dart` 8/8 and `permission_e2e_test.dart` 1/1 were last run in session 3 (need the sing-box CLI).
+- iOS: SPM simulator debug + `--release --no-codesign` (140 MB) OK; `smoke_test.dart` 5/5 on the simulator (session 4);
+  CocoaPods mode OK in session 3; `add_packet_tunnel.rb` applied to `example/ios` (idempotent).
+- Local dev copy `android/libs/libbox.aar` (gitignored) = `build/libbox/libbox.aar`; needed until the release exists.
 
 ### Running the Android e2e
 1. Start the emulator (§2). 2. `SING_BOX_BIN=<sing-box 1.14> example/integration_test/server/run_e2e_server.sh` (background).
@@ -81,24 +87,29 @@ If a new chat starts on a fresh branch cut from `main`, fast-forward it first (m
   packages silently; `setMetered(false)` + `setUnderlyingNetworks` = follow the real network.
 - iOS: gomobile emits versioned frameworks → `flatten_xcframework.sh`; libbox Swift names
   `usePlatformAutoDetectControl()` / `autoDetectControl(_:)`; Libbox (static) is linked into both Runner and extension.
+- Android lifecycle (verified session 4, `example/lib/e2e_harness.dart`, see `doc/android.md`): `isLockdownEnabled()`
+  is false until `establish()` → the notification is rebuilt after connect; non-active QS tiles ignore
+  `requestListeningState` and refresh only while the panel is open (`cmd statusbar expand-settings` before
+  `click-tile`); `settings put secure always_on_vpn_*` needs a few seconds before `adb reboot` to persist.
+- libbox release assets must be the files whose SHA-256 is committed; CI rebuilds never match (`release_libbox.sh`
+  refuses to replace differing assets without `--force`).
 - flutter_vless lessons we follow: core in-process; truthful start result with exact error; serialized start/stop;
   validate config before replacing a session; immediate `startForeground`; null-intent start; no background
   `startService` for stop; Stop hidden under lockdown; iOS kill switch / On Demand / excludeLocalNetworks are options,
   never forced; provider shipped as a library class; XHTTP fails clearly.
 
 ## 6. Next tasks (in order)
-1. **pana** (`dart pub global run pana --no-warning .` in the plugin root; target 160/160) and fix findings.
-2. **CI sanity**: review `.github/workflows/ci.yml` / `libbox.yml` against the current scripts (flatten step is inside
-   `build_libbox.sh`; scripts are now executable; example integration tests are not run in CI).
-3. **Android manual scenarios on the emulator** (not automated yet): app closed (Back / swipe) while connected → VPN
-   keeps running, reopening the app shows `connected`; QS tile (`adb shell cmd statusbar add-tile …` / `click-tile`);
-   boot start (`startOnBoot` + `adb reboot`); Always-on/lockdown hides the Stop action. Idea: a tiny entrypoint
-   `example/lib/e2e_harness.dart` built with `-t` that connects from `--dart-define`s and prints state to logcat.
-4. **iOS review**: check `ios/sing_box/Sources/sing_box/TunnelController.swift` against the contract (status events,
-   `last_error` on failed starts, `stop` disables On Demand, reload path) — device testing needs the user's paid team
-   + iPhone (ask when ready).
-5. Before publishing (on the user's request only): publish the libbox release (`scripts/release_libbox.sh --publish`,
-   current `build/libbox` files), remove `doc/agent_notes/`, decide licensing (§7), bump version, squash if asked.
+1. **sing-box CLI for `test/config`**: building it (`go build ./cmd/sing-box` from a v1.14.4 clone in the scratchpad)
+   was refused by the auto-mode classifier in session 4 — ask the user to allow it (or to build it), then run
+   `SING_BOX_BIN=… flutter test test/config` and the Android `vpn_e2e_test.dart` (needs the e2e server).
+2. **iOS on a device**: the session-4 `TunnelController` changes (synthetic `connecting` until iOS reports the start,
+   errors of fast-failing starts, no stale `fetchLastDisconnectError` after `stop()`, `reload` error codes) compile and
+   pass the simulator smoke test, but Network Extensions only run on a device — needs the user's paid team + iPhone.
+3. **CI**: the native jobs fail until the libbox release exists; the `dart` job now builds the sing-box CLI.
+4. Before publishing (on the user's request only): publish the libbox release (`scripts/release_libbox.sh --publish`,
+   current `build/libbox` files — never a CI rebuild, see `libbox.yml`), remove `doc/agent_notes/`, decide licensing
+   (§7), bump version, squash if asked. pana is 150/160 only because `origin/main` still has the old `repository`
+   URL in pubspec — 160/160 once this branch is on main.
 
 ## 7. Open questions for the user
 1. When to publish the GitHub release `libbox-v1.14.4` (pub users cannot download libbox before that).
