@@ -99,6 +99,12 @@ If a new session starts on a fresh branch from `main` again, fast-forward it fir
   "no available network interface" (now synchronous like SFA); Android 17 `addAllowedApplication` silently accepts
   unknown packages and Android 11+ hides apps without `QUERY_ALL_PACKAGES` → start fails clearly when no
   `include_package` app is visible (example declares `QUERY_ALL_PACKAGES`, documented in doc/android.md).
+- Result: `vpn_e2e_test.dart` **8/8 pass** (info/validation, TCP ping, connect + traffic via SS and VLESS verified in
+  the server log, stats, groups, URL test, select, connections, clash modes, logs, switchServer/reload, stop, per-app
+  include/exclude/not-installed, first-start rule-set download, core start error, rapid toggles, restart);
+  `permission_e2e_test.dart` 1/1 (run without the consent loop; a fresh install has no consent).
+- libbox `urlTest(<single outbound>)` ignores the configured URL and uses gstatic (and deletes the history on failure),
+  so `pingOutbound` now tests via the outbound's `urltest` group when there is one.
 - Not automated yet: engine detach/reattach (swipe away app, VPN keeps running), boot start, tile, Always-on, notification UI.
 
 ## 4. Facts about libbox 1.14.4 learned so far
