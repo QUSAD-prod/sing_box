@@ -148,7 +148,9 @@ String? _nonEmpty(String? value) {
   return trimmed == null || trimmed.isEmpty ? null : trimmed;
 }
 
-String _requireHost(String host, String link) {
+/// The trimmed server address; throws a [FormatException] for an empty or
+/// invalid one.
+String requireHost(String host, String link) {
   final h = host.trim();
   if (h.isEmpty) {
     throw FormatException('Share link has no server address', link);
@@ -329,7 +331,9 @@ Map<String, dynamic>? buildTransport({
   }
 }
 
-String? _flow(String? value, Map<String, dynamic>? transport, String link) {
+/// The sing-box VLESS `flow` for [value]: Vision only on raw TCP; throws a
+/// [FormatException] for other flows.
+String? vlessFlow(String? value, Map<String, dynamic>? transport, String link) {
   final flow = value?.trim().toLowerCase();
   if (flow == null || flow.isEmpty || flow == 'none') return null;
   if (flow == 'xtls-rprx-vision' || flow == 'xtls-rprx-vision-udp443') {
@@ -339,7 +343,9 @@ String? _flow(String? value, Map<String, dynamic>? transport, String link) {
   throw FormatException('Unsupported VLESS flow "$value"', link);
 }
 
-String? _packetEncoding(String? value) {
+/// The sing-box `packet_encoding` (`xudp`, `packetaddr`, empty for `none`) or
+/// `null` when [value] is unknown.
+String? packetEncoding(String? value) {
   final encoding = value?.trim().toLowerCase();
   switch (encoding) {
     case 'xudp' || 'packetaddr':
@@ -356,7 +362,7 @@ _Parsed _vless(String link) {
   final p = splitLink(link);
   final uuid = percentDecode(p.userInfo ?? '').trim();
   if (uuid.isEmpty) throw FormatException('VLESS link has no UUID', link);
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 443);
   final encryption = p.param(['encryption'])?.toLowerCase();
   if (encryption != null && encryption != 'none') {
@@ -368,8 +374,8 @@ _Parsed _vless(String link) {
   final transport = _transportFromParams(p, link);
   final security = (p.param(['security']) ?? 'none').toLowerCase();
   final tls = _tlsFromParams(p, security, link);
-  final flow = _flow(p.param(['flow']), transport, link);
-  final encoding = _packetEncoding(p.param(['packetencoding']));
+  final flow = vlessFlow(p.param(['flow']), transport, link);
+  final encoding = packetEncoding(p.param(['packetencoding']));
   return _Parsed(
     {
       'type': 'vless',
@@ -393,7 +399,7 @@ _Parsed _trojan(String link) {
   if (password.isEmpty) {
     throw FormatException('Trojan link has no password', link);
   }
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 443);
   final transport = _transportFromParams(p, link);
   final security = (p.param(['security']) ?? 'tls').toLowerCase();
@@ -475,7 +481,7 @@ _Parsed _vmess(String link) {
   final p = splitLink(link);
   final uuid = percentDecode(p.userInfo ?? '').trim();
   if (uuid.isEmpty) throw FormatException('VMess link has no UUID', link);
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 443);
   final transport = _transportFromParams(p, link);
   final tls = _tlsFromParams(
@@ -489,10 +495,10 @@ _Parsed _vmess(String link) {
       'server': host,
       'server_port': port,
       'uuid': uuid,
-      'security': _vmessSecurity(p.param(['encryption', 'scy'])),
+      'security': vmessSecurity(p.param(['encryption', 'scy'])),
       if (_positive(readInt(p.param(['alterid', 'aid']))) case final aid?)
         'alter_id': aid,
-      if (_nonEmpty(_packetEncoding(p.param(['packetencoding'])))
+      if (_nonEmpty(packetEncoding(p.param(['packetencoding'])))
           case final encoding?)
         'packet_encoding': encoding,
       if (tls != null) 'tls': tls,
@@ -506,7 +512,8 @@ _Parsed _vmess(String link) {
 
 int? _positive(int? value) => value != null && value > 0 ? value : null;
 
-String _vmessSecurity(String? value) {
+/// The VMess `security`; unknown values become `auto`.
+String vmessSecurity(String? value) {
   final security = value?.trim().toLowerCase();
   const known = {
     'auto',
@@ -528,7 +535,7 @@ _Parsed _vmessJson(String text, String? fragment, String link) {
   }
   if (decoded is! Map) throw FormatException('Malformed VMess JSON', link);
   final map = decoded;
-  final host = _requireHost(readString(map['add']) ?? '', link);
+  final host = requireHost(readString(map['add']) ?? '', link);
   final port = readInt(map['port']) ?? 443;
   if (port < 1 || port > 65535) {
     throw FormatException('Invalid VMess port ${map['port']}', link);
@@ -568,7 +575,7 @@ _Parsed _vmessJson(String text, String? fragment, String link) {
       'server': host,
       'server_port': port,
       'uuid': uuid,
-      'security': _vmessSecurity(readString(map['scy'])),
+      'security': vmessSecurity(readString(map['scy'])),
       if (_positive(readInt(map['aid'])) case final aid?) 'alter_id': aid,
       if (tls != null) 'tls': tls,
       if (transport != null) 'transport': transport,
@@ -592,7 +599,7 @@ _Parsed _vmessShadowrocket(
   final security = userInfo.substring(0, colon);
   final uuid = userInfo.substring(colon + 1);
   final hostPort = splitHostPort(decoded.substring(at + 1));
-  final host = _requireHost(hostPort.host, link);
+  final host = requireHost(hostPort.host, link);
   final port = _port(hostPort.port, 443);
   final params = parseQuery(query);
   final obfs = (params['obfs'] ?? 'none').toLowerCase();
@@ -633,7 +640,7 @@ _Parsed _vmessShadowrocket(
       'server': host,
       'server_port': port,
       'uuid': uuid,
-      'security': _vmessSecurity(security),
+      'security': vmessSecurity(security),
       if (_positive(readInt(params['alterid'])) case final aid?)
         'alter_id': aid,
       if (tls != null) 'tls': tls,
@@ -711,7 +718,7 @@ _Parsed _shadowsocks(String link) {
   if (password.isEmpty && method != 'none') {
     throw FormatException('Shadowsocks link has no password', link);
   }
-  final host = _requireHost(hostPort.host, link);
+  final host = requireHost(hostPort.host, link);
   final port = hostPort.port;
   if (port == null) throw FormatException('Shadowsocks link has no port', link);
   final params = parseQuery(query);
@@ -781,14 +788,17 @@ bool _portCovered(int port, List<String> ranges) => ranges.any((range) {
   return port >= int.parse(parts[0]) && port <= int.parse(parts[1]);
 });
 
-int? _mbps(String? value) {
+/// The leading positive number of a bandwidth such as `100`, `100 Mbps`.
+int? parseMbps(String? value) {
   if (value == null) return null;
   final match = RegExp(r'^\s*(\d+)').firstMatch(value);
   final number = match == null ? null : int.tryParse(match.group(1)!);
   return number != null && number > 0 ? number : null;
 }
 
-String? _durationParam(String? value) {
+/// A sing-box duration: plain numbers are seconds; `ms`, `s`, `m`, `h`
+/// suffixes are kept; anything else is `null`.
+String? durationParam(String? value) {
   final v = _nonEmpty(value);
   if (v == null) return null;
   if (RegExp(r'^\d+$').hasMatch(v)) return '${v}s';
@@ -799,7 +809,7 @@ _Parsed _hysteria2(String link) {
   final p = splitLink(link, allowPortList: true);
   var password = percentDecode(p.userInfo ?? '');
   if (password.isEmpty) password = p.param(['auth', 'password']) ?? '';
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   List<String>? ports;
   int? port = p.port;
   if (p.port == null && p.hostPort.portText.isNotEmpty) {
@@ -836,12 +846,13 @@ _Parsed _hysteria2(String link) {
       'server': host,
       if (ports == null) 'server_port': port,
       if (ports != null) 'server_ports': ports,
-      if (_durationParam(p.param(['hop_interval', 'hopinterval']))
+      if (durationParam(p.param(['hop_interval', 'hopinterval']))
           case final interval?)
         'hop_interval': interval,
-      if (_mbps(p.param(['upmbps', 'up', 'up_mbps'])) case final up?)
+      if (parseMbps(p.param(['upmbps', 'up', 'up_mbps'])) case final up?)
         'up_mbps': up,
-      if (_mbps(p.param(['downmbps', 'down', 'down_mbps'])) case final down?)
+      if (parseMbps(p.param(['downmbps', 'down', 'down_mbps']))
+          case final down?)
         'down_mbps': down,
       if (obfs != null) 'obfs': obfs,
       'password': password,
@@ -855,7 +866,7 @@ _Parsed _hysteria2(String link) {
 
 _Parsed _hysteria(String link) {
   final p = splitLink(link, allowPortList: true);
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   List<String>? ports;
   var port = p.port;
   if (port == null && p.hostPort.portText.isNotEmpty) {
@@ -891,8 +902,8 @@ _Parsed _hysteria(String link) {
       'server': host,
       if (ports == null) 'server_port': port,
       if (ports != null) 'server_ports': ports,
-      'up_mbps': _mbps(p.param(['upmbps', 'up', 'up_mbps'])) ?? 10,
-      'down_mbps': _mbps(p.param(['downmbps', 'down', 'down_mbps'])) ?? 50,
+      'up_mbps': parseMbps(p.param(['upmbps', 'up', 'up_mbps'])) ?? 10,
+      'down_mbps': parseMbps(p.param(['downmbps', 'down', 'down_mbps'])) ?? 50,
       if (obfs != null) 'obfs': obfs,
       if (auth != null) 'auth_str': auth,
       if (tls != null) 'tls': tls,
@@ -921,7 +932,7 @@ _Parsed _tuic(String link) {
       link,
     );
   }
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 443);
   final congestion =
       p.param([
@@ -991,7 +1002,7 @@ _Parsed _socks(String link, String scheme) {
     }
   }
   final p = splitLink(effective);
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 1080);
   final (username, password) = _credentials(p.userInfo);
   final version = switch (scheme) {
@@ -1022,7 +1033,7 @@ _Parsed _http(String link, String scheme) {
       link,
     );
   }
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final secure = scheme == 'https';
   final port = _port(p.port, secure ? 443 : 80);
   final (username, password) = _credentials(p.userInfo);
@@ -1059,7 +1070,7 @@ _Parsed _anytls(String link) {
   if (password.isEmpty) {
     throw FormatException('AnyTLS link has no password', link);
   }
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 443);
   final tls = buildTls(
     security:
@@ -1090,13 +1101,15 @@ _Parsed _anytls(String link) {
 
 // --- WireGuard -------------------------------------------------------------
 
-String? _normalizePrefix(String value) {
+/// [value] as a CIDR prefix (plain addresses get /32 or /128), or `null`.
+String? normalizePrefix(String value) {
   final v = value.trim();
   if (v.isEmpty) return null;
   return SingBoxValidators.normalizeCidr(v);
 }
 
-List<int>? _reserved(String? value) {
+/// WireGuard `reserved` bytes from `1,2,3` or base64, or `null`.
+List<int>? parseReserved(String? value) {
   final v = _nonEmpty(value);
   if (v == null) return null;
   if (v.contains(',') || RegExp(r'^\d+$').hasMatch(v)) {
@@ -1138,16 +1151,16 @@ _Parsed _wireguard(String link) {
     for (final a in _splitList(
       p.param(['address', 'local_address', 'localaddress', 'ip', 'addresses']),
     ))
-      if (_normalizePrefix(a) case final String prefix) prefix,
+      if (normalizePrefix(a) case final String prefix) prefix,
   ];
   if (addresses.isEmpty) {
     throw FormatException('WireGuard link has no local address', link);
   }
-  final host = _requireHost(p.host, link);
+  final host = requireHost(p.host, link);
   final port = _port(p.port, 51820);
   final allowed = [
     for (final a in _splitList(p.param(['allowedips', 'allowed_ips'])))
-      if (_normalizePrefix(a) case final String prefix) prefix,
+      if (normalizePrefix(a) case final String prefix) prefix,
   ];
   final keepalive = readInt(
     p.param(['keepalive', 'persistent_keepalive', 'persistentkeepalive']),
@@ -1175,7 +1188,7 @@ _Parsed _wireguard(String link) {
           'allowed_ips': allowed.isEmpty ? ['0.0.0.0/0', '::/0'] : allowed,
           if (keepalive != null && keepalive > 0)
             'persistent_keepalive_interval': keepalive,
-          if (_reserved(p.param(['reserved'])) case final reserved?)
+          if (parseReserved(p.param(['reserved'])) case final reserved?)
             'reserved': reserved,
         },
       ],

@@ -4,6 +4,7 @@
 import 'dart:convert';
 
 import '../outbound.dart';
+import 'clash.dart';
 import 'json_utils.dart';
 import 'link_parser.dart';
 import 'uri_parts.dart';
@@ -14,6 +15,7 @@ List<SingBoxOutbound> parseSubscriptionContent(String content) {
   if (text.isEmpty) return [];
   final fromJson = _tryJson(text);
   if (fromJson != null) return _uniqueTags(fromJson);
+  if (isClashYaml(text)) return _uniqueTags(parseClashProxies(text));
   if (!text.contains('://')) {
     final decoded = tryDecodeBase64(text);
     if (decoded != null) {
