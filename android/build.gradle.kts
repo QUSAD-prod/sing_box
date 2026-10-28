@@ -11,7 +11,7 @@ import java.util.UUID
 import java.util.zip.ZipFile
 
 group = "com.qusadprod.sing_box"
-version = "1.0.1"
+version = "1.1.0"
 
 // The oldest supported versions (the Flutter 3.29 app template). In an app
 // build the app's own, usually newer, Android and Kotlin Gradle plugins are

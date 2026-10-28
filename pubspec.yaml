@@ -2,7 +2,7 @@ name: sing_box
 description: >-
   Flutter VPN plugin powered by the sing-box core: VLESS, VMess, Trojan,
   Shadowsocks, Hysteria2, TUIC, WireGuard, routing rules, stats and speed tests.
-version: 1.0.1
+version: 1.1.0
 homepage: https://github.com/QUSAD-prod/sing_box
 repository: https://github.com/QUSAD-prod/sing_box
 issue_tracker: https://github.com/QUSAD-prod/sing_box/issues

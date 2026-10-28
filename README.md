@@ -80,7 +80,7 @@ included; see [Building libbox](#building-libbox-yourself).
 
 ```yaml
 dependencies:
-  sing_box: ^1.0.1
+  sing_box: ^1.1.0
 ```
 
 Requires Flutter 3.29 or newer (Dart 3.7+).

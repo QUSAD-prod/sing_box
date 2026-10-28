@@ -13,7 +13,7 @@ require_relative 'libbox'
 
 Pod::Spec.new do |s|
   s.name             = 'SingBoxTunnel'
-  s.version          = '1.0.1'
+  s.version          = '1.1.0'
   s.summary          = 'Packet Tunnel provider of the sing_box Flutter plugin.'
   s.description      = <<-DESC
 NEPacketTunnelProvider subclass running the sing-box core (libbox) for the
