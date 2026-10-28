@@ -13,14 +13,14 @@ require_relative 'libbox'
 
 Pod::Spec.new do |s|
   s.name             = 'SingBoxTunnel'
-  s.version          = '0.1.0'
+  s.version          = '1.0.0'
   s.summary          = 'Packet Tunnel provider of the sing_box Flutter plugin.'
   s.description      = <<-DESC
 NEPacketTunnelProvider subclass running the sing-box core (libbox) for the
 sing_box Flutter plugin. Link it into the app's Network Extension target.
                        DESC
   s.homepage         = 'https://github.com/QUSAD-prod/sing_box'
-  s.license          = { :type => 'MIT', :file => '../LICENSE' }
+  s.license          = { :type => 'GPL-3.0-or-later', :file => '../LICENSE' }
   s.author           = { 'QUSAD-prod' => 'https://github.com/QUSAD-prod' }
   s.source           = { :path => '.' }
   s.platform         = :ios, '15.0'

@@ -1,6 +1,6 @@
 // End-to-end test against real sing-box servers. Start them with
 // `SING_BOX_BIN=… integration_test/server/run_e2e_server.sh` and keep
-// `integration_test/server/grant_vpn_consent.sh` running (see doc/HANDOFF.md).
+// `integration_test/server/grant_vpn_consent.sh` running (see CONTRIBUTING.md).
 //
 // Needs a sing-box server reachable from the device (the Android emulator
 // reaches the host's loopback as 10.0.2.2) with

@@ -4,11 +4,16 @@
 [![likes](https://img.shields.io/pub/likes/sing_box)](https://pub.dev/packages/sing_box/score)
 [![platform](https://img.shields.io/badge/platform-android%20%7C%20ios-blue)](#platform-support)
 [![sing-box](https://img.shields.io/badge/sing--box-1.14.4-informational)](https://github.com/SagerNet/sing-box)
+[![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#license)
 
 A Flutter VPN plugin powered by [sing-box](https://sing-box.sagernet.org), the
 universal proxy platform. It runs the official sing-box core (`libbox`) inside
 an Android `VpnService` and an iOS Packet Tunnel Network Extension and exposes
 everything a VPN client app needs through a typed Dart API.
+
+> **Unofficial.** This plugin is a community project. It is not affiliated
+> with, endorsed by or supported by SagerNet or the sing-box project; report
+> problems with the plugin [here](https://github.com/QUSAD-prod/sing_box/issues).
 
 ```dart
 await SingBox.instance.initialize();
@@ -23,8 +28,9 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
   ShadowTLS, SOCKS, HTTP, SSH and more, with WebSocket, gRPC, HTTP/2,
   HTTPUpgrade and QUIC transports, uTLS fingerprints and multiplexing.
 - **Share links and subscriptions**: import `vless://`, `vmess://`, `trojan://`,
-  `ss://`, `hysteria2://`, `tuic://`, `socks://`, `http://` links and base64
-  subscriptions; export profiles back to links.
+  `ss://`, `hysteria2://`, `hysteria://`, `tuic://`, `anytls://`,
+  `wireguard://`, `socks://`, `http://` links and base64, plain, JSON and
+  SIP008 subscriptions; export profiles back to links.
 - **Config generation**: a complete, validated sing-box 1.14 configuration
   (TUN, DNS, routing, URL test groups, cache, clash API) is generated from a
   link or outbound - or bring your own full config.
@@ -55,7 +61,7 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
 | VPN mechanism | `VpnService` (foreground service) | Packet Tunnel Network Extension |
 | Per-app routing | ✅ | ❌ (requires MDM) |
 | Kill switch | System setting (*Block connections without VPN*) | `includeAllNetworks` |
-| Auto reconnect | Always-on VPN / sticky service | VPN On Demand |
+| Auto reconnect | Always-on VPN | VPN On Demand |
 | Start on boot | ✅ | via On Demand |
 | Quick Settings tile | ✅ (Android 7+, add prompt on 13+) | – |
 | Simulator / emulator | Emulator: full support | Simulator: UI only, Network Extensions do not run |
@@ -69,7 +75,7 @@ included; see [Building libbox](#building-libbox-yourself).
 
 ```yaml
 dependencies:
-  sing_box: ^0.1.0
+  sing_box: ^1.0.0
 ```
 
 The native libraries (~85 MB AAR, ~200 MB XCFramework) are too large for
@@ -490,13 +496,18 @@ in-memory implementation.
 | Scheme | Notes |
 | --- | --- |
 | `vless://` | TLS / Reality (`pbk`, `sid`, `spx`), Vision flow, `tcp`, `ws`, `grpc`, `http`/`h2`, `httpupgrade`, uTLS `fp`. XHTTP is not supported by sing-box. |
-| `vmess://` | v2rayN base64 JSON format |
+| `vmess://` | v2rayN base64 JSON, Xray and Shadowrocket formats |
 | `trojan://` | TLS, transports as VLESS |
-| `ss://` | SIP002 and legacy formats, `obfs-local` / `v2ray-plugin` |
+| `ss://` | SIP002, SIP022 (2022 ciphers) and legacy formats, `obfs-local` / `v2ray-plugin` |
 | `hysteria2://`, `hy2://` | obfs `salamander`, port hopping, bandwidth |
 | `hysteria://` | v1 |
 | `tuic://` | v5 |
-| `socks://`, `socks5://`, `http://`, `https://` | Plain proxies |
+| `anytls://` | AnyTLS |
+| `wireguard://`, `wg://` | WireGuard endpoint |
+| `socks://`, `socks5://`, `socks5h://`, `socks4://`, `http://`, `https://` | Plain proxies |
+
+`ssr://` (ShadowsocksR), XHTTP and mKCP transports are not supported by
+sing-box; such links fail with a `FormatException` that says so.
 
 ## Building libbox yourself
 
@@ -539,9 +550,23 @@ features.
 - **The first build is slow** - the native library is downloaded once and
   cached.
 
-## Migrating from 0.0.x
+## Publishing an app that uses sing_box
 
-0.1.0 is a rewrite on top of sing-box 1.14:
+- **GPL**: the plugin and the sing-box core are GPL-3.0-or-later, so an app
+  that ships them is distributed under the GPL as well: publish the app's
+  complete corresponding source code under a GPL-compatible license and keep
+  the notices (see [License](#license)).
+- **Google Play**: apps that use `VpnService` must have VPN as their core
+  functionality and fill in the VPN declaration and the foreground service
+  declaration (`systemExempted`) in the Play Console.
+- **App Store**: VPN apps must be published by a developer enrolled as an
+  organization (App Review Guideline 5.4) and need the Network Extension
+  entitlement for both the app and the extension.
+- **Size**: ship an App Bundle (Android) - each ABI adds ~60 MB of libbox.
+
+## Migrating from 0.0.1
+
+1.0.0 is a rewrite on top of sing-box 1.14:
 
 - Action methods (`connect`, `disconnect`, …) return `Future<void>` and throw
   `SingBoxException`s instead of returning `false`.
@@ -558,11 +583,24 @@ features.
   exclude them from the VPN.
 - iOS needs the Packet Tunnel extension target described above.
 
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+describes the development setup, the test suites (unit tests validated with
+the real sing-box CLI, Android emulator end-to-end tests, the iOS simulator
+smoke test) and [how releases are made](doc/releasing.md).
+
 ## License
 
-The Dart and native wrapper code of this plugin is released under the
-[MIT License](LICENSE). The bundled sing-box core (`libbox`) is licensed under
-**GPL-3.0-or-later**; apps that ship it must comply with the GPL. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright (C) 2025-2026 QUSAD-prod.
 
-This project is not affiliated with SagerNet or the sing-box project.
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version ([LICENSE](LICENSE)). Versions up to 0.0.1 were released under the MIT
+License.
+
+The native code is partly adapted from the official sing-box clients, and the
+sing-box core (`libbox`) is GPL-3.0-or-later with an additional naming clause;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). "sing-box" is the name of
+the SagerNet project; this plugin is not affiliated with it.

@@ -1,5 +1,6 @@
 # Files that must not be published to pub.dev.
-# (.gitignore rules apply as well.)
+# A .pubignore replaces the .gitignore of its directory for publishing, so the
+# relevant .gitignore rules are repeated here.
 
 # Native libbox binaries - downloaded at build time from GitHub releases.
 android/libs/
@@ -27,10 +28,16 @@ build/
 **/xcuserdata/
 .DS_Store
 
-# Internal working notes
-doc/agent_notes/
-
-# Repository tooling
+# Repository tooling and maintainer docs
 .github/
+CONTRIBUTING.md
+doc/releasing.md
+doc/releasing.ru.md
 
-doc/HANDOFF.md
+# Local files
+/pubspec.lock
+/coverage/
+**/.swiftpm/
+**/.build/
+*.class
+*.log

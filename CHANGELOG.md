@@ -1,4 +1,4 @@
-## 0.1.0
+## 1.0.0
 
 A complete rewrite on top of **sing-box 1.14.4** (`libbox`).
 
@@ -44,9 +44,15 @@ A complete rewrite on top of **sing-box 1.14.4** (`libbox`).
   for the Packet Tunnel extension (CocoaPods pod of the same name).
 - Android: built-in Kotlin (AGP 9), foreground service with live speed and a
   Stop action, Always-on VPN and boot start support.
-- Full-featured example app.
+- Android Always-on VPN with *Block connections without VPN* hides the Stop
+  action of the notification.
+- Full-featured example app and `example/lib/e2e_harness.dart` for manual
+  lifecycle checks.
 
 ### Changed (breaking)
+- **License: GPL-3.0-or-later** (was MIT). The native code is partly adapted
+  from the official sing-box clients and the sing-box core is GPL-3.0-or-later;
+  see `THIRD_PARTY_NOTICES.md`.
 - Requires Flutter 3.44+ / Dart 3.12+, Android API 24+, iOS 15+.
 - Action methods return `Future<void>` and throw `SingBoxException`s.
 - `SingBoxConnectionStatus` reduced to `disconnected`, `connecting`,

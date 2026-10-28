@@ -1,0 +1,77 @@
+name: Publish to pub.dev
+
+# Publishes the package when a version tag `v<pubspec version>` is pushed
+# (`git push origin v1.0.0`, or a GitHub release that creates the tag).
+# pub.dev authenticates the job with GitHub's OIDC token: enable it once on
+# https://pub.dev/packages/sing_box/admin -> Automated publishing
+# (repository QUSAD-prod/sing_box, tag pattern `v{{version}}`, optionally
+# require the `pub.dev` environment). See doc/releasing.md.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+jobs:
+  verify:
+    name: Verify the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Tag matches the pubspec version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(sed -n -E 's/^version: *([^ ]+).*/\1/p' pubspec.yaml)"
+          if [ "$TAG" != "v$version" ]; then
+            echo "Tag $TAG does not match pubspec version $version" >&2
+            exit 1
+          fi
+          grep -q "^## $version\$" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section" >&2; exit 1; }
+      - name: libbox release assets match the pinned checksums
+        run: scripts/verify_libbox_release.sh
+      - uses: actions/cache@v4
+        id: sing-box-cli
+        with:
+          path: ~/.cache/sing-box-cli
+          key: sing-box-cli-${{ hashFiles('LIBBOX_VERSION') }}
+      - uses: actions/setup-go@v5
+        if: steps.sing-box-cli.outputs.cache-hit != 'true'
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Build the sing-box CLI
+        if: steps.sing-box-cli.outputs.cache-hit != 'true'
+        run: |
+          version="$(tr -d '[:space:]' < LIBBOX_VERSION)"
+          mkdir -p ~/.cache/sing-box-cli
+          git clone --quiet --depth 1 --branch "v$version" https://github.com/SagerNet/sing-box.git "$RUNNER_TEMP/sing-box"
+          cd "$RUNNER_TEMP/sing-box"
+          go build -trimpath -tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api \
+            -o ~/.cache/sing-box-cli/sing-box ./cmd/sing-box
+      - run: echo "SING_BOX_BIN=$HOME/.cache/sing-box-cli/sing-box" >> "$GITHUB_ENV"
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test example/lib example/integration_test
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter pub publish --dry-run
+
+  publish:
+    name: Publish
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      id-token: write # OIDC token for pub.dev
+    steps:
+      - uses: actions/checkout@v4
+      # Configures the pub.dev credentials from the OIDC token.
+      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: dart pub publish --force

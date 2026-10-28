@@ -7,7 +7,7 @@ require_relative 'libbox'
 
 Pod::Spec.new do |s|
   s.name             = 'sing_box'
-  s.version          = '0.1.0'
+  s.version          = '1.0.0'
   s.summary          = 'Flutter VPN plugin powered by the sing-box core.'
   s.description      = <<-DESC
 Flutter plugin running the sing-box core (libbox) in a Network Extension:
@@ -15,7 +15,7 @@ VLESS, VMess, Trojan, Shadowsocks, Hysteria2, TUIC, WireGuard, routing rules,
 statistics and speed tests.
                        DESC
   s.homepage         = 'https://github.com/QUSAD-prod/sing_box'
-  s.license          = { :type => 'MIT', :file => '../LICENSE' }
+  s.license          = { :type => 'GPL-3.0-or-later', :file => '../LICENSE' }
   s.author           = { 'QUSAD-prod' => 'https://github.com/QUSAD-prod' }
   s.source           = { :path => '.' }
   s.platform         = :ios, '15.0'
