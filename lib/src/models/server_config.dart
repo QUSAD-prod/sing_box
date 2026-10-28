@@ -9,8 +9,8 @@ import '../config/outbound.dart';
 /// * a **single sing-box outbound** object, e.g.
 ///   `{"type": "vless", "tag": "my-server", "server": "...", ...}` - the
 ///   plugin wraps it into a complete configuration with TUN, DNS and routing
-///   (see `SingBoxConfigBuilder`); this is what `SingBoxServerConfig.fromLink`
-///   produces, or
+///   (see `SingBoxConfigBuilder`); this is what
+///   [SingBoxServerConfig.fromOutbound] produces, or
 /// * a **complete sing-box configuration** (with `outbounds`, usually also
 ///   `inbounds`, `dns` and `route`) - used as is, with the stored routing
 ///   rules applied on top.

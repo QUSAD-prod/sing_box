@@ -21,9 +21,11 @@ import 'models/settings.dart';
 import 'models/sing_box_notification.dart';
 import 'models/speed_test_result.dart';
 import 'models/stun_result.dart';
+import 'models/subscription.dart';
 import 'observer/sing_box_observer.dart';
 import 'options.dart';
 import 'storage.dart';
+import 'subscription_loader.dart';
 import 'utils/validators.dart';
 
 /// The entry point of the plugin: controls the sing-box VPN tunnel.
@@ -100,6 +102,18 @@ class SingBox {
   /// Whether a running tunnel is reloaded automatically when the routing
   /// rules change (bypass/block lists, DNS servers). Defaults to `true`.
   bool reloadOnRulesChange = true;
+
+  /// `User-Agent` for subscriptions without their own
+  /// [SingBoxSubscription.userAgent]. `null` (the default) sends
+  /// `sing-box/<core version>`: providers that look at the User-Agent then
+  /// return a sing-box configuration, share links or base64 links.
+  String? subscriptionUserAgent;
+
+  /// Timeout of one subscription download.
+  Duration subscriptionTimeout = const Duration(seconds: 30);
+
+  final _subscriptionChanges =
+      StreamController<List<SingBoxSubscription>>.broadcast();
 
   // ===========================================================================
   // Lifecycle
@@ -180,6 +194,15 @@ class SingBox {
     if (settings.autoConnectOnStart && !_state.status.isActive) {
       unawaited(_autoConnect());
     }
+    unawaited(_autoUpdateSubscriptions());
+  }
+
+  Future<void> _autoUpdateSubscriptions() async {
+    try {
+      await updateSubscriptions(onlyStale: true);
+    } on Object catch (e, s) {
+      _observer.error('Automatic subscription update failed', e, s);
+    }
   }
 
   Future<void> _autoConnect() async {
@@ -234,6 +257,8 @@ class SingBox {
     _observer = const SingBoxNoOpObserver();
     configOptions = const SingBoxConfigOptions();
     reloadOnRulesChange = true;
+    subscriptionUserAgent = null;
+    subscriptionTimeout = const Duration(seconds: 30);
     _mutation = Future<void>.value();
     _serviceQueue = Future<void>.value();
     _startWaiter?.cancel();
@@ -1888,6 +1913,342 @@ class SingBox {
   @Deprecated('Use getActiveServerConfig() instead.')
   Future<SingBoxServerConfig?> getActiveSingBoxServerConfig() =>
       getActiveServerConfig();
+
+  // ===========================================================================
+  // Subscriptions
+  // ===========================================================================
+
+  /// Returns all stored subscriptions.
+  Future<List<SingBoxSubscription>> getSubscriptions() async {
+    final list = await _storage.readList(SingBoxStorage.keySubscriptions);
+    return (list ?? const [])
+        .whereType<Map<dynamic, dynamic>>()
+        .map(SingBoxSubscription.fromMap)
+        .toList();
+  }
+
+  /// Returns the subscription [id], or `null`.
+  Future<SingBoxSubscription?> getSubscription(String id) async {
+    for (final subscription in await getSubscriptions()) {
+      if (subscription.id == id) return subscription;
+    }
+    return null;
+  }
+
+  /// Emits the stored subscriptions now and again after every change
+  /// (added, updated, edited, removed).
+  Stream<List<SingBoxSubscription>> watchSubscriptions() async* {
+    yield await getSubscriptions();
+    yield* _subscriptionChanges.stream;
+  }
+
+  Future<void> _writeSubscriptions(List<SingBoxSubscription> subscriptions) {
+    _subscriptionChanges.add(List.unmodifiable(subscriptions));
+    return _storage.writeJson(
+      SingBoxStorage.keySubscriptions,
+      subscriptions.map((s) => s.toMap()).toList(),
+    );
+  }
+
+  /// Downloads the subscription at [url], imports its servers as profiles
+  /// and stores the subscription.
+  ///
+  /// The body may be share links (plain or base64), a sing-box
+  /// configuration or outbound list, a SIP008 document or a Clash / mihomo
+  /// YAML configuration; unsupported entries are skipped. The name is
+  /// [name], else the provider's `profile-title` or `content-disposition`
+  /// header, else the URL host. Traffic, expiry, update interval and
+  /// provider links are read from the response headers (see
+  /// [SingBoxSubscription]).
+  ///
+  /// [userAgent] overrides [subscriptionUserAgent] and [headers] are added
+  /// to the request. [updateInterval] overrides the provider's interval for
+  /// [updateSubscriptions]; [autoUpdate] enables automatic updates.
+  ///
+  /// Throws a [SingBoxSubscriptionException] when the download fails or no
+  /// supported server is found; nothing is stored then.
+  ///
+  /// ```dart
+  /// final sub = await SingBox.instance.addSubscription(
+  ///   'https://example.com/sub/token',
+  ///   name: 'My provider',
+  /// );
+  /// final servers = (await SingBox.instance.getServerConfigs())
+  ///     .where((s) => s.subscriptionId == sub.id);
+  /// ```
+  Future<SingBoxSubscription> addSubscription(
+    String url, {
+    String? name,
+    String? userAgent,
+    Map<String, String> headers = const {},
+    Duration? updateInterval,
+    bool autoUpdate = true,
+  }) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !uri.hasAuthority) {
+      throw SingBoxSubscriptionException('Invalid URL: $url', url: url);
+    }
+    final ids = {for (final s in await getSubscriptions()) s.id};
+    var id = 'sub-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+    for (var i = 2; ids.contains(id); i++) {
+      id = '$id-$i';
+    }
+    final draft = SingBoxSubscription(
+      id: id,
+      name: name?.trim() ?? '',
+      url: uri.toString(),
+      userAgent: userAgent,
+      headers: headers,
+      autoUpdate: autoUpdate,
+      updateInterval: updateInterval,
+    );
+    return _downloadSubscription(draft, isNew: true);
+  }
+
+  /// Downloads the subscription [id] again and replaces its servers.
+  ///
+  /// Servers keep their ids (`<subscription id>/<tag>`) and their `enabled`
+  /// flag when the provider keeps their names, so the active server stays
+  /// selected; when the active server disappeared the active server is
+  /// cleared. A running tunnel is not reloaded.
+  ///
+  /// Throws a [SingBoxSubscriptionException] when the download fails; the
+  /// error is also stored in [SingBoxSubscription.lastError] and the old
+  /// servers are kept.
+  Future<SingBoxSubscription> updateSubscription(String id) async {
+    final subscription = await getSubscription(id);
+    if (subscription == null) {
+      throw SingBoxSubscriptionException('No subscription with id $id');
+    }
+    return _downloadSubscription(subscription, isNew: false);
+  }
+
+  /// Updates every subscription, or with [onlyStale] only those with
+  /// [SingBoxSubscription.autoUpdate] that are older than their
+  /// [SingBoxSubscription.effectiveUpdateInterval]. Returns the updated
+  /// subscriptions; failures are recorded in
+  /// [SingBoxSubscription.lastError] instead of being thrown.
+  ///
+  /// `initialize()` calls it with `onlyStale: true`; call it again, for
+  /// example when the app returns to the foreground, to keep subscriptions
+  /// fresh.
+  Future<List<SingBoxSubscription>> updateSubscriptions({
+    bool onlyStale = false,
+  }) async {
+    final updated = <SingBoxSubscription>[];
+    for (final subscription in await getSubscriptions()) {
+      if (onlyStale && (!subscription.autoUpdate || !subscription.isStale())) {
+        continue;
+      }
+      try {
+        updated.add(await _downloadSubscription(subscription, isNew: false));
+      } on SingBoxSubscriptionException {
+        // Recorded in lastError.
+      }
+    }
+    return updated;
+  }
+
+  /// Stores changed settings of a subscription (name, URL, User-Agent,
+  /// headers, update interval, auto update). Returns `false` if there is no
+  /// subscription with the same id. Servers are not downloaded again.
+  Future<bool> editSubscription(SingBoxSubscription subscription) {
+    return _synchronized(() async {
+      final subscriptions = await getSubscriptions();
+      final index = subscriptions.indexWhere((s) => s.id == subscription.id);
+      if (index < 0) return false;
+      subscriptions[index] = subscription;
+      await _writeSubscriptions(subscriptions);
+      return true;
+    });
+  }
+
+  /// Removes the subscription [id] and, with [removeServers], its servers;
+  /// otherwise the servers are kept as ordinary profiles. Returns `false` if
+  /// there is no such subscription.
+  Future<bool> removeSubscription(String id, {bool removeServers = true}) {
+    return _synchronized(() async {
+      final subscriptions = await getSubscriptions();
+      if (!subscriptions.any((s) => s.id == id)) return false;
+      await _writeSubscriptions(
+        subscriptions.where((s) => s.id != id).toList(),
+      );
+      final servers = await getServerConfigs();
+      final kept = <SingBoxServerConfig>[];
+      final removed = <String>[];
+      for (final server in servers) {
+        if (server.subscriptionId != id) {
+          kept.add(server);
+        } else if (removeServers) {
+          removed.add(server.id);
+        } else {
+          kept.add(
+            SingBoxServerConfig.fromMap(
+              server.toMap()..remove('subscriptionId'),
+            ),
+          );
+        }
+      }
+      await _writeServers(kept);
+      await _forgetRemovedServers(removed);
+      _observer.info('Subscription removed', {'id': id});
+      return true;
+    });
+  }
+
+  String get _defaultSubscriptionUserAgent {
+    final version = _runtimeInfo?.singBoxVersion;
+    return version == null || version.isEmpty
+        ? 'sing-box'
+        : 'sing-box/$version';
+  }
+
+  Future<SingBoxSubscription> _downloadSubscription(
+    SingBoxSubscription subscription, {
+    required bool isNew,
+  }) async {
+    final SubscriptionResponse response;
+    final List<SingBoxOutbound> outbounds;
+    try {
+      response = await downloadSubscription(
+        Uri.parse(subscription.url),
+        userAgent:
+            subscription.userAgent ??
+            subscriptionUserAgent ??
+            _defaultSubscriptionUserAgent,
+        headers: subscription.headers,
+        timeout: subscriptionTimeout,
+      );
+      outbounds = SingBoxShareLink.parseSubscription(response.body);
+      if (outbounds.isEmpty) {
+        throw SingBoxSubscriptionException(
+          'No supported servers found',
+          url: subscription.url,
+        );
+      }
+    } on SingBoxSubscriptionException catch (e) {
+      _observer.warning('Subscription download failed', {
+        'id': subscription.id,
+        'error': e.message,
+      });
+      if (!isNew) {
+        await _synchronized(() async {
+          final subscriptions = await getSubscriptions();
+          final index = subscriptions.indexWhere(
+            (s) => s.id == subscription.id,
+          );
+          if (index < 0) return;
+          subscriptions[index] = subscriptions[index].copyWith(
+            lastError: e.message,
+          );
+          await _writeSubscriptions(subscriptions);
+        });
+      }
+      rethrow;
+    }
+
+    return _synchronized(() async {
+      final subscriptions = await getSubscriptions();
+      final index = subscriptions.indexWhere((s) => s.id == subscription.id);
+      if (!isNew && index < 0) {
+        throw SingBoxSubscriptionException(
+          'The subscription was removed during the update',
+          url: subscription.url,
+        );
+      }
+      final current = isNew ? subscription : subscriptions[index];
+      final headers = response.headers;
+      final uri = Uri.parse(current.url);
+      final servers = await getServerConfigs();
+      final previous = {
+        for (final s in servers)
+          if (s.subscriptionId == current.id) s.id: s,
+      };
+      final fresh = [
+        for (final outbound in outbounds)
+          SingBoxServerConfig.fromOutbound(
+            outbound.json,
+            id: '${current.id}/${outbound.tag}',
+            name: outbound.name ?? outbound.tag,
+            link: outbound.link,
+            subscriptionId: current.id,
+          ).copyWith(
+            enabled: previous['${current.id}/${outbound.tag}']?.enabled,
+          ),
+      ];
+      final firstIndex = servers.indexWhere(
+        (s) => s.subscriptionId == current.id,
+      );
+      final others = servers.where((s) => s.subscriptionId != current.id);
+      // The new servers take the place of the old ones (everything before
+      // the first old server belongs to other subscriptions).
+      final merged =
+          others.toList()
+            ..insertAll(firstIndex < 0 ? others.length : firstIndex, fresh);
+      await _writeServers(merged);
+
+      final freshIds = {for (final s in fresh) s.id};
+      await _forgetRemovedServers([
+        for (final id in previous.keys)
+          if (!freshIds.contains(id)) id,
+      ]);
+      for (final server in fresh) {
+        if (!previous.containsKey(server.id)) {
+          _observer.onServerConfigAdded(server.id, server.name);
+        }
+      }
+
+      final updated = SingBoxSubscription(
+        id: current.id,
+        name:
+            current.name.isNotEmpty
+                ? current.name
+                : headers.name ?? (uri.host.isEmpty ? current.url : uri.host),
+        url: current.url,
+        userAgent: current.userAgent,
+        headers: current.headers,
+        autoUpdate: current.autoUpdate,
+        updateInterval: current.updateInterval,
+        providerUpdateInterval: headers.updateInterval,
+        // Millisecond precision, like the stored value.
+        lastUpdated: DateTime.fromMillisecondsSinceEpoch(
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        serverCount: fresh.length,
+        upload: headers.upload,
+        download: headers.download,
+        total: headers.total,
+        expire: headers.expire,
+        webPageUrl: headers.webPageUrl,
+        supportUrl: headers.supportUrl,
+        announce: headers.announce,
+      );
+      if (isNew) {
+        subscriptions.add(updated);
+      } else {
+        subscriptions[index] = updated;
+      }
+      await _writeSubscriptions(subscriptions);
+      _observer.info(isNew ? 'Subscription added' : 'Subscription updated', {
+        'id': updated.id,
+        'servers': updated.serverCount,
+      });
+      return updated;
+    });
+  }
+
+  /// Reports removed server ids and clears the active server if it was one
+  /// of them.
+  Future<void> _forgetRemovedServers(List<String> removed) async {
+    if (removed.isEmpty) return;
+    for (final id in removed) {
+      _observer.onServerConfigRemoved(id);
+    }
+    final active = await _storage.readString(
+      SingBoxStorage.keyActiveServerConfig,
+    );
+    if (active != null && removed.contains(active)) await _setActiveId(null);
+  }
 
   // ===========================================================================
   // Helpers

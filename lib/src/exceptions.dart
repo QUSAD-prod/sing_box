@@ -143,6 +143,29 @@ class SingBoxUnsupportedException extends SingBoxException {
   String toString() => 'SingBoxUnsupportedException: $message';
 }
 
+/// A subscription could not be downloaded or contained no usable servers.
+///
+/// Thrown by `SingBox.addSubscription` and `SingBox.updateSubscription`;
+/// the failed update is also recorded in `SingBoxSubscription.lastError`.
+class SingBoxSubscriptionException extends SingBoxException {
+  /// Creates a subscription error.
+  const SingBoxSubscriptionException(
+    String message, {
+    this.url,
+    this.statusCode,
+    super.details,
+  }) : super(SingBoxErrorCode.subscriptionFailed, message);
+
+  /// The subscription URL.
+  final String? url;
+
+  /// The HTTP status code when the server answered with an error.
+  final int? statusCode;
+
+  @override
+  String toString() => 'SingBoxSubscriptionException: $message';
+}
+
 /// A method was called before `SingBox.instance.initialize()` completed.
 class SingBoxNotInitializedException extends SingBoxException {
   /// Creates a "not initialized" error.
@@ -194,4 +217,7 @@ abstract final class SingBoxErrorCode {
 
   /// Any other failure.
   static const internal = 'INTERNAL';
+
+  /// Dart only: a subscription could not be downloaded or parsed.
+  static const subscriptionFailed = 'SUBSCRIPTION_FAILED';
 }
