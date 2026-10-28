@@ -1,5 +1,25 @@
 ## 1.0.1
 
+### Added
+- Subscriptions by URL: `addSubscription()`, `updateSubscription()`,
+  `updateSubscriptions(onlyStale:)`, `editSubscription()`,
+  `removeSubscription()`, `getSubscriptions()`, `watchSubscriptions()`.
+  `SingBoxSubscription` keeps the provider metadata from the response
+  headers (`subscription-userinfo` traffic and expiry, `profile-title`,
+  `profile-update-interval`, `profile-web-page-url`, `support-url`,
+  `announce`). Servers keep stable ids across updates; stale subscriptions
+  are refreshed by `initialize()`. Errors throw
+  `SingBoxSubscriptionException` and are stored in `lastError`.
+- Clash / mihomo YAML subscriptions: the `proxies` of ss, vmess, vless,
+  trojan, hysteria, hysteria2, tuic, wireguard, socks5, http, anytls and ssh
+  (with ws, grpc, h2, http and HTTPUpgrade transports) are converted by
+  `SingBoxShareLink.parseSubscription()` and everything built on it. New
+  dependency: `yaml`.
+- IP version mode `SingBoxRoutingRules.ipVersion` (`SingBoxIpVersion.dual`,
+  `ipv4`, `ipv6`) and `setIpVersion()` / `getIpVersion()`. IPv4 only
+  resolves names to IPv4 and rejects IPv6 connections instead of proxying
+  them, without letting IPv6 traffic leave outside the VPN.
+
 ### Changed
 - Requires Flutter 3.29+ / Dart 3.7+ (was Flutter 3.44+ / Dart 3.12+).
 - Android: builds with AGP 9 (built-in Kotlin) and with AGP 8 plus the

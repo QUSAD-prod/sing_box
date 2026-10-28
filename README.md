@@ -29,8 +29,12 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
   HTTPUpgrade and QUIC transports, uTLS fingerprints and multiplexing.
 - **Share links and subscriptions**: import `vless://`, `vmess://`, `trojan://`,
   `ss://`, `hysteria2://`, `hysteria://`, `tuic://`, `anytls://`,
-  `wireguard://`, `socks://`, `http://` links and base64, plain, JSON and
-  SIP008 subscriptions; export profiles back to links.
+  `wireguard://`, `socks://`, `http://` links and base64, plain, sing-box
+  JSON, SIP008 and **Clash / mihomo YAML** subscriptions; export profiles
+  back to links.
+- **Subscriptions by URL**: download and refresh subscriptions with traffic
+  used, limit and expiry (`subscription-userinfo`), provider name, update
+  interval and links; automatic updates of stale subscriptions.
 - **Config generation**: a complete, validated sing-box 1.14 configuration
   (TUN, DNS, routing, URL test groups, cache, clash API) is generated from a
   link or outbound - or bring your own full config.
@@ -44,7 +48,8 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
   STUN NAT type / UDP test.
 - **Routing rules**: bypass or block apps (Android), domains and subnets,
   "only these apps use the VPN", bypass LAN, bypass whole countries (geoip /
-  geosite rule-sets), ad blocking, custom DNS (UDP, TCP, DoT, DoH, DoQ, DoH3).
+  geosite rule-sets), ad blocking, custom DNS (UDP, TCP, DoT, DoH, DoQ, DoH3),
+  IP version: IPv4 and IPv6, IPv4 only or IPv6 only.
 - **Persistence**: settings, server profiles and routing rules are stored
   natively and applied automatically.
 - **Platform integration**: Android foreground notification with live speed
@@ -296,10 +301,10 @@ singBox.watchConnectionStats().listen((s) {
 await singBox.waitForStatus(SingBoxConnectionStatus.connected);
 ```
 
-### Server profiles and subscriptions
+### Server profiles
 
 ```dart
-final imported = await singBox.importServerConfigs(subscriptionBody, subscriptionId: 'main');
+final imported = await singBox.importServerConfigs(linksOrSubscriptionBody);
 await singBox.setActiveServerConfig(imported.first.id);
 await singBox.connectToActiveServer();
 
@@ -311,6 +316,54 @@ final all = await singBox.getServerConfigs();
 
 final link = SingBoxShareLink.toLink(server.outbound!); // export
 ```
+
+### Subscriptions
+
+`addSubscription()` downloads a subscription URL, imports its servers as
+profiles (their `subscriptionId` is the subscription id) and stores the
+subscription with the metadata the provider sends in its response headers:
+
+```dart
+final sub = await singBox.addSubscription(
+  'https://example.com/sub/token',
+  name: 'My provider',              // optional: else profile-title or the host
+  headers: {'x-hwid': deviceId},    // optional extra request headers
+);
+print('${sub.name}: ${sub.serverCount} servers');
+print('traffic ${sub.used} / ${sub.total} bytes, expires ${sub.expire}');
+
+await singBox.updateSubscription(sub.id);               // download again
+await singBox.updateSubscriptions(onlyStale: true);     // e.g. on app resume
+await singBox.editSubscription(sub.copyWith(updateInterval: const Duration(hours: 6)));
+await singBox.removeSubscription(sub.id);               // and its servers
+
+singBox.watchSubscriptions().listen((subs) { … });
+```
+
+| `SingBoxSubscription` field | Source |
+| --- | --- |
+| `upload`, `download`, `total`, `expire` (and `used`, `remaining`, `isExpired`) | `subscription-userinfo` |
+| `name` | your `name`, else `profile-title` (plain or `base64:`), else the `content-disposition` file name, else the URL host |
+| `providerUpdateInterval` | `profile-update-interval` (hours); `updateInterval` overrides it, default 24 h |
+| `webPageUrl`, `supportUrl`, `announce` | `profile-web-page-url`, `support-url`, `announce` |
+| `lastUpdated`, `lastError`, `serverCount` | the last update |
+
+* **Formats**: share links (plain or base64), a sing-box configuration or
+  outbound list, SIP008 and Clash / mihomo YAML (see
+  [Supported subscription formats](#supported-subscription-formats)).
+* **User-Agent**: many providers choose the format by it. The default is
+  `sing-box/<core version>`; change it for all subscriptions with
+  `SingBox.subscriptionUserAgent` or per subscription with `userAgent`.
+* **Updates**: `initialize()` refreshes subscriptions with `autoUpdate`
+  that are older than their interval; call `updateSubscriptions(onlyStale:
+  true)` again when the app returns to the foreground. An update replaces
+  the subscription's servers; servers keep their id
+  (`<subscription id>/<server name>`) and `enabled` flag when the provider
+  keeps their names, so the active server stays selected. A running tunnel
+  is not reloaded.
+* **Errors**: a failed download or a body without supported servers throws
+  `SingBoxSubscriptionException` (with `statusCode` for HTTP errors); for
+  updates it is also stored in `lastError` and the old servers are kept.
 
 ### Groups, instant switching and latency
 
@@ -395,7 +448,21 @@ await singBox.updateRoutingRules((r) => r.copyWith(
   bypassCountries: ['ru'], // geoip-ru + geosite-ru rule-sets go direct
   blockAds: true,          // geosite-category-ads-all
 ));
+
+await singBox.setIpVersion(SingBoxIpVersion.ipv4); // IPv4 only
 ```
+
+**IP version** (`SingBoxRoutingRules.ipVersion`):
+
+| Value | Effect |
+| --- | --- |
+| `SingBoxIpVersion.dual` (default) | IPv4 and IPv6; the preferred family is `SingBoxDnsOptions.strategy` (IPv4 first by default) |
+| `SingBoxIpVersion.ipv4` | Names resolve to IPv4 only (`ipv4_only`) and IPv6 connections that would go through the proxy are rejected, so apps fall back to IPv4 at once. The TUN keeps its IPv6 address, so IPv6 traffic does not leak outside the VPN. Use it when the server or the network has no working IPv6. |
+| `SingBoxIpVersion.ipv6` | Names resolve to IPv6 only (`ipv6_only`); sites without IPv6 cannot be opened by name, IPv4 addresses still work |
+
+For user supplied configurations `dual` changes nothing; the other values
+set `dns.strategy` and (IPv4 only) append the IPv6 reject rule after the
+config's own rules.
 
 ### Configuration options
 
@@ -465,6 +532,7 @@ Every failure is a `SingBoxException` with a `code`:
 | `SingBoxServiceNotRunningException` | The operation needs a running tunnel |
 | `SingBoxUnsupportedException` | Not available on this platform |
 | `SingBoxNotInitializedException` | `initialize()` was not called |
+| `SingBoxSubscriptionException` | A subscription could not be downloaded or had no supported servers |
 
 Runtime failures that stop the tunnel are reported in
 `SingBoxConnectionState.error`.
@@ -513,6 +581,41 @@ in-memory implementation.
 
 `ssr://` (ShadowsocksR), XHTTP and mKCP transports are not supported by
 sing-box; such links fail with a `FormatException` that says so.
+
+## Supported subscription formats
+
+`SingBoxShareLink.parseSubscription()`, `importServerConfigs()` and
+`addSubscription()` detect the format automatically:
+
+| Format | Notes |
+| --- | --- |
+| Share links | One per line, plain or base64 (standard or URL-safe, also per line) |
+| sing-box JSON | A complete configuration (its proxy outbounds and endpoints are taken) or an outbound array |
+| SIP008 | Shadowsocks `{"servers": [...]}` |
+| Clash / mihomo YAML | The `proxies` list; `proxy-groups`, `rules` and `dns` are ignored |
+
+Clash / mihomo proxy types and options:
+
+| `type` | Converted options |
+| --- | --- |
+| `ss` | ciphers incl. 2022, `plugin: obfs` / `v2ray-plugin` (websocket), `udp-over-tcp` |
+| `vmess` | `cipher`, `alterId`, `tls`, `servername`, `global-padding`, `authenticated-length`, `packet-encoding` |
+| `vless` | `flow: xtls-rprx-vision`, `tls`, `reality-opts`, `packet-encoding` |
+| `trojan` | `sni`, `alpn` |
+| `hysteria` | `auth-str`, `obfs`, `up` / `down`, `ports`, receive windows (protocol `udp` only) |
+| `hysteria2` | `password`, `ports` + `hop-interval`, `obfs: salamander`, `up` / `down` |
+| `tuic` | v5 `uuid` + `password`, `congestion-controller`, `udp-relay-mode`, `reduce-rtt`, `heartbeat-interval` |
+| `wireguard` | `ip`, `ipv6`, keys, `reserved`, `mtu`, `peers` |
+| `socks5`, `http` | credentials; `tls` for `http` |
+| `anytls` | `password`, idle session options |
+| `ssh` | `username`, `password`, `private-key`, `host-key` |
+
+Common options: `network` `ws` (`ws-opts`, early data, `v2ray-http-upgrade`),
+`grpc`, `h2`, `http` (HTTP obfuscation); `skip-cert-verify`, `alpn`,
+`client-fingerprint` (uTLS), `smux`, `tfo`. Proxies sing-box cannot express
+are skipped: `ssr`, `snell`, `mieru`, TUIC v4, XHTTP and mKCP transports,
+`shadow-tls` / `restls` plugins, VLESS encryption, AmneziaWG and
+`dialer-proxy` chains.
 
 ## Building libbox yourself
 

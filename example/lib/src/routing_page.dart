@@ -115,6 +115,33 @@ class _RoutingPageState extends State<RoutingPage> {
             value: _rules.blockAds,
             onChanged: (v) => _update((r) => r.copyWith(blockAds: v)),
           ),
+          ListTile(
+            title: const Text('IP version'),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SegmentedButton<SingBoxIpVersion>(
+                segments: const [
+                  ButtonSegment(
+                    value: SingBoxIpVersion.dual,
+                    label: Text('IPv4 + IPv6'),
+                  ),
+                  ButtonSegment(
+                    value: SingBoxIpVersion.ipv4,
+                    label: Text('IPv4'),
+                  ),
+                  ButtonSegment(
+                    value: SingBoxIpVersion.ipv6,
+                    label: Text('IPv6'),
+                  ),
+                ],
+                selected: {_rules.ipVersion},
+                onSelectionChanged: (v) async {
+                  await _singBox.setIpVersion(v.single);
+                  await _reload();
+                },
+              ),
+            ),
+          ),
           _list(
             title: 'Bypass countries',
             hint: 'ISO code, e.g. ru',
