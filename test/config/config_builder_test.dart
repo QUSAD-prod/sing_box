@@ -587,21 +587,20 @@ void main() {
     });
 
     test('URL test and rule-set options', () async {
-      final config =
-          const SingBoxConfigBuilder(
-            SingBoxConfigOptions(
-              urlTestUrl: 'https://cp.cloudflare.com',
-              urlTestInterval: Duration(minutes: 10, seconds: 30),
-              urlTestTolerance: 150,
-              ruleSetDownloadDetour: 'proxy',
-              ruleSetUpdateInterval: Duration(hours: 12),
-              geoipRuleSetUrl: 'https://mirror.example.com/geoip/{tag}.srs',
-              geositeRuleSetUrl: 'https://mirror.example.com/geosite/{tag}.srs',
-            ),
-          ).build([
-            vless,
-            trojan,
-          ], rules: const SingBoxRoutingRules(bypassCountries: ['ru']));
+      final config = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          urlTestUrl: 'https://cp.cloudflare.com',
+          urlTestInterval: Duration(minutes: 10, seconds: 30),
+          urlTestTolerance: 150,
+          ruleSetDownloadDetour: 'proxy',
+          ruleSetUpdateInterval: Duration(hours: 12),
+          geoipRuleSetUrl: 'https://mirror.example.com/geoip/{tag}.srs',
+          geositeRuleSetUrl: 'https://mirror.example.com/geosite/{tag}.srs',
+        ),
+      ).build([
+        vless,
+        trojan,
+      ], rules: const SingBoxRoutingRules(bypassCountries: ['ru']));
       expect(
         outbound(config, 'auto'),
         containsPair('url', 'https://cp.cloudflare.com'),
@@ -611,8 +610,9 @@ void main() {
       expect(config['http_clients'], [
         {'tag': 'rule-set-download', 'detour': 'proxy'},
       ]);
-      final sets = ((config['route'] as Map)['rule_set'] as List)
-          .cast<Map<String, dynamic>>();
+      final sets =
+          ((config['route'] as Map)['rule_set'] as List)
+              .cast<Map<String, dynamic>>();
       expect(sets.map((s) => s['url']), [
         'https://mirror.example.com/geosite/geosite-category-ru.srs',
         'https://mirror.example.com/geoip/geoip-ru.srs',

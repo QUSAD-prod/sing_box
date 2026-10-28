@@ -7,7 +7,7 @@ require_relative 'libbox'
 
 Pod::Spec.new do |s|
   s.name             = 'sing_box'
-  s.version          = '1.0.0'
+  s.version          = '1.0.1'
   s.summary          = 'Flutter VPN plugin powered by the sing-box core.'
   s.description      = <<-DESC
 Flutter plugin running the sing-box core (libbox) in a Network Extension:

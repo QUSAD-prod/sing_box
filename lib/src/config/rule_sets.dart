@@ -115,7 +115,7 @@ abstract final class SingBoxRuleSets {
       'tag': tag,
       'format': 'binary',
       'url': url(tag, geoipUrl: geoipUrl, geositeUrl: geositeUrl),
-      'http_client': ?httpClient,
+      if (httpClient != null) 'http_client': httpClient,
       'update_interval': formatDuration(updateInterval),
     };
   }

@@ -75,8 +75,10 @@ included; see [Building libbox](#building-libbox-yourself).
 
 ```yaml
 dependencies:
-  sing_box: ^1.0.0
+  sing_box: ^1.0.1
 ```
+
+Requires Flutter 3.29 or newer (Dart 3.7+).
 
 The native libraries (~85 MB AAR, ~200 MB XCFramework) are too large for
 pub.dev. They are downloaded automatically on the first build from this
@@ -100,7 +102,10 @@ the foreground service type, and the permissions it needs (`INTERNET`,
 
 Recommended:
 
-1. **minSdk 24** (the Flutter default).
+1. **minSdk 24**: the Flutter default since 3.35. Apps created with older
+   Flutter versions set `minSdk = 24` in `android/app/build.gradle(.kts)`.
+   Both AGP 9 (built-in Kotlin) and AGP 8 with the Kotlin Android plugin
+   1.8.22+ are supported.
 2. **Notification icon**: add a monochrome vector drawable, e.g.
    `android/app/src/main/res/drawable/ic_vpn.xml`, and pass
    `SingBoxAndroidOptions(notificationIcon: 'ic_vpn')`.

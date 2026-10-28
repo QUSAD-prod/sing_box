@@ -70,8 +70,8 @@ changes.
    end
    ```
    This works whether the app links the plugin with Swift Package Manager
-   (Flutter's default) or CocoaPods. Linking the `SingBoxTunnel` Swift
-   package product directly is not recommended: Flutter references the
+   (Flutter's default since 3.44) or CocoaPods. Linking the `SingBoxTunnel`
+   Swift package product directly is not recommended: Flutter references the
    plugin package under a folder-dependent identity
    (`ios/Flutter/ephemeral/Packages/.packages/<plugin folder>`), and a second
    reference to the same package under another path conflicts.

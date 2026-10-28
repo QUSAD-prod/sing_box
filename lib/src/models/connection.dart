@@ -48,9 +48,8 @@ class SingBoxConnection {
       user: readString('user'),
       fromOutbound: readString('fromOutbound'),
       createdAt: DateTime.fromMillisecondsSinceEpoch(readInt('createdAt')),
-      closedAt: closedAt > 0
-          ? DateTime.fromMillisecondsSinceEpoch(closedAt)
-          : null,
+      closedAt:
+          closedAt > 0 ? DateTime.fromMillisecondsSinceEpoch(closedAt) : null,
       uploadSpeed: readInt('uplink'),
       downloadSpeed: readInt('downlink'),
       uploadTotal: readInt('uplinkTotal'),

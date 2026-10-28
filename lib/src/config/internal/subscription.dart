@@ -144,7 +144,8 @@ void _sip008(List<dynamic> servers, List<SingBoxOutbound> result) {
           plugin == 'simple-obfs' ||
           plugin == 'v2ray-plugin') ...{
         'plugin': plugin == 'simple-obfs' ? 'obfs-local' : plugin,
-        'plugin_opts': ?readString(server['plugin_opts']),
+        if (readString(server['plugin_opts']) case final opts?)
+          'plugin_opts': opts,
       },
     };
     if (plugin != null && json['plugin'] == null) continue;

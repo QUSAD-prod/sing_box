@@ -539,9 +539,10 @@ class SingBoxConfigOptions {
       dns: dns is Map ? SingBoxDnsOptions.fromMap(dns) : d.dns,
       sniff: readBool(map['sniff']) ?? d.sniff,
       urlTestUrl: readString(map['urlTestUrl']) ?? d.urlTestUrl,
-      urlTestInterval: interval != null && interval > 0
-          ? Duration(seconds: interval)
-          : d.urlTestInterval,
+      urlTestInterval:
+          interval != null && interval > 0
+              ? Duration(seconds: interval)
+              : d.urlTestInterval,
       urlTestTolerance: readInt(map['urlTestTolerance']) ?? d.urlTestTolerance,
       interruptExistConnections:
           readBool(map['interruptExistConnections']) ??
@@ -550,9 +551,10 @@ class SingBoxConfigOptions {
       cacheFile: readBool(map['cacheFile']) ?? d.cacheFile,
       ruleSetDownloadDetour:
           readString(map['ruleSetDownloadDetour']) ?? d.ruleSetDownloadDetour,
-      ruleSetUpdateInterval: updateInterval != null && updateInterval > 0
-          ? Duration(seconds: updateInterval)
-          : d.ruleSetUpdateInterval,
+      ruleSetUpdateInterval:
+          updateInterval != null && updateInterval > 0
+              ? Duration(seconds: updateInterval)
+              : d.ruleSetUpdateInterval,
       geoipRuleSetUrl: readString(map['geoipRuleSetUrl']) ?? d.geoipRuleSetUrl,
       geositeRuleSetUrl:
           readString(map['geositeRuleSetUrl']) ?? d.geositeRuleSetUrl,

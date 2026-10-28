@@ -83,8 +83,9 @@ class SingBoxSpeedTestResult {
   };
 
   @override
-  String toString() => success
-      ? 'SingBoxSpeedTestResult(down: ${downloadMbps.toStringAsFixed(1)} '
-            'Mbps, up: ${uploadMbps.toStringAsFixed(1)} Mbps)'
-      : 'SingBoxSpeedTestResult(failed: $errorMessage)';
+  String toString() =>
+      success
+          ? 'SingBoxSpeedTestResult(down: ${downloadMbps.toStringAsFixed(1)} '
+              'Mbps, up: ${uploadMbps.toStringAsFixed(1)} Mbps)'
+          : 'SingBoxSpeedTestResult(failed: $errorMessage)';
 }

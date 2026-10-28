@@ -108,8 +108,8 @@ class SingBoxConfigBuilder {
     final selectorMembers = [if (useAuto) autoTag, ...memberTags];
     final defaultMember =
         selectedTag != null && selectorMembers.contains(selectedTag)
-        ? selectedTag
-        : selectorMembers.first;
+            ? selectedTag
+            : selectorMembers.first;
 
     final ruleSetTags = _ruleSetTags(rules);
     final config = <String, dynamic>{
@@ -436,9 +436,8 @@ class SingBoxConfigBuilder {
 
     final blocked = _domains(rules.blockedDomains);
     final bypass = _domains(rules.bypassDomains);
-    final directGeosites = _countryRuleSets(
-      rules,
-    ).where(SingBoxRuleSets.isGeosite).toList();
+    final directGeosites =
+        _countryRuleSets(rules).where(SingBoxRuleSets.isGeosite).toList();
     final dnsRules = <Map<String, dynamic>>[
       if (blocked.isNotEmpty)
         {'domain_suffix': blocked, 'action': 'predefined', 'rcode': 'NXDOMAIN'},

@@ -56,9 +56,10 @@ class SingBoxConnectionState {
     final error = map['error'];
     return SingBoxConnectionState(
       status: SingBoxConnectionStatus.fromString(map['status'] as String?),
-      startedAt: startedAt is int && startedAt > 0
-          ? DateTime.fromMillisecondsSinceEpoch(startedAt)
-          : null,
+      startedAt:
+          startedAt is int && startedAt > 0
+              ? DateTime.fromMillisecondsSinceEpoch(startedAt)
+              : null,
       error: error is String && error.isNotEmpty ? error : null,
     );
   }

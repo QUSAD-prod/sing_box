@@ -149,14 +149,16 @@ class SingBox {
       await _stateSubscription?.cancel();
       _stateSubscription = _platform.watchState().listen(
         _handleState,
-        onError: (Object e, StackTrace s) =>
-            _observer.error('Status stream error', e, s),
+        onError:
+            (Object e, StackTrace s) =>
+                _observer.error('Status stream error', e, s),
       );
       await _notificationSubscription?.cancel();
       _notificationSubscription = _platform.watchNotifications().listen(
         _observer.onNotification,
-        onError: (Object e, StackTrace s) =>
-            _observer.error('Notification stream error', e, s),
+        onError:
+            (Object e, StackTrace s) =>
+                _observer.error('Notification stream error', e, s),
       );
       _isInitialized = true;
       _observer.info('sing_box initialized', {
@@ -342,10 +344,11 @@ class SingBox {
         if (decoded is! List) {
           throw const SingBoxConfigException('Expected a JSON array.');
         }
-        final outbounds = decoded
-            .whereType<Map<dynamic, dynamic>>()
-            .map(Map<String, dynamic>.from)
-            .toList();
+        final outbounds =
+            decoded
+                .whereType<Map<dynamic, dynamic>>()
+                .map(Map<String, dynamic>.from)
+                .toList();
         if (outbounds.isEmpty) {
           throw const SingBoxConfigException('The outbound list is empty.');
         }
@@ -703,9 +706,11 @@ class SingBox {
       pending.requested();
       await pending.outcome.timeout(
         timeout,
-        onTimeout: () => throw SingBoxTimeoutException(
-          'The tunnel did not connect within ${timeout.inSeconds} s.',
-        ),
+        onTimeout:
+            () =>
+                throw SingBoxTimeoutException(
+                  'The tunnel did not connect within ${timeout.inSeconds} s.',
+                ),
       );
       _observer.info('Tunnel connected');
     } on SingBoxCancelledException {
@@ -834,7 +839,7 @@ class SingBox {
     return _storage.writeJson(SingBoxStorage.keyLastInput, {
       'input': input,
       'applyRules': applyRules,
-      'selectedTag': ?selectedTag,
+      if (selectedTag != null) 'selectedTag': selectedTag,
     });
   }
 
@@ -1058,16 +1063,16 @@ class SingBox {
       final item = await resultFuture;
       return item.urlTestDelay == null
           ? SingBoxPingResult.failure(
-              'URL test failed',
-              tag: tag,
-              address: address,
-            )
+            'URL test failed',
+            tag: tag,
+            address: address,
+          )
           : SingBoxPingResult(
-              ping: item.urlTestDelay!,
-              success: true,
-              tag: tag,
-              address: address,
-            );
+            ping: item.urlTestDelay!,
+            success: true,
+            tag: tag,
+            address: address,
+          );
     } on TimeoutException {
       return SingBoxPingResult.failure(
         'URL test timed out',
@@ -1109,16 +1114,18 @@ class SingBox {
     late final StreamController<SingBoxPingResult> controller;
     Future<void> run() async {
       final throughTunnel = _state.status.isActive;
-      final tags = throughTunnel
-          ? await _runningOutboundTags()
-          : const <String, String>{};
+      final tags =
+          throughTunnel
+              ? await _runningOutboundTags()
+              : const <String, String>{};
       var next = 0;
       Future<void> worker() async {
         while (!cancelled && next < queue.length) {
           final server = queue[next++];
-          final result = throughTunnel
-              ? await _pingInTunnel(server, tags, timeout)
-              : await _tcpPing(server, timeout);
+          final result =
+              throughTunnel
+                  ? await _pingInTunnel(server, tags, timeout)
+                  : await _tcpPing(server, timeout);
           if (!cancelled) controller.add(result);
         }
       }
@@ -1601,11 +1608,8 @@ class SingBox {
   /// Routes ONLY the given Android apps through the VPN (all other apps go
   /// direct). An empty list routes every app through the VPN.
   Future<void> setProxyApps(List<String> packageNames) async {
-    final apps = packageNames
-        .map(_package)
-        .whereType<String>()
-        .toSet()
-        .toList();
+    final apps =
+        packageNames.map(_package).whereType<String>().toSet().toList();
     await updateRoutingRules((r) => r.copyWith(proxyApps: apps));
   }
 

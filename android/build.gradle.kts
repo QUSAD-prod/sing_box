@@ -11,17 +11,20 @@ import java.util.UUID
 import java.util.zip.ZipFile
 
 group = "com.qusadprod.sing_box"
-version = "1.0.0"
+version = "1.0.1"
 
+// The oldest supported versions (the Flutter 3.29 app template). In an app
+// build the app's own, usually newer, Android and Kotlin Gradle plugins are
+// used; a newer version here would not resolve with an older Gradle.
 buildscript {
-    val kotlinVersion = "2.4.0"
+    val kotlinVersion = "1.8.22"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:9.1.0")
+        classpath("com.android.tools.build:gradle:8.7.0")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     }
 }
@@ -35,6 +38,13 @@ allprojects {
 
 plugins {
     id("com.android.library")
+}
+
+// AGP 9 compiles Kotlin itself (built-in Kotlin) and registers the `kotlin`
+// extension. Older AGP versions, and AGP 9 with `android.builtInKotlin=false`,
+// need the Kotlin Android plugin.
+if (extensions.findByName("kotlin") == null) {
+    apply(plugin = "org.jetbrains.kotlin.android")
 }
 
 // -----------------------------------------------------------------------------
@@ -272,7 +282,7 @@ val libboxDir: File = LibboxResolver(
 android {
     namespace = "com.qusadprod.sing_box"
 
-    compileSdk = 36
+    compileSdk = 35
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -312,16 +322,18 @@ android {
     }
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-    }
+// Works with built-in Kotlin and with the Kotlin Android plugin (the typed
+// `kotlin {}` block exists only with built-in Kotlin).
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
 }
 
 dependencies {
     implementation(files(File(libboxDir, "classes.jar")))
-    implementation("androidx.core:core-ktx:1.18.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // Kept at versions built with Kotlin 1.8 that need neither compileSdk 36
+    // nor a recent AGP; apps with newer copies resolve to those.
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")

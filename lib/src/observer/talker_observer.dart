@@ -38,8 +38,8 @@ class SingBoxTalkerObserver extends SingBoxObserver {
 
   String _format(String message, Map<String, dynamic>? data) =>
       data != null && data.isNotEmpty
-      ? '$prefix $message | $data'
-      : '$prefix $message';
+          ? '$prefix $message | $data'
+          : '$prefix $message';
 
   void _call(void Function(dynamic talker) call) {
     final instance = talker;

@@ -142,10 +142,10 @@ abstract final class SingBoxDnsServer {
       domainResolver: domainResolver,
       path:
           (type == 'https' || type == 'h3') &&
-              path != '/dns-query' &&
-              path != '/'
-          ? path
-          : '',
+                  path != '/dns-query' &&
+                  path != '/'
+              ? path
+              : '',
     );
   }
 

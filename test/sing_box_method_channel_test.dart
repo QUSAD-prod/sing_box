@@ -142,22 +142,23 @@ void main() {
     messenger.setMockStreamHandler(
       platform.groupsEventChannel,
       MockStreamHandler.inline(
-        onListen: (arguments, sink) => sink.success([
-          {
-            'tag': 'proxy',
-            'type': 'selector',
-            'selectable': true,
-            'selected': 'a',
-            'items': [
+        onListen:
+            (arguments, sink) => sink.success([
               {
-                'tag': 'a',
-                'type': 'vless',
-                'urlTestTime': 1,
-                'urlTestDelay': 50,
+                'tag': 'proxy',
+                'type': 'selector',
+                'selectable': true,
+                'selected': 'a',
+                'items': [
+                  {
+                    'tag': 'a',
+                    'type': 'vless',
+                    'urlTestTime': 1,
+                    'urlTestDelay': 50,
+                  },
+                ],
               },
-            ],
-          },
-        ]),
+            ]),
       ),
     );
     final groups = await platform.watchGroups().first;
@@ -174,9 +175,8 @@ void main() {
         },
       ),
     );
-    final quality = await platform
-        .runNetworkQualityTest(outboundTag: 'node')
-        .toList();
+    final quality =
+        await platform.runNetworkQualityTest(outboundTag: 'node').toList();
     expect(quality.first.phase, SingBoxNetworkQualityPhase.download);
     expect(quality.last.isFinal, isTrue);
   });
@@ -185,8 +185,9 @@ void main() {
     messenger.setMockStreamHandler(
       platform.stunEventChannel,
       MockStreamHandler.inline(
-        onListen: (arguments, sink) =>
-            sink.error(code: 'SERVICE_NOT_RUNNING', message: 'not running'),
+        onListen:
+            (arguments, sink) =>
+                sink.error(code: 'SERVICE_NOT_RUNNING', message: 'not running'),
       ),
     );
     await expectLater(

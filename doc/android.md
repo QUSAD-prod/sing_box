@@ -23,8 +23,8 @@ details of the Android implementation.
 | | |
 | --- | --- |
 | minSdk | 24 |
-| compileSdk | 36 or newer |
-| Android Gradle Plugin | 9.x (built-in Kotlin) |
+| compileSdk | 35 or newer |
+| Android Gradle Plugin | 9.x (built-in Kotlin), or 8.7+ with the Kotlin Android plugin 1.8.22+ (applied by the plugin when built-in Kotlin is off) |
 | JDK for the build | 17 or 21 |
 
 The plugin declares everything it needs in its own manifest:

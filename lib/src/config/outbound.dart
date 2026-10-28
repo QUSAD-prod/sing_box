@@ -157,10 +157,11 @@ class SingBoxOutbound {
 
   @override
   String toString() {
-    final address = server == null
-        ? ''
-        : ', server: ${server!.contains(':') ? '[$server]' : server}'
-              '${serverPort == null ? '' : ':$serverPort'}';
+    final address =
+        server == null
+            ? ''
+            : ', server: ${server!.contains(':') ? '[$server]' : server}'
+                '${serverPort == null ? '' : ':$serverPort'}';
     return 'SingBoxOutbound(type: $type, tag: $tag$address)';
   }
 }

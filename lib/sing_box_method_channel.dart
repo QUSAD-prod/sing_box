@@ -87,10 +87,11 @@ class MethodChannelSingBox extends SingBoxPlatform {
     (event) => SingBoxConnectionStats.fromMap(event as Map),
   );
 
-  late final Stream<SingBoxLogEvent> _logs = _events(
-    logsEventChannel,
-    (event) => SingBoxLogEvent.fromMap(event as Map),
-  ).where((event) => event != null).cast<SingBoxLogEvent>();
+  late final Stream<SingBoxLogEvent> _logs =
+      _events(
+        logsEventChannel,
+        (event) => SingBoxLogEvent.fromMap(event as Map),
+      ).where((event) => event != null).cast<SingBoxLogEvent>();
 
   late final Stream<List<SingBoxOutboundGroup>> _groups = _events(
     groupsEventChannel,

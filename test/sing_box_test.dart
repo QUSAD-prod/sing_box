@@ -471,15 +471,16 @@ void main() {
       final closedPort = closed.port;
       await closed.close();
 
-      final results = await singBox.pingServers([
-        profile('open', 'vless', '127.0.0.1', listener.port),
-        profile('closed', 'trojan', '127.0.0.1', closedPort),
-        profile('udp', 'hysteria2', '127.0.0.1', listener.port),
-        profile('quic', 'vless', '127.0.0.1', listener.port, {
-          'transport': {'type': 'quic'},
-        }),
-        profile('empty', 'vless', '', 0),
-      ], concurrency: 2).toList();
+      final results =
+          await singBox.pingServers([
+            profile('open', 'vless', '127.0.0.1', listener.port),
+            profile('closed', 'trojan', '127.0.0.1', closedPort),
+            profile('udp', 'hysteria2', '127.0.0.1', listener.port),
+            profile('quic', 'vless', '127.0.0.1', listener.port, {
+              'transport': {'type': 'quic'},
+            }),
+            profile('empty', 'vless', '', 0),
+          ], concurrency: 2).toList();
 
       final byId = {for (final r in results) r.serverId!: r};
       expect(
@@ -513,13 +514,14 @@ void main() {
           ]);
         });
       };
-      final results = await singBox.pingServers([
-        SingBoxServerConfig.fromOutbound(
-          Map<String, dynamic>.from(_ssOutbound),
-          id: 'running',
-        ),
-        profile('other', 'vless', 'other.example.com', 443),
-      ]).toList();
+      final results =
+          await singBox.pingServers([
+            SingBoxServerConfig.fromOutbound(
+              Map<String, dynamic>.from(_ssOutbound),
+              id: 'running',
+            ),
+            profile('other', 'vless', 'other.example.com', 443),
+          ]).toList();
       final byId = {for (final r in results) r.serverId!: r};
       expect(byId['running']!.success, isTrue);
       expect(byId['running']!.ping, 42);
@@ -620,15 +622,16 @@ void main() {
     });
 
     test('pingOutbound reports failures', () async {
-      platform.onUrlTest = (tag) => Timer.run(
-        () => platform.outbounds.add([
-          SingBoxOutboundItem(
-            tag: tag,
-            type: 'shadowsocks',
-            urlTestTime: DateTime.now(),
-          ),
-        ]),
-      );
+      platform.onUrlTest =
+          (tag) => Timer.run(
+            () => platform.outbounds.add([
+              SingBoxOutboundItem(
+                tag: tag,
+                type: 'shadowsocks',
+                urlTestTime: DateTime.now(),
+              ),
+            ]),
+          );
       final result = await singBox.pingOutbound('my-ss');
       expect(result.success, isFalse);
     });

@@ -1,3 +1,15 @@
+## 1.0.1
+
+### Changed
+- Requires Flutter 3.29+ / Dart 3.7+ (was Flutter 3.44+ / Dart 3.12+).
+- Android: builds with AGP 9 (built-in Kotlin) and with AGP 8 plus the
+  Kotlin Android plugin, as in apps created with Flutter 3.29-3.41; the
+  plugin applies the Kotlin plugin itself when needed. `compileSdk` 35,
+  `androidx.core` 1.13.1 and `kotlinx-coroutines` 1.7.3 as minimum versions.
+- iOS: the Swift package depends on `FlutterFramework` only when Flutter
+  generates that package (3.44+), so Swift Package Manager also works with
+  older Flutter versions; CocoaPods is unchanged.
+
 ## 1.0.0
 
 A complete rewrite on top of **sing-box 1.14.4** (`libbox`).
