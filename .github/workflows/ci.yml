@@ -111,3 +111,101 @@ jobs:
       - name: Build for the simulator
         working-directory: example
         run: flutter build ios --simulator --debug
+
+  # Builds a fresh app made by the oldest supported Flutter (keep the version
+  # in sync with `environment.flutter` in pubspec.yaml). Such apps use AGP 8
+  # with the Kotlin Android plugin 1.8, minSdk 21, iOS 12 and CocoaPods unless
+  # Swift Package Manager is enabled, unlike the example app.
+  minimum-flutter:
+    name: Minimum Flutter (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: [dart, libbox]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: android
+            os: ubuntu-latest
+          - target: ios-cocoapods
+            os: macos-latest
+          - target: ios-spm
+            os: macos-latest
+    env:
+      MIN_FLUTTER: '3.29.3'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: sing_box
+      - uses: actions/setup-java@v6
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.MIN_FLUTTER }}
+          channel: stable
+          cache: true
+      - name: Select package manager
+        if: startsWith(matrix.target, 'ios')
+        run: |
+          if [ "${{ matrix.target }}" = "ios-spm" ]; then
+            flutter config --enable-swift-package-manager
+          else
+            flutter config --no-enable-swift-package-manager
+          fi
+      - name: Create an app that uses the plugin
+        run: |
+          platform="${{ matrix.target }}"
+          flutter create --org com.example --platforms "${platform%%-*}" min_app
+          cd min_app
+          flutter pub add 'sing_box:{"path":"../sing_box"}'
+          # Reference the plugin so its Dart code is compiled as well.
+          cat > lib/main.dart <<'DART'
+          import 'package:flutter/material.dart';
+          import 'package:sing_box/sing_box.dart';
+
+          void main() {
+            final servers = SingBoxShareLink.parseSubscription(
+              'trojan://secret@198.51.100.4:443#Server',
+            );
+            final config = const SingBoxConfigBuilder().build([
+              for (final server in servers) server.json,
+            ]);
+            runApp(
+              MaterialApp(
+                home: Text('${config.length} ${SingBox.instance.status.name}'),
+              ),
+            );
+          }
+          DART
+      - name: Raise the minimum OS versions to the plugin's
+        working-directory: min_app
+        run: |
+          if [ "${{ matrix.target }}" = "android" ]; then
+            sed -i -E 's/minSdk(Version)? *=? *flutter\.minSdkVersion/minSdk = 24/' android/app/build.gradle*
+            grep -q 'minSdk = 24' android/app/build.gradle*
+          else
+            sed -i '' -E 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/' ios/Runner.xcodeproj/project.pbxproj
+            grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 15.0;' ios/Runner.xcodeproj/project.pbxproj
+          fi
+      - uses: actions/cache@v6
+        if: matrix.target == 'android'
+        with:
+          path: ~/.gradle/caches/sing_box
+          key: libbox-android-${{ hashFiles('sing_box/android/libbox.properties') }}
+      - uses: actions/cache@v6
+        if: startsWith(matrix.target, 'ios')
+        with:
+          path: |
+            ~/Library/Caches/sing_box
+            ~/Library/Caches/org.swift.swiftpm/artifacts
+          key: libbox-ios-min-${{ matrix.target }}-${{ hashFiles('sing_box/ios/sing_box/Package.swift') }}
+      - name: Build
+        working-directory: min_app
+        run: |
+          if [ "${{ matrix.target }}" = "android" ]; then
+            flutter build apk --debug
+          else
+            flutter build ios --simulator --debug
+          fi

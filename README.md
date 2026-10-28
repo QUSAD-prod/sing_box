@@ -156,7 +156,11 @@ teams), and VPN tunnels do not run in the iOS Simulator.
    Extensions* and *App Groups* (`group.<app bundle id>` by default) for both
    `<app bundle id>` and `<app bundle id>.PacketTunnel`, or let Xcode's
    automatic signing do it.
-3. Build as usual (`flutter build ios` / `flutter run`).
+3. **Deployment target 15.0**: older Flutter versions create apps for an
+   earlier iOS (Flutter 3.29: iOS 12.0); set *Minimum Deployments* of Runner
+   to 15.0 (or `IPHONEOS_DEPLOYMENT_TARGET = 15.0` in
+   `ios/Runner.xcodeproj/project.pbxproj`).
+4. Build as usual (`flutter build ios` / `flutter run`).
 
 The manual steps are described in [doc/ios.md](doc/ios.md#manual-setup).
 
