@@ -1,26 +1,10 @@
-/// Notification model from sing-box
+/// A notification emitted by the sing-box core.
+///
+/// The core sends notifications for events the user should know about, for
+/// example when a remote rule-set fails to update. Listen with
+/// `SingBox.watchNotifications()`.
 class SingBoxNotification {
-  /// Notification identifier
-  final String identifier;
-
-  /// Notification type (name)
-  final String typeName;
-
-  /// Notification type ID
-  final int typeId;
-
-  /// Notification title
-  final String title;
-
-  /// Notification subtitle
-  final String subtitle;
-
-  /// Notification body
-  final String body;
-
-  /// URL to open when notification is tapped
-  final String? openUrl;
-
+  /// Creates a notification.
   const SingBoxNotification({
     required this.identifier,
     required this.typeName,
@@ -31,34 +15,55 @@ class SingBoxNotification {
     this.openUrl,
   });
 
-  /// Create from Map (from Method Channel)
+  /// Creates a notification from a map (from the platform channel).
   factory SingBoxNotification.fromMap(Map<dynamic, dynamic> map) {
+    final url = map['openUrl'] as String?;
     return SingBoxNotification(
       identifier: map['identifier'] as String? ?? '',
       typeName: map['typeName'] as String? ?? '',
-      typeId: map['typeId'] as int? ?? 0,
+      typeId: (map['typeId'] as num?)?.toInt() ?? 0,
       title: map['title'] as String? ?? '',
       subtitle: map['subtitle'] as String? ?? '',
       body: map['body'] as String? ?? '',
-      openUrl: map['openUrl'] as String?,
+      openUrl: url == null || url.isEmpty ? null : url,
     );
   }
 
-  /// Convert to Map (for Method Channel)
-  Map<String, dynamic> toMap() {
-    return {
-      'identifier': identifier,
-      'typeName': typeName,
-      'typeId': typeId,
-      'title': title,
-      'subtitle': subtitle,
-      'body': body,
-      'openUrl': openUrl,
-    };
-  }
+  /// Notification identifier.
+  final String identifier;
+
+  /// Notification type name.
+  final String typeName;
+
+  /// Notification type id.
+  final int typeId;
+
+  /// Title.
+  final String title;
+
+  /// Subtitle.
+  final String subtitle;
+
+  /// Body text.
+  final String body;
+
+  /// URL to open when the notification is tapped.
+  final String? openUrl;
+
+  /// Converts the notification to a map (for the platform channel).
+  Map<String, dynamic> toMap() => {
+    'identifier': identifier,
+    'typeName': typeName,
+    'typeId': typeId,
+    'title': title,
+    'subtitle': subtitle,
+    'body': body,
+    'openUrl': openUrl,
+  };
 
   @override
-  String toString() {
-    return 'SingBoxNotification(identifier: $identifier, typeName: $typeName, typeId: $typeId, title: $title, subtitle: $subtitle, body: $body, openUrl: $openUrl)';
-  }
+  String toString() =>
+      'SingBoxNotification(identifier: $identifier, typeName: $typeName, '
+      'typeId: $typeId, title: $title, subtitle: $subtitle, body: $body, '
+      'openUrl: $openUrl)';
 }

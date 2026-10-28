@@ -1,0 +1,62 @@
+name: libbox
+
+# Builds the sing-box native libraries (libbox) from source on a clean
+# machine and uploads them as a workflow artifact, together with the
+# checksum files updated by scripts/release_libbox.sh.
+#
+# This workflow does not publish the release. The plugin pins the SHA-256 of
+# the release assets (android/libbox.properties, ios/sing_box/Package.swift)
+# and the builds are not byte-for-byte reproducible (toolchain drift, zip
+# timestamps), so a fresh CI build never matches the committed checksums.
+# To release: take the artifact (or a local build), copy libbox.aar and
+# Libbox.xcframework.zip to build/libbox/, commit the updated checksum files
+# and run `scripts/release_libbox.sh --publish` from that commit.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android NDK
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Build libbox
+        run: scripts/build_libbox.sh android apple
+      - name: Update checksums
+        run: |
+          scripts/release_libbox.sh
+          {
+            echo '### libbox checksums'
+            echo
+            echo '```'
+            cat build/libbox/libbox.aar.sha256 build/libbox/Libbox.xcframework.zip.sha256
+            echo '```'
+            echo
+            echo 'Committed checksums differ from this build:'
+            echo
+            echo '```diff'
+            git diff -- android/libbox.properties ios/sing_box/Package.swift
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libbox
+          path: |
+            build/libbox/libbox.aar
+            build/libbox/Libbox.xcframework.zip
+            build/libbox/*.sha256
+            LIBBOX_VERSION
+            android/libbox.properties
+            ios/sing_box/Package.swift

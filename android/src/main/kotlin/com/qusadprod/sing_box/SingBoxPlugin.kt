@@ -1,876 +1,487 @@
 package com.qusadprod.sing_box
 
+import android.Manifest
 import android.app.Activity
-import android.content.BroadcastReceiver
+import android.app.StatusBarManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.net.VpnService
-import android.os.Bundle
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.qusadprod.sing_box.bg.SingBoxVPNService
-import com.qusadprod.sing_box.constant.Action
-import com.qusadprod.sing_box.constant.Status
+import com.qusadprod.sing_box.core.AppInfo
+import com.qusadprod.sing_box.core.KeyValueStorage
+import com.qusadprod.sing_box.core.LibboxRuntime
+import com.qusadprod.sing_box.core.NotificationOptions
+import com.qusadprod.sing_box.core.Paths
+import com.qusadprod.sing_box.core.ServiceSettings
+import com.qusadprod.sing_box.core.ServiceState
+import com.qusadprod.sing_box.core.ServiceStatus
+import com.qusadprod.sing_box.core.SingBoxError
+import com.qusadprod.sing_box.core.libboxMessage
+import com.qusadprod.sing_box.plugin.ClashModeStreamHandler
+import com.qusadprod.sing_box.plugin.ConnectionsStreamHandler
+import com.qusadprod.sing_box.plugin.GroupsStreamHandler
+import com.qusadprod.sing_box.plugin.LogsStreamHandler
+import com.qusadprod.sing_box.plugin.NetworkQualityStreamHandler
+import com.qusadprod.sing_box.plugin.NotificationsStreamHandler
+import com.qusadprod.sing_box.plugin.OutboundsStreamHandler
+import com.qusadprod.sing_box.plugin.StatsStreamHandler
+import com.qusadprod.sing_box.plugin.StatusStreamHandler
+import com.qusadprod.sing_box.plugin.StunStreamHandler
+import com.qusadprod.sing_box.service.ServiceNotification
+import com.qusadprod.sing_box.service.SingBoxTileService
+import com.qusadprod.sing_box.service.SingBoxVpnService
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
+import io.nekohasekai.libbox.CommandClient
+import io.nekohasekai.libbox.Libbox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicReference
-import com.google.gson.Gson
-import com.google.gson.JsonObject
+import kotlinx.coroutines.withContext
 
-/** SingBoxPlugin */
-class SingBoxPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
-    // The MethodChannel that will the communication between Flutter and native Android
+/**
+ * Flutter plugin entry point: implements the method channel `sing_box` and the
+ * event channels of `doc/platform_channel.md`. The VPN itself runs in
+ * [SingBoxVpnService]; this class only talks to it and to libbox.
+ */
+class SingBoxPlugin :
+    FlutterPlugin,
+    ActivityAware,
+    MethodChannel.MethodCallHandler,
+    PluginRegistry.ActivityResultListener,
+    PluginRegistry.RequestPermissionsResultListener {
+    private lateinit var context: Context
     private lateinit var channel: MethodChannel
-    
-    // Event channels for status and stats streams
-    private lateinit var statusEventChannel: EventChannel
-    private lateinit var statsEventChannel: EventChannel
-    private lateinit var notificationsEventChannel: EventChannel
-    
-    private var activity: Activity? = null
-    private var context: Context? = null
-    
-    // Coroutine scope for async operations
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    
-    // VPN Service class
-    private val vpnServiceClass = SingBoxVPNService::class.java
-    
-    // Bypass Manager for managing bypass lists
-    private var bypassManager: BypassManager? = null
-    
-    // DNS Manager for managing DNS servers
-    private var dnsManager: DnsManager? = null
-    
-    // Settings Manager for managing settings
-    private var settingsManager: SettingsManager? = null
-    
-    // Server Config Manager for managing server configurations
-    private var serverConfigManager: ServerConfigManager? = null
-    
-    // Block Manager for managing app and domain blocking
-    private var blockManager: BlockManager? = null
-    
-    // Current connection status (cached from Broadcast)
-    private val currentStatus = AtomicReference<String>("disconnected")
-    
-    companion object {
-        // Constants for waiting for VPN disconnection
-        private const val DISCONNECT_WAIT_MAX_ATTEMPTS = 50
-        private const val DISCONNECT_WAIT_DELAY_MS = 100L
-    }
-    
-    // Last connection statistics (cached from Broadcast)
-    private val lastStats = AtomicReference<Map<String, Any?>>(
-        mapOf(
-            "downloadSpeed" to 0L,
-            "uploadSpeed" to 0L,
-            "bytesSent" to 0L,
-            "bytesReceived" to 0L,
-            "ping" to null,
-            "connectionDuration" to 0L
-        )
-    )
-    
-    // Stream handlers for Event Channels
-    private var statusStreamHandler: StatusStreamHandler? = null
-    private var statsStreamHandler: StatsStreamHandler? = null
-    private var notificationsStreamHandler: NotificationsStreamHandler? = null
-    
-    // BroadcastReceiver for receiving status and statistics
-    private val statusReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                Action.STATUS_UPDATE -> {
-                    val status = intent.getStringExtra(Action.EXTRA_STATUS) ?: "disconnected"
-                    currentStatus.set(status)
-                    statusStreamHandler?.sendStatus(status)
-                }
-                Action.STATS_UPDATE -> {
-                    val statsBundle = intent.getBundleExtra(Action.EXTRA_STATS)
-                    if (statsBundle != null) {
-                        val stats = bundleToMap(statsBundle)
-                        // Cache last statistics
-                        lastStats.set(stats)
-                        // Send to Event Channel
-                        statsStreamHandler?.sendStats(stats)
-                    }
-                }
-                Action.NOTIFICATION_UPDATE -> {
-                    val notification = mapOf(
-                        "identifier" to (intent.getStringExtra(Action.EXTRA_NOTIFICATION_IDENTIFIER) ?: ""),
-                        "typeName" to (intent.getStringExtra(Action.EXTRA_NOTIFICATION_TYPE_NAME) ?: ""),
-                        "typeId" to (intent.getIntExtra(Action.EXTRA_NOTIFICATION_TYPE_ID, 0)),
-                        "title" to (intent.getStringExtra(Action.EXTRA_NOTIFICATION_TITLE) ?: ""),
-                        "subtitle" to (intent.getStringExtra(Action.EXTRA_NOTIFICATION_SUBTITLE) ?: ""),
-                        "body" to (intent.getStringExtra(Action.EXTRA_NOTIFICATION_BODY) ?: ""),
-                        "openUrl" to intent.getStringExtra(Action.EXTRA_NOTIFICATION_OPEN_URL)
-                    )
-                    notificationsStreamHandler?.sendNotification(notification)
-                }
-            }
-        }
-    }
-    
-    private fun bundleToMap(bundle: Bundle): Map<String, Any?> {
-        val map = mutableMapOf<String, Any?>()
-        for (key in bundle.keySet()) {
-            val value = bundle.get(key)
-            when (value) {
-                is Long -> map[key] = value
-                is Int -> map[key] = value.toLong()
-                is String -> map[key] = value
-                is Boolean -> map[key] = value
-                null -> map[key] = null
-                else -> map[key] = value.toString()
-            }
-        }
-        // Ensure ping is present (may be null)
-        if (!map.containsKey("ping")) {
-            map["ping"] = null
-        }
-        return map
-    }
+    private val eventChannels = mutableListOf<EventChannel>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        context = flutterPluginBinding.applicationContext
-        context?.let { ctx ->
-            bypassManager = BypassManager(ctx)
-            dnsManager = DnsManager(ctx)
-            settingsManager = SettingsManager(ctx)
-            serverConfigManager = ServerConfigManager(ctx)
-            blockManager = BlockManager(ctx)
-        }
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "sing_box")
+    private var activityBinding: ActivityPluginBinding? = null
+    private var vpnPermissionResult: MethodChannel.Result? = null
+    private var notificationPermissionResult: MethodChannel.Result? = null
+    private var initialized = false
+
+    // ---------------------------------------------------------------------------------------
+    // FlutterPlugin / ActivityAware
+    // ---------------------------------------------------------------------------------------
+
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        context = binding.applicationContext
+        channel = MethodChannel(binding.binaryMessenger, "sing_box")
         channel.setMethodCallHandler(this)
-        
-        // Setup Event Channels
-        statusEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "sing_box/status")
-        statusStreamHandler = StatusStreamHandler()
-        statusEventChannel.setStreamHandler(statusStreamHandler)
-        
-        statsEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "sing_box/stats")
-        statsStreamHandler = StatsStreamHandler()
-        statsEventChannel.setStreamHandler(statsStreamHandler)
-        
-        // Setup Event Channel for notifications
-        notificationsEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "sing_box/notifications")
-        notificationsStreamHandler = NotificationsStreamHandler()
-        notificationsEventChannel.setStreamHandler(notificationsStreamHandler)
-        
-        // Register BroadcastReceiver
-        val filter = IntentFilter().apply {
-            addAction(Action.STATUS_UPDATE)
-            addAction(Action.STATS_UPDATE)
-            addAction(Action.NOTIFICATION_UPDATE)
-        }
-        // Use RECEIVER_NOT_EXPORTED for security (Android 8.0+)
-        context?.let { ctx ->
-            ContextCompat.registerReceiver(ctx, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        }
-    }
-
-    override fun onMethodCall(call: MethodCall, result: Result) {
-        when (call.method) {
-            "initialize" -> {
-                // Initialization already done when creating components
-                // All components are created in SingBoxVPNService.onCreate()
-                result.success(true)
-            }
-            "getPlatformVersion" -> {
-                result.success("Android ${android.os.Build.VERSION.RELEASE}")
-            }
-            "connect" -> {
-                val config = call.argument<String>("config")
-                if (config == null || config.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config is required and cannot be empty", null)
-                    return
-                }
-                
-                val activity = activity
-                if (activity == null) {
-                    result.error("NO_ACTIVITY", "Activity is not available", null)
-                    return
-                }
-                
-                // Request VPN permission
-                val vpnIntent = VpnService.prepare(activity)
-                if (vpnIntent != null) {
-                    // Need to request permission
-                    result.error("VPN_PERMISSION_REQUIRED", "VPN permission is required", null)
-                    return
-                }
-                
-                // Start VPN service
-                scope.launch {
-                    try {
-                        val intent = Intent(context, vpnServiceClass).apply {
-                            action = SingBoxVPNService.ACTION_START
-                            putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
-                            putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
-                        }
-                        // Cache configuration to get server address
-                        currentConfigCache.set(config)
-                        context?.let { ctx ->
-                            ContextCompat.startForegroundService(ctx, intent)
-                            result.success(true)
-                        } ?: run {
-                            result.error("CONTEXT_NULL", "Context is null, cannot start service", null)
-                        }
-                    } catch (e: Exception) {
-                        result.error("CONNECTION_FAILED", "Failed to start VPN service: ${e.message}", null)
-                    }
-                }
-            }
-            "disconnect" -> {
-                scope.launch {
-                    try {
-                        val intent = Intent(context, vpnServiceClass).apply {
-                            action = SingBoxVPNService.ACTION_STOP
-                        }
-                        context?.startService(intent)
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("DISCONNECTION_FAILED", "Failed to stop VPN service: ${e.message}", null)
-                    }
-                }
-            }
-            "getConnectionStatus" -> {
-                // Get status from cache (updated via BroadcastReceiver)
-                result.success(currentStatus.get())
-            }
-            "getConnectionStats" -> {
-                // Return last statistics from cache
-                // Statistics are updated every second via BroadcastReceiver
-                val stats = lastStats.get()
-                result.success(stats)
-            }
-            "testSpeed" -> {
-                // Speed test uses current connection statistics
-                scope.launch {
-                    try {
-                        val stats = lastStats.get()
-                        val downloadSpeed = stats["downloadSpeed"] as? Long ?: 0L
-                        val uploadSpeed = stats["uploadSpeed"] as? Long ?: 0L
-                        val isConnected = currentStatus.get() == "connected"
-                        
-                        result.success(mapOf(
-                            "downloadSpeed" to downloadSpeed,
-                            "uploadSpeed" to uploadSpeed,
-                            "success" to isConnected,
-                            "errorMessage" to if (isConnected) null else "Not connected to VPN"
-                        ))
-                    } catch (e: Exception) {
-                        result.success(mapOf(
-                            "downloadSpeed" to 0,
-                            "uploadSpeed" to 0,
-                            "success" to false,
-                            "errorMessage" to e.message ?: "Unknown error"
-                        ))
-                    }
-                }
-            }
-            "pingCurrentServer" -> {
-                // Ping uses current connection statistics
-                scope.launch {
-                    try {
-                        val stats = lastStats.get()
-                        val ping = stats["ping"] as? Long
-                        val isConnected = currentStatus.get() == "connected"
-                        
-                        result.success(mapOf(
-                            "ping" to (ping ?: 0),
-                            "success" to (isConnected && ping != null && ping > 0),
-                            "errorMessage" to if (!isConnected) "Not connected to VPN" else if (ping == null) "Ping not available" else null,
-                            "address" to getCurrentServerAddress()
-                        ))
-                    } catch (e: Exception) {
-                        result.success(mapOf(
-                            "ping" to 0,
-                            "success" to false,
-                            "errorMessage" to e.message ?: "Unknown error",
-                            "address" to null
-                        ))
-                    }
-                }
-            }
-            "addAppToBypass" -> {
-                val packageName = call.argument<String>("packageName")
-                if (packageName == null || packageName.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Package name is required", null)
-                    return
-                }
-                val success = bypassManager?.addAppToBypass(packageName) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "removeAppFromBypass" -> {
-                val packageName = call.argument<String>("packageName")
-                if (packageName == null || packageName.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Package name is required", null)
-                    return
-                }
-                val success = bypassManager?.removeAppFromBypass(packageName) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "getBypassApps" -> {
-                val apps = bypassManager?.getBypassApps() ?: emptyList()
-                result.success(apps)
-            }
-            "addDomainToBypass" -> {
-                val domain = call.argument<String>("domain")
-                if (domain == null || domain.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Domain is required", null)
-                    return
-                }
-                val success = bypassManager?.addDomainToBypass(domain) ?: false
-                result.success(success)
-            }
-            "removeDomainFromBypass" -> {
-                val domain = call.argument<String>("domain")
-                if (domain == null || domain.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Domain is required", null)
-                    return
-                }
-                val success = bypassManager?.removeDomainFromBypass(domain) ?: false
-                result.success(success)
-            }
-            "getBypassDomains" -> {
-                val domains = bypassManager?.getBypassDomains() ?: emptyList()
-                result.success(domains)
-            }
-            "switchServer" -> {
-                val config = call.argument<String>("config")
-                if (config == null || config.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config is required and cannot be empty", null)
-                    return
-                }
-                
-                scope.launch {
-                    try {
-                        val currentStatusValue = currentStatus.get()
-                        
-                        // If VPN is not connected, just connect with new configuration
-                        if (currentStatusValue != "connected" && currentStatusValue != "connecting") {
-                            // Direct connection with new configuration
-                            val activity = activity
-                            if (activity == null) {
-                                result.error("NO_ACTIVITY", "Activity is not available", null)
-                                return@launch
-                            }
-                            
-                            val vpnIntent = VpnService.prepare(activity)
-                            if (vpnIntent != null) {
-                                result.error("VPN_PERMISSION_REQUIRED", "VPN permission is required", null)
-                                return@launch
-                            }
-                            
-                        val intent = Intent(context, vpnServiceClass).apply {
-                            action = SingBoxVPNService.ACTION_START
-                            putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
-                            putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
-                        }
-                        // Cache configuration to get server address
-                        currentConfigCache.set(config)
-                        context?.let { ctx ->
-                            ContextCompat.startForegroundService(ctx, intent)
-                            result.success(true)
-                        } ?: run {
-                            result.error("CONTEXT_NULL", "Context is null, cannot start service", null)
-                        }
-                            return@launch
-                        }
-                        
-                        // If VPN is connected, disconnect first
-                        val disconnectIntent = Intent(context, vpnServiceClass).apply {
-                            action = SingBoxVPNService.ACTION_STOP
-                        }
-                        context?.startService(disconnectIntent)
-                        
-                        // Wait for disconnection (maximum 5 seconds)
-                        var attempts = 0
-                        while (attempts < DISCONNECT_WAIT_MAX_ATTEMPTS && currentStatus.get() != "disconnected") {
-                            delay(DISCONNECT_WAIT_DELAY_MS)
-                            attempts++
-                        }
-                        
-                        // Check that we disconnected
-                        if (currentStatus.get() != "disconnected") {
-                            result.error("DISCONNECT_TIMEOUT", "Failed to disconnect from current server", null)
-                            return@launch
-                        }
-                        
-                        // Small delay before reconnecting
-                        delay(500)
-                        
-                        // Connect with new configuration
-                        val activity = activity
-                        if (activity == null) {
-                            result.error("NO_ACTIVITY", "Activity is not available", null)
-                            return@launch
-                        }
-                        
-                        val vpnIntent = VpnService.prepare(activity)
-                        if (vpnIntent != null) {
-                            result.error("VPN_PERMISSION_REQUIRED", "VPN permission is required", null)
-                            return@launch
-                        }
-                        
-                        val connectIntent = Intent(context, vpnServiceClass).apply {
-                            action = SingBoxVPNService.ACTION_START
-                            putExtra(SingBoxVPNService.EXTRA_CONFIG, config)
-                            putExtra(SingBoxVPNService.EXTRA_DISABLE_MEMORY_LIMIT, false)
-                        }
-                        // Cache configuration to get server address
-                        currentConfigCache.set(config)
-                        context?.let { ctx ->
-                            ContextCompat.startForegroundService(ctx, connectIntent)
-                            result.success(true)
-                        } ?: run {
-                            result.error("CONTEXT_NULL", "Context is null, cannot start service", null)
-                        }
-                    } catch (e: Exception) {
-                        result.error("SWITCH_SERVER_FAILED", "Failed to switch server: ${e.message}", null)
-                    }
-                }
-            }
-            "saveSettings" -> {
-                val settings = call.argument<Map<String, Any>>("settings")
-                if (settings == null) {
-                    result.error("INVALID_ARGUMENT", "Settings map is required", null)
-                    return
-                }
-                val success = settingsManager?.saveSettings(settings) ?: false
-                result.success(success)
-            }
-            "loadSettings" -> {
-                val settings = settingsManager?.loadSettings() ?: mapOf<String, Any>()
-                result.success(settings)
-            }
-            "getSettings" -> {
-                val settings = settingsManager?.getSettings() ?: mapOf<String, Any>()
-                result.success(settings)
-            }
-            "updateSetting" -> {
-                val key = call.argument<String>("key")
-                val value = call.arguments["value"]
-                if (key == null || key.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Setting key is required", null)
-                    return
-                }
-                val success = settingsManager?.updateSetting(key, value) ?: false
-                result.success(success)
-            }
-            "addServerConfig" -> {
-                val config = call.argument<Map<String, Any>>("config")
-                if (config == null) {
-                    result.error("INVALID_ARGUMENT", "Config is required", null)
-                    return
-                }
-                val configId = config["id"] as? String
-                if (configId.isNullOrBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config ID is required", null)
-                    return
-                }
-                val success = serverConfigManager?.addServerConfig(config) ?: false
-                result.success(success)
-            }
-            "removeServerConfig" -> {
-                val configId = call.argument<String>("configId")
-                if (configId == null || configId.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config ID is required", null)
-                    return
-                }
-                val success = serverConfigManager?.removeServerConfig(configId) ?: false
-                result.success(success)
-            }
-            "updateServerConfig" -> {
-                val config = call.argument<Map<String, Any>>("config")
-                if (config == null) {
-                    result.error("INVALID_ARGUMENT", "Config is required", null)
-                    return
-                }
-                val configId = config["id"] as? String
-                if (configId.isNullOrBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config ID is required", null)
-                    return
-                }
-                val success = serverConfigManager?.updateServerConfig(config) ?: false
-                result.success(success)
-            }
-            "getServerConfigs" -> {
-                val configs = serverConfigManager?.getServerConfigs() ?: emptyList()
-                result.success(configs)
-            }
-            "getServerConfig" -> {
-                val configId = call.argument<String>("configId")
-                if (configId == null || configId.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Config ID is required", null)
-                    return
-                }
-                val config = serverConfigManager?.getServerConfig(configId)
-                result.success(config)
-            }
-            "setActiveServerConfig" -> {
-                val configId = call.argument<String>("configId")
-                // configId can be null to reset active configuration
-                val success = serverConfigManager?.setActiveServerConfig(configId) ?: false
-                result.success(success)
-            }
-            "getActiveServerConfig" -> {
-                val config = serverConfigManager?.getActiveServerConfig()
-                result.success(config)
-            }
-            "addBlockedApp" -> {
-                val packageName = call.argument<String>("packageName")
-                if (packageName == null || packageName.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Package name is required", null)
-                    return
-                }
-                val success = blockManager?.addBlockedApp(packageName) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply blocking changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "removeBlockedApp" -> {
-                val packageName = call.argument<String>("packageName")
-                if (packageName == null || packageName.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Package name is required", null)
-                    return
-                }
-                val success = blockManager?.removeBlockedApp(packageName) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply blocking changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "getBlockedApps" -> {
-                val apps = blockManager?.getBlockedApps() ?: emptyList()
-                result.success(apps)
-            }
-            "addBlockedDomain" -> {
-                val domain = call.argument<String>("domain")
-                if (domain == null || domain.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Domain is required", null)
-                    return
-                }
-                val success = blockManager?.addBlockedDomain(domain) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply blocking changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "removeBlockedDomain" -> {
-                val domain = call.argument<String>("domain")
-                if (domain == null || domain.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Domain is required", null)
-                    return
-                }
-                val success = blockManager?.removeBlockedDomain(domain) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply blocking changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "getBlockedDomains" -> {
-                val domains = blockManager?.getBlockedDomains() ?: emptyList()
-                result.success(domains)
-            }
-            "addSubnetToBypass" -> {
-                val subnet = call.argument<String>("subnet")
-                if (subnet == null || subnet.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Subnet is required", null)
-                    return
-                }
-                val success = bypassManager?.addSubnetToBypass(subnet) ?: false
-                if (!success) {
-                    result.error("INVALID_SUBNET", "Invalid subnet format. Expected CIDR notation (e.g., 192.168.1.0/24)", null)
-                    return
-                }
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(true)
-            }
-            "removeSubnetFromBypass" -> {
-                val subnet = call.argument<String>("subnet")
-                if (subnet == null || subnet.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "Subnet is required", null)
-                    return
-                }
-                val success = bypassManager?.removeSubnetFromBypass(subnet) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "getBypassSubnets" -> {
-                val subnets = bypassManager?.getBypassSubnets() ?: emptyList()
-                result.success(subnets)
-            }
-            "addDnsServer" -> {
-                val dnsServer = call.argument<String>("dnsServer")
-                if (dnsServer == null || dnsServer.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "DNS server is required", null)
-                    return
-                }
-                val success = dnsManager?.addDnsServer(dnsServer) ?: false
-                if (!success) {
-                    result.error("INVALID_DNS", "Invalid DNS server format. Expected IPv4 or IPv6 address (e.g., 8.8.8.8)", null)
-                    return
-                }
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes DNS
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(true)
-            }
-            "removeDnsServer" -> {
-                val dnsServer = call.argument<String>("dnsServer")
-                if (dnsServer == null || dnsServer.isBlank()) {
-                    result.error("INVALID_ARGUMENT", "DNS server is required", null)
-                    return
-                }
-                val success = dnsManager?.removeDnsServer(dnsServer) ?: false
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes DNS
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(success)
-            }
-            "getDnsServers" -> {
-                val servers = dnsManager?.getDnsServers() ?: emptyList()
-                result.success(servers)
-            }
-            "setDnsServers" -> {
-                val dnsServers = call.argument<List<String>>("dnsServers")
-                if (dnsServers == null) {
-                    result.error("INVALID_ARGUMENT", "DNS servers list is required", null)
-                    return
-                }
-                val success = dnsManager?.setDnsServers(dnsServers) ?: false
-                if (!success) {
-                    result.error("INVALID_DNS", "One or more DNS servers have invalid format", null)
-                    return
-                }
-                if (success && currentStatus.get() == "connected") {
-                    // Restart VPN to apply changes DNS
-                    val reloadIntent = Intent(context, vpnServiceClass).apply {
-                        action = SingBoxVPNService.ACTION_RELOAD
-                    }
-                    context?.startService(reloadIntent)
-                }
-                result.success(true)
-            }
-            else -> {
-                result.notImplemented()
+        val handlers = mapOf(
+            "status" to StatusStreamHandler(),
+            "stats" to StatsStreamHandler(scope),
+            "logs" to LogsStreamHandler(scope),
+            "groups" to GroupsStreamHandler(scope),
+            "outbounds" to OutboundsStreamHandler(scope),
+            "clash_mode" to ClashModeStreamHandler(scope),
+            "connections" to ConnectionsStreamHandler(scope),
+            "notifications" to NotificationsStreamHandler(),
+            "network_quality" to NetworkQualityStreamHandler(context, scope),
+            "stun" to StunStreamHandler(context, scope),
+        )
+        for ((name, handler) in handlers) {
+            eventChannels += EventChannel(binding.binaryMessenger, "sing_box/$name").apply {
+                setStreamHandler(handler)
             }
         }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
-        
-        // Unregister Event Channels
-        statusEventChannel.setStreamHandler(null)
-        statsEventChannel.setStreamHandler(null)
-        notificationsEventChannel.setStreamHandler(null)
-        statusStreamHandler = null
-        statsStreamHandler = null
-        
-        // Unregister BroadcastReceiver
-        try {
-            context?.unregisterReceiver(statusReceiver)
-        } catch (e: Exception) {
-            // Ignore errors when unregistering, but log for debugging
-            android.util.Log.w("SingBoxPlugin", "Error unregistering receiver", e)
-        }
-        
-        context = null
-    }
-    
-    /**
-     * Get server address from current configuration
-     * Parses JSON configuration and extracts server address
-     */
-    private fun getCurrentServerAddress(): String? {
-        val config = currentConfigCache.get() ?: return null
-        return try {
-            // Parse JSON configuration
-            val jsonObject = Gson().fromJson(config, JsonObject::class.java)
-            
-            // JSON structure validation
-            if (!jsonObject.has("outbounds")) {
-                return null
-            }
-            
-            // Look for outbounds
-            val outbounds = jsonObject.getAsJsonArray("outbounds")
-            if (outbounds == null || outbounds.size() == 0) {
-                return null
-            }
-            
-            // Take the first outbound (usually the main server)
-            val firstOutbound = outbounds.get(0).asJsonObject
-            
-            // Try to get address from different fields depending on protocol
-            // For most protocols, address is in the "server" field
-            val serverField = firstOutbound.get("server")
-            if (serverField != null && serverField.isJsonPrimitive) {
-                val serverValue = serverField.asString
-                if (serverValue.isNotEmpty()) {
-                    return serverValue
-                }
-            }
-            
-            // For some protocols, address may be in "settings.server"
-            val settings = firstOutbound.getAsJsonObject("settings")
-            if (settings != null) {
-                val serverInSettings = settings.get("server")
-                if (serverInSettings != null && serverInSettings.isJsonPrimitive) {
-                    val serverValue = serverInSettings.asString
-                    if (serverValue.isNotEmpty()) {
-                        return serverValue
-                    }
-                }
-                
-                // For shadowsocks, address may be in "settings.address"
-                val address = settings.get("address")
-                if (address != null && address.isJsonPrimitive) {
-                    val addressValue = address.asString
-                    if (addressValue.isNotEmpty()) {
-                        return addressValue
-                    }
-                }
-            }
-            
-            null
-        } catch (e: Exception) {
-            null
-        }
+        for (eventChannel in eventChannels) eventChannel.setStreamHandler(null)
+        eventChannels.clear()
+        scope.cancel()
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activity = binding.activity
+        activityBinding = binding
+        binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        activity = null
+        // The pending requests are delivered to the recreated Activity.
+        detachActivity()
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity
+        onAttachedToActivity(binding)
     }
 
     override fun onDetachedFromActivity() {
-        activity = null
+        detachActivity()
+        // No Activity will deliver the results any more: answer with the current state.
+        vpnPermissionResult?.success(hasVpnPermission())
+        vpnPermissionResult = null
+        notificationPermissionResult?.success(hasNotificationPermission())
+        notificationPermissionResult = null
     }
-    
-    /**
-     * StreamHandler for connection status
-     */
-    private class StatusStreamHandler : EventChannel.StreamHandler {
-        private var eventSink: EventChannel.EventSink? = null
-        
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            eventSink = events
+
+    private fun detachActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding?.removeRequestPermissionsResultListener(this)
+        activityBinding = null
+    }
+
+    private val activity: Activity? get() = activityBinding?.activity
+
+    // ---------------------------------------------------------------------------------------
+    // Method channel
+    // ---------------------------------------------------------------------------------------
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        val method = call.method
+        if (method != "getPlatformVersion" && method != "initialize" && !initialized) {
+            result.error(SingBoxError.NOT_INITIALIZED, SingBoxError.notInitialized().message, null)
+            return
         }
-        
-        override fun onCancel(arguments: Any?) {
-            eventSink = null
-        }
-        
-        fun sendStatus(status: String) {
-            eventSink?.success(status)
+        when (method) {
+            "initialize" -> respond(result) { initialize(call) }
+            "getPlatformVersion" -> result.success("Android ${Build.VERSION.RELEASE}")
+            "getSingBoxVersion" -> respond(result) { io { Libbox.version() } }
+            "checkConfig" -> respond(result) {
+                checkConfig(call.requireString("config"))
+                null
+            }
+            "formatConfig" -> respond(result) { formatConfig(call.requireString("config")) }
+            "hasVpnPermission" -> result.success(hasVpnPermission())
+            "requestVpnPermission" -> requestVpnPermission(result)
+            "hasNotificationPermission" -> result.success(hasNotificationPermission())
+            "requestNotificationPermission" -> requestNotificationPermission(result)
+            "openVpnSettings" -> respond(result) {
+                openVpnSettings()
+                null
+            }
+            "requestAddQuickSettingsTile" -> requestAddQuickSettingsTile(call.argument<String>("label"), result)
+            "start" -> respond(result) {
+                start(call.requireString("config"), call.argument<Boolean>("disableMemoryLimit") ?: false)
+                null
+            }
+            "stop" -> respond(result) {
+                stop()
+                null
+            }
+            "reload" -> respond(result) {
+                reload(call.argument<String>("config"))
+                null
+            }
+            "getStatus" -> result.success(ServiceState.status.wire)
+            "getStartedAt" -> result.success(ServiceState.current.let { if (it.status == ServiceStatus.Started) it.startedAt else null })
+            "getLastConfig" -> respond(result) { io { Paths.readLastConfig(context) } }
+            "setServiceOptions" -> respond(result) {
+                setServiceOptions(call.arguments as? Map<*, *> ?: emptyMap<Any, Any>())
+                null
+            }
+            "selectOutbound" -> command(result) {
+                it.selectOutbound(call.requireString("groupTag"), call.requireString("outboundTag"))
+            }
+            "urlTest" -> command(result) { it.urlTest(call.requireString("tag")) }
+            "setClashMode" -> command(result) { it.setClashMode(call.requireString("mode")) }
+            "closeConnection" -> command(result) { it.closeConnection(call.requireString("id")) }
+            "closeAllConnections" -> command(result) { it.closeConnections() }
+            "clearLogs" -> command(result) { it.clearLogs() }
+            "setGroupExpand" -> command(result) {
+                it.setGroupExpand(call.requireString("groupTag"), call.argument<Boolean>("expand") ?: false)
+            }
+            "storageRead" -> respond(result) { io { KeyValueStorage(context).read(call.requireString("key")) } }
+            "storageWrite" -> respond(result) {
+                val key = call.requireString("key")
+                val value = call.argument<String>("value")
+                io { KeyValueStorage(context).write(key, value) }
+                null
+            }
+            else -> result.notImplemented()
         }
     }
-    
-    /**
-     * StreamHandler for connection statistics
-     */
-    private class StatsStreamHandler : EventChannel.StreamHandler {
-        private var eventSink: EventChannel.EventSink? = null
-        
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            eventSink = events
-        }
-        
-        override fun onCancel(arguments: Any?) {
-            eventSink = null
-        }
-        
-        fun sendStats(stats: Map<String, Any>) {
-            eventSink?.success(stats)
+
+    /** Runs [block] on the main scope and reports its value or [SingBoxError]. */
+    private fun respond(result: MethodChannel.Result, block: suspend () -> Any?) {
+        scope.launch {
+            try {
+                result.success(block())
+            } catch (e: SingBoxError) {
+                result.error(e.code, e.message, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "method call failed", e)
+                result.error(SingBoxError.INTERNAL, e.libboxMessage, null)
+            }
         }
     }
-    
-    private class NotificationsStreamHandler : EventChannel.StreamHandler {
-        private var eventSink: EventChannel.EventSink? = null
 
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            eventSink = events
-        }
+    private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
-        override fun onCancel(arguments: Any?) {
-            eventSink = null
-        }
+    private fun MethodCall.requireString(key: String): String =
+        argument<String>(key) ?: throw SingBoxError.invalidArgument("Missing argument \"$key\"")
 
-        fun sendNotification(notification: Map<String, Any?>) {
-            eventSink?.success(notification)
+    // ---------------------------------------------------------------------------------------
+    // Initialization and information
+    // ---------------------------------------------------------------------------------------
+
+    private suspend fun initialize(call: MethodCall): Map<String, Any?> {
+        val settings = ServiceSettings(context)
+        (call.argument<Number>("logMaxLines"))?.toInt()?.takeIf { it > 0 }?.let { settings.logMaxLines = it }
+        call.argument<Boolean>("debug")?.let { settings.debug = it }
+        val notificationOptions = NotificationOptions.fromMap(call.argument<Map<*, *>>("android"))
+        settings.notificationOptions = notificationOptions
+        ServiceNotification.createChannel(context, notificationOptions)
+        io { LibboxRuntime.ensureSetup(context) }
+        SingBoxTileService.install(context)
+        initialized = true
+        return mapOf(
+            "singBoxVersion" to io { Libbox.version() },
+            "status" to ServiceState.status.wire,
+            "workingDirectory" to Paths.workingDir(context).path,
+        )
+    }
+
+    private suspend fun checkConfig(config: String) = io {
+        LibboxRuntime.ensureSetup(context)
+        try {
+            Libbox.checkConfig(config)
+        } catch (e: Exception) {
+            throw SingBoxError(SingBoxError.INVALID_CONFIG, e.libboxMessage)
         }
+    }
+
+    private suspend fun formatConfig(config: String): String = io {
+        LibboxRuntime.ensureSetup(context)
+        try {
+            Libbox.formatConfig(config).value
+        } catch (e: Exception) {
+            throw SingBoxError(SingBoxError.INVALID_CONFIG, e.libboxMessage)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Permissions
+    // ---------------------------------------------------------------------------------------
+
+    private fun hasVpnPermission(): Boolean = runCatching { VpnService.prepare(context) == null }.getOrDefault(false)
+
+    private fun requestVpnPermission(result: MethodChannel.Result) {
+        val intent = try {
+            VpnService.prepare(context)
+        } catch (e: Exception) {
+            result.error(SingBoxError.INTERNAL, e.libboxMessage, null)
+            return
+        }
+        if (intent == null) {
+            result.success(true)
+            return
+        }
+        val current = activity
+        if (current == null) {
+            result.error(SingBoxError.NO_ACTIVITY, SingBoxError.noActivity().message, null)
+            return
+        }
+        if (vpnPermissionResult != null) {
+            result.error(SingBoxError.INTERNAL, "A VPN permission request is already in progress", null)
+            return
+        }
+        vpnPermissionResult = result
+        try {
+            current.startActivityForResult(intent, REQUEST_VPN)
+        } catch (e: Exception) {
+            vpnPermissionResult = null
+            result.error(SingBoxError.INTERNAL, e.libboxMessage, null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != REQUEST_VPN) return false
+        val pending = vpnPermissionResult ?: return true
+        vpnPermissionResult = null
+        // RESULT_OK is not reliable on every OEM build; ask the system again.
+        pending.success(resultCode == Activity.RESULT_OK || hasVpnPermission())
+        return true
+    }
+
+    private fun hasNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (hasNotificationPermission()) {
+            result.success(true)
+            return
+        }
+        val current = activity
+        if (current == null) {
+            result.error(SingBoxError.NO_ACTIVITY, SingBoxError.noActivity().message, null)
+            return
+        }
+        if (notificationPermissionResult != null) {
+            result.error(SingBoxError.INTERNAL, "A notification permission request is already in progress", null)
+            return
+        }
+        notificationPermissionResult = result
+        ActivityCompat.requestPermissions(current, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ): Boolean {
+        if (requestCode != REQUEST_NOTIFICATIONS) return false
+        val pending = notificationPermissionResult ?: return true
+        notificationPermissionResult = null
+        pending.success(hasNotificationPermission())
+        return true
+    }
+
+    private fun openVpnSettings() {
+        val intent = Intent(Settings.ACTION_VPN_SETTINGS)
+        val current = activity
+        if (current != null) {
+            current.startActivity(intent)
+        } else {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    private fun requestAddQuickSettingsTile(label: String?, result: MethodChannel.Result) {
+        val current = activity
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || current == null) {
+            result.success("unsupported")
+            return
+        }
+        val settings = ServiceSettings(context)
+        settings.quickSettingsTile = true
+        if (!label.isNullOrBlank()) settings.tileLabel = label
+        SingBoxTileService.setEnabled(context, true)
+        val statusBar = current.getSystemService(StatusBarManager::class.java)
+        if (statusBar == null) {
+            result.success("unsupported")
+            return
+        }
+        val icon = Icon.createWithResource(context, AppInfo.iconResource(context, settings.notificationOptions.icon))
+        try {
+            statusBar.requestAddTileService(
+                SingBoxTileService.component(context),
+                settings.tileLabel ?: AppInfo.label(context),
+                icon,
+                ContextCompat.getMainExecutor(context),
+            ) { code ->
+                result.success(
+                    when (code) {
+                        StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "added"
+                        StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "alreadyAdded"
+                        StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> "declined"
+                        else -> "unsupported"
+                    },
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "requestAddTileService", e)
+            result.success("unsupported")
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Service control
+    // ---------------------------------------------------------------------------------------
+
+    private suspend fun start(config: String, disableMemoryLimit: Boolean) {
+        checkConfig(config)
+        if (!hasVpnPermission()) throw SingBoxError.permissionDenied()
+        val settings = ServiceSettings(context)
+        io {
+            settings.disableMemoryLimit = disableMemoryLimit
+            Paths.writeLastConfig(context, config)
+        }
+        val service = SingBoxVpnService.instance
+        when (ServiceState.status) {
+            ServiceStatus.Started, ServiceStatus.Starting -> {
+                // Already running: reload with the new last config. A start that has not
+                // reached the service yet reads the new config by itself.
+                if (service == null && ServiceState.status == ServiceStatus.Starting) return
+                (service ?: throw SingBoxError.notRunning()).reload()
+                return
+            }
+            ServiceStatus.Stopping, ServiceStatus.Stopped -> Unit
+        }
+        val wasStopped = ServiceState.status == ServiceStatus.Stopped
+        if (wasStopped) {
+            // Report `connecting` before the method result (contract); the service
+            // continues from this state.
+            SingBoxVpnService.cancelPendingStop()
+            ServiceState.update { it.copy(status = ServiceStatus.Starting, startedAt = null) }
+        }
+        try {
+            SingBoxVpnService.start(context)
+        } catch (e: Exception) {
+            val message = "android: cannot start the VPN service: ${e.libboxMessage}"
+            if (wasStopped) {
+                ServiceState.update { it.copy(status = ServiceStatus.Stopped, startedAt = null, error = message) }
+            }
+            throw SingBoxError(SingBoxError.START_FAILED, message)
+        }
+    }
+
+    private fun stop() {
+        val service = SingBoxVpnService.instance
+        if (service != null) {
+            service.requestStop(userInitiated = true)
+        } else if (ServiceState.status != ServiceStatus.Stopped) {
+            // Started by us but the service has not been created yet.
+            SingBoxVpnService.requestPendingStop(context)
+        }
+    }
+
+    private suspend fun reload(config: String?) {
+        if (!ServiceState.isRunning) throw SingBoxError.notRunning()
+        if (config != null) {
+            checkConfig(config)
+            io { Paths.writeLastConfig(context, config) }
+        }
+        (SingBoxVpnService.instance ?: throw SingBoxError.notRunning()).reload()
+    }
+
+    private fun setServiceOptions(options: Map<*, *>) {
+        val settings = ServiceSettings(context)
+        (options["startOnBoot"] as? Boolean)?.let { settings.startOnBoot = it }
+        (options["quickSettingsTile"] as? Boolean)?.let {
+            settings.quickSettingsTile = it
+            SingBoxTileService.setEnabled(context, it)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Command client operations
+    // ---------------------------------------------------------------------------------------
+
+    private fun command(result: MethodChannel.Result, block: (CommandClient) -> Unit) = respond(result) {
+        if (!ServiceState.isRunning) throw SingBoxError.notRunning()
+        io {
+            try {
+                // Standalone clients close their connection after every call.
+                block(Libbox.newStandaloneCommandClient())
+            } catch (e: Exception) {
+                throw SingBoxError(SingBoxError.COMMAND_FAILED, e.libboxMessage)
+            }
+        }
+        null
+    }
+
+    private companion object {
+        const val TAG = "sing_box"
+        const val REQUEST_VPN = 0x5B01
+        const val REQUEST_NOTIFICATIONS = 0x5B02
     }
 }

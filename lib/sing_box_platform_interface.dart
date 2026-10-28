@@ -1,16 +1,35 @@
-import 'dart:async';
+/// The platform interface of the `sing_box` plugin.
+///
+/// App developers should use `package:sing_box/sing_box.dart` instead. This
+/// library is meant for alternative platform implementations and for tests,
+/// which can replace [SingBoxPlatform.instance] with a fake.
+library;
 
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'sing_box_method_channel.dart';
-import 'src/models/connection_status.dart';
+import 'src/models/clash_mode.dart';
+import 'src/models/connection.dart';
 import 'src/models/connection_stats.dart';
-import 'src/models/ping_result.dart';
-import 'src/models/speed_test_result.dart';
-import 'src/models/settings.dart';
-import 'src/models/server_config.dart';
+import 'src/models/connection_status.dart';
+import 'src/models/log_entry.dart';
+import 'src/models/network_quality.dart';
+import 'src/models/outbound_group.dart';
+import 'src/models/runtime_info.dart';
 import 'src/models/sing_box_notification.dart';
+import 'src/models/stun_result.dart';
+import 'src/options.dart';
 
+export 'src/models/runtime_info.dart';
+
+/// The interface that platform implementations of `sing_box` must extend.
+///
+/// Every method maps 1:1 to a message of the native contract described in
+/// `doc/platform_channel.md`. Higher level behaviour (config generation,
+/// persistence, observers) lives in `SingBox`.
+///
+/// Implementations must extend this class rather than implement it, so that
+/// new methods added here do not break them.
 abstract class SingBoxPlatform extends PlatformInterface {
   /// Constructs a SingBoxPlatform.
   SingBoxPlatform() : super(token: _token);
@@ -25,254 +44,239 @@ abstract class SingBoxPlatform extends PlatformInterface {
   static SingBoxPlatform get instance => _instance;
 
   /// Platform-specific implementations should set this with their own
-  /// platform-specific class that extends [SingBoxPlatform] when
-  /// they register themselves.
+  /// platform-specific class that extends [SingBoxPlatform] when they
+  /// register themselves.
   static set instance(SingBoxPlatform instance) {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
   }
 
-  /// Initialize plugin
-  /// Must be called before using other methods, preferably before application start
-  Future<bool> initialize() {
+  // ---------------------------------------------------------------------------
+  // Lifecycle and information
+  // ---------------------------------------------------------------------------
+
+  /// Initializes the native side (libbox setup, notification channel, VPN
+  /// profile loading).
+  Future<SingBoxRuntimeInfo> initialize(SingBoxOptions options) {
     throw UnimplementedError('initialize() has not been implemented.');
   }
 
-  /// Get platform version
+  /// Returns the operating system name and version, e.g. `Android 15`.
   Future<String?> getPlatformVersion() {
-    throw UnimplementedError('platformVersion() has not been implemented.');
+    throw UnimplementedError('getPlatformVersion() has not been implemented.');
   }
 
-  /// Connect to VPN with specified configuration
-  /// [config] - JSON string with server configuration
-  Future<bool> connect(String config) {
-    throw UnimplementedError('connect() has not been implemented.');
+  /// Returns the version of the bundled sing-box core.
+  Future<String> getSingBoxVersion() {
+    throw UnimplementedError('getSingBoxVersion() has not been implemented.');
   }
 
-  /// Disconnect from VPN
-  Future<bool> disconnect() {
-    throw UnimplementedError('disconnect() has not been implemented.');
+  /// Validates [config] with sing-box. Completes normally when the config is
+  /// valid and throws a configuration error otherwise.
+  Future<void> checkConfig(String config) {
+    throw UnimplementedError('checkConfig() has not been implemented.');
   }
 
-  /// Get current connection status
-  Future<SingBoxConnectionStatus> getConnectionStatus() {
-    throw UnimplementedError('getConnectionStatus() has not been implemented.');
+  /// Returns [config] formatted by sing-box.
+  Future<String> formatConfig(String config) {
+    throw UnimplementedError('formatConfig() has not been implemented.');
   }
 
-  /// Get current connection statistics
-  Future<SingBoxConnectionStats> getConnectionStats() {
-    throw UnimplementedError('getConnectionStats() has not been implemented.');
+  // ---------------------------------------------------------------------------
+  // Permissions
+  // ---------------------------------------------------------------------------
+
+  /// Whether the VPN permission (Android) / VPN profile (iOS) is granted.
+  Future<bool> hasVpnPermission() {
+    throw UnimplementedError('hasVpnPermission() has not been implemented.');
   }
 
-  /// Measure connection speed
-  Future<SingBoxSpeedTestResult> testSpeed() {
-    throw UnimplementedError('testSpeed() has not been implemented.');
+  /// Requests the VPN permission / installs the VPN profile.
+  Future<bool> requestVpnPermission() {
+    throw UnimplementedError(
+      'requestVpnPermission() has not been implemented.',
+    );
   }
 
-  /// Measure ping to current server
-  Future<SingBoxPingResult> pingCurrentServer() {
-    throw UnimplementedError('pingCurrentServer() has not been implemented.');
+  /// Whether the app may post notifications.
+  Future<bool> hasNotificationPermission() {
+    throw UnimplementedError(
+      'hasNotificationPermission() has not been implemented.',
+    );
   }
 
-
-  /// Subscribe to connection status changes
-  /// Returns Stream with status updates
-  Stream<SingBoxConnectionStatus> watchSingBoxConnectionStatus() {
-    throw UnimplementedError('watchSingBoxConnectionStatus() has not been implemented.');
+  /// Requests the notification permission.
+  Future<bool> requestNotificationPermission() {
+    throw UnimplementedError(
+      'requestNotificationPermission() has not been implemented.',
+    );
   }
 
-  /// Subscribe to connection statistics changes
-  /// Returns Stream with statistics updates
-  /// Statistics include: download/upload speed, bytes sent/received, ping, connection duration
-  Stream<SingBoxConnectionStats> watchSingBoxConnectionStats() {
-    throw UnimplementedError('watchSingBoxConnectionStats() has not been implemented.');
+  /// Opens the system VPN settings.
+  Future<void> openVpnSettings() {
+    throw UnimplementedError('openVpnSettings() has not been implemented.');
   }
 
-  /// Add app to bypass list (will not use VPN)
-  /// [packageName] - app package name (Android) or bundle ID (iOS)
-  Future<bool> addAppToBypass(String packageName) {
-    throw UnimplementedError('addAppToBypass() has not been implemented.');
+  /// Android 13+: asks the user to add the Quick Settings tile.
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({String? label}) {
+    throw UnimplementedError(
+      'requestAddQuickSettingsTile() has not been implemented.',
+    );
   }
 
-  /// Remove app from bypass list
-  /// [packageName] - app package name (Android) or bundle ID (iOS)
-  Future<bool> removeAppFromBypass(String packageName) {
-    throw UnimplementedError('removeAppFromBypass() has not been implemented.');
+  // ---------------------------------------------------------------------------
+  // Service control
+  // ---------------------------------------------------------------------------
+
+  /// Starts the tunnel with a complete sing-box [config].
+  Future<void> start(String config, {bool disableMemoryLimit = false}) {
+    throw UnimplementedError('start() has not been implemented.');
   }
 
-  /// Get list of apps in bypass
-  Future<List<String>> getBypassApps() {
-    throw UnimplementedError('getBypassApps() has not been implemented.');
+  /// Stops the tunnel.
+  Future<void> stop() {
+    throw UnimplementedError('stop() has not been implemented.');
   }
 
-  /// Add domain/site to bypass list (will not use VPN)
-  /// [domain] - domain name or IP address
-  Future<bool> addDomainToBypass(String domain) {
-    throw UnimplementedError('addDomainToBypass() has not been implemented.');
+  /// Reloads the running service, optionally with a new [config].
+  Future<void> reload([String? config]) {
+    throw UnimplementedError('reload() has not been implemented.');
   }
 
-  /// Remove domain/site from bypass list
-  /// [domain] - domain name or IP address
-  Future<bool> removeDomainFromBypass(String domain) {
-    throw UnimplementedError('removeDomainFromBypass() has not been implemented.');
+  /// Returns the current tunnel status.
+  Future<SingBoxConnectionStatus> getStatus() {
+    throw UnimplementedError('getStatus() has not been implemented.');
   }
 
-  /// Get list of domains/sites in bypass
-  Future<List<String>> getBypassDomains() {
-    throw UnimplementedError('getBypassDomains() has not been implemented.');
+  /// Returns when the current session started, `null` when not running.
+  Future<DateTime?> getStartedAt() {
+    throw UnimplementedError('getStartedAt() has not been implemented.');
   }
 
-  /// Switch current server
-  /// Stops current connection, changes configuration and connects to new server
-  /// [config] - JSON string with new server configuration
-  Future<bool> switchServer(String config) {
-    throw UnimplementedError('switchServer() has not been implemented.');
+  /// Returns the last configuration passed to [start] or [reload].
+  Future<String?> getLastConfig() {
+    throw UnimplementedError('getLastConfig() has not been implemented.');
   }
 
-  /// Save settings
-  /// [settings] - settings object to save
-  Future<bool> saveSettings(SingBoxSettings settings) {
-    throw UnimplementedError('saveSettings() has not been implemented.');
+  /// Persists and applies native service options.
+  Future<void> setServiceOptions(SingBoxServiceOptions options) {
+    throw UnimplementedError('setServiceOptions() has not been implemented.');
   }
 
-  /// Load settings
-  Future<SingBoxSettings> loadSettings() {
-    throw UnimplementedError('loadSettings() has not been implemented.');
+  // ---------------------------------------------------------------------------
+  // Command client operations
+  // ---------------------------------------------------------------------------
+
+  /// Selects [outboundTag] in the selector group [groupTag].
+  Future<void> selectOutbound(String groupTag, String outboundTag) {
+    throw UnimplementedError('selectOutbound() has not been implemented.');
   }
 
-  /// Get current settings
-  Future<SingBoxSettings> getSettings() {
-    throw UnimplementedError('getSettings() has not been implemented.');
+  /// Starts a URL test of a group or a single outbound.
+  Future<void> urlTest(String tag) {
+    throw UnimplementedError('urlTest() has not been implemented.');
   }
 
-  /// Update individual setting parameter
-  /// [key] - parameter key (autoConnectOnStart, autoReconnectOnDisconnect, killSwitch)
-  /// [value] - parameter value
-  Future<bool> updateSetting(String key, dynamic value) {
-    throw UnimplementedError('updateSetting() has not been implemented.');
+  /// Switches the clash mode.
+  Future<void> setClashMode(String mode) {
+    throw UnimplementedError('setClashMode() has not been implemented.');
   }
 
-  /// Add server configuration
-  /// [config] - server configuration
-  Future<bool> addServerConfig(SingBoxServerConfig config) {
-    throw UnimplementedError('addServerConfig() has not been implemented.');
+  /// Closes the connection with [id].
+  Future<void> closeConnection(String id) {
+    throw UnimplementedError('closeConnection() has not been implemented.');
   }
 
-  /// Remove server configuration
-  /// [configId] - configuration identifier
-  Future<bool> removeServerConfig(String configId) {
-    throw UnimplementedError('removeServerConfig() has not been implemented.');
+  /// Closes all connections.
+  Future<void> closeAllConnections() {
+    throw UnimplementedError('closeAllConnections() has not been implemented.');
   }
 
-  /// Update server configuration
-  /// [config] - updated server configuration
-  Future<bool> updateServerConfig(SingBoxServerConfig config) {
-    throw UnimplementedError('updateServerConfig() has not been implemented.');
+  /// Clears the log buffer of the core.
+  Future<void> clearLogs() {
+    throw UnimplementedError('clearLogs() has not been implemented.');
   }
 
-  /// Get all server configurations
-  Future<List<SingBoxServerConfig>> getServerConfigs() {
-    throw UnimplementedError('getServerConfigs() has not been implemented.');
+  /// Persists the UI expansion state of a group.
+  Future<void> setGroupExpand(String groupTag, bool expand) {
+    throw UnimplementedError('setGroupExpand() has not been implemented.');
   }
 
-  /// Get server configuration by ID
-  /// [configId] - configuration identifier
-  Future<SingBoxServerConfig?> getServerConfig(String configId) {
-    throw UnimplementedError('getServerConfig() has not been implemented.');
+  // ---------------------------------------------------------------------------
+  // Storage
+  // ---------------------------------------------------------------------------
+
+  /// Reads a persisted string value.
+  Future<String?> storageRead(String key) {
+    throw UnimplementedError('storageRead() has not been implemented.');
   }
 
-  /// Set active server configuration
-  /// [configId] - configuration identifier
-  Future<bool> setActiveServerConfig(String configId) {
-    throw UnimplementedError('setActiveServerConfig() has not been implemented.');
+  /// Persists a string value; `null` removes the key.
+  Future<void> storageWrite(String key, String? value) {
+    throw UnimplementedError('storageWrite() has not been implemented.');
   }
 
-  /// Get active server configuration
-  Future<SingBoxServerConfig?> getActiveSingBoxServerConfig() {
-    throw UnimplementedError('getActiveSingBoxServerConfig() has not been implemented.');
+  // ---------------------------------------------------------------------------
+  // Streams
+  // ---------------------------------------------------------------------------
+
+  /// Tunnel state updates. Emits the current state first.
+  Stream<SingBoxConnectionState> watchState() {
+    throw UnimplementedError('watchState() has not been implemented.');
   }
 
-  /// Add app to blocked list
-  /// [packageName] - app package name (Android) or bundle ID (iOS)
-  Future<bool> addBlockedApp(String packageName) {
-    throw UnimplementedError('addBlockedApp() has not been implemented.');
+  /// Traffic statistics, about once per second while connected.
+  Stream<SingBoxConnectionStats> watchStats() {
+    throw UnimplementedError('watchStats() has not been implemented.');
   }
 
-  /// Remove app from blocked list
-  /// [packageName] - app package name (Android) or bundle ID (iOS)
-  Future<bool> removeBlockedApp(String packageName) {
-    throw UnimplementedError('removeBlockedApp() has not been implemented.');
+  /// Log events of the core.
+  Stream<SingBoxLogEvent> watchLogEvents() {
+    throw UnimplementedError('watchLogEvents() has not been implemented.');
   }
 
-  /// Get list of blocked apps
-  Future<List<String>> getBlockedApps() {
-    throw UnimplementedError('getBlockedApps() has not been implemented.');
+  /// Outbound groups of the running configuration.
+  Stream<List<SingBoxOutboundGroup>> watchGroups() {
+    throw UnimplementedError('watchGroups() has not been implemented.');
   }
 
-  /// Add domain/site to blocked list
-  /// [domain] - domain name or IP address
-  Future<bool> addBlockedDomain(String domain) {
-    throw UnimplementedError('addBlockedDomain() has not been implemented.');
+  /// All outbounds with their latest URL test results.
+  Stream<List<SingBoxOutboundItem>> watchOutbounds() {
+    throw UnimplementedError('watchOutbounds() has not been implemented.');
   }
 
-  /// Remove domain/site from blocked list
-  /// [domain] - domain name or IP address
-  Future<bool> removeBlockedDomain(String domain) {
-    throw UnimplementedError('removeBlockedDomain() has not been implemented.');
+  /// Clash mode state.
+  Stream<SingBoxClashMode> watchClashMode() {
+    throw UnimplementedError('watchClashMode() has not been implemented.');
   }
 
-  /// Get list of blocked domains/sites
-  Future<List<String>> getBlockedDomains() {
-    throw UnimplementedError('getBlockedDomains() has not been implemented.');
+  /// Connections tracked by the core.
+  Stream<List<SingBoxConnection>> watchConnections() {
+    throw UnimplementedError('watchConnections() has not been implemented.');
   }
 
-  // ========== Bypass Subnets ==========
-
-  /// Add subnet to bypass list (will not use VPN)
-  /// [subnet] - subnet in CIDR notation (e.g., "192.168.1.0/24", "10.0.0.0/8")
-  Future<bool> addSubnetToBypass(String subnet) {
-    throw UnimplementedError('addSubnetToBypass() has not been implemented.');
-  }
-
-  /// Remove subnet from bypass list
-  /// [subnet] - subnet in CIDR notation
-  Future<bool> removeSubnetFromBypass(String subnet) {
-    throw UnimplementedError('removeSubnetFromBypass() has not been implemented.');
-  }
-
-  /// Get list of subnets in bypass
-  Future<List<String>> getBypassSubnets() {
-    throw UnimplementedError('getBypassSubnets() has not been implemented.');
-  }
-
-  // ========== DNS Servers ==========
-
-  /// Add DNS server
-  /// [dnsServer] - DNS server IP address (e.g., "8.8.8.8", "1.1.1.1")
-  Future<bool> addDnsServer(String dnsServer) {
-    throw UnimplementedError('addDnsServer() has not been implemented.');
-  }
-
-  /// Remove DNS server
-  /// [dnsServer] - DNS server IP address
-  Future<bool> removeDnsServer(String dnsServer) {
-    throw UnimplementedError('removeDnsServer() has not been implemented.');
-  }
-
-  /// Get list of DNS servers
-  Future<List<String>> getDnsServers() {
-    throw UnimplementedError('getDnsServers() has not been implemented.');
-  }
-
-  /// Set DNS servers (replaces all existing DNS servers)
-  /// [dnsServers] - list of DNS server IP addresses
-  Future<bool> setDnsServers(List<String> dnsServers) {
-    throw UnimplementedError('setDnsServers() has not been implemented.');
-  }
-
-  /// Subscribe to notifications from sing-box
-  /// Returns Stream with notification updates
+  /// Notifications emitted by the core.
   Stream<SingBoxNotification> watchNotifications() {
     throw UnimplementedError('watchNotifications() has not been implemented.');
+  }
+
+  /// Runs a network quality (speed) test and streams its progress. The last
+  /// event has [SingBoxNetworkQuality.isFinal] set.
+  Stream<SingBoxNetworkQuality> runNetworkQualityTest({
+    String? configUrl,
+    String? outboundTag,
+    bool serial = false,
+    Duration? maxRuntime,
+    bool http3 = false,
+  }) {
+    throw UnimplementedError(
+      'runNetworkQualityTest() has not been implemented.',
+    );
+  }
+
+  /// Runs a STUN (NAT type) test and streams its progress. The last event has
+  /// [SingBoxStunResult.isFinal] set.
+  Stream<SingBoxStunResult> runStunTest({String? server, String? outboundTag}) {
+    throw UnimplementedError('runStunTest() has not been implemented.');
   }
 }

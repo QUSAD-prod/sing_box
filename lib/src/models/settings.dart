@@ -1,134 +1,199 @@
-import 'server_config.dart';
+import '../options.dart';
 
-/// Plugin settings
+/// User facing behaviour settings persisted by the plugin.
+///
+/// Read with `SingBox.getSettings()` and store with `SingBox.saveSettings()`
+/// or `SingBox.updateSetting()`. Native-relevant flags are applied to the VPN
+/// service immediately (see [toServiceOptions]).
+///
+/// Routing preferences (bypass and block lists, DNS servers) are kept
+/// separately in `SingBoxRoutingRules`.
 class SingBoxSettings {
-  /// Default subnets to bypass (local networks)
-  static const List<String> defaultBypassSubnets = [
-    '192.168.0.0/16', // Private network
-    '10.0.0.0/8', // Private network
-    '172.16.0.0/12', // Private network
-    '127.0.0.0/8', // Loopback
-    '169.254.0.0/16', // Link-local
-  ];
-
-  /// Default DNS servers (public DNS)
-  static const List<String> defaultDnsServers = [
-    '8.8.8.8', // Google DNS
-    '1.1.1.1', // Cloudflare DNS
-  ];
-
-  /// Automatically connect on application start
-  final bool autoConnectOnStart;
-
-  /// Automatically reconnect on connection loss
-  final bool autoReconnectOnDisconnect;
-
-  /// Kill switch - block all internet when VPN is disconnected
-  final bool killSwitch;
-
-  /// List of apps blocked from using VPN
-  /// (apps that should not use VPN)
-  final List<String> blockedApps;
-
-  /// List of sites/domains blocked from using VPN
-  /// (sites that should not use VPN)
-  final List<String> blockedDomains;
-
-  /// List of subnets to bypass (will not use VPN)
-  /// Format: CIDR notation (e.g., "192.168.1.0/24", "10.0.0.0/8")
-  final List<String> bypassSubnets;
-
-  /// List of DNS servers to use
-  /// Format: IP addresses (e.g., "8.8.8.8", "1.1.1.1")
-  final List<String> dnsServers;
-
-  /// ID of current active server configuration
-  final String? activeServerConfigId;
-
-  /// List of server configurations
-  final List<SingBoxServerConfig> serverConfigs;
-
+  /// Creates settings.
   const SingBoxSettings({
     this.autoConnectOnStart = false,
     this.autoReconnectOnDisconnect = false,
     this.killSwitch = false,
-    this.blockedApps = const [],
-    this.blockedDomains = const [],
-    this.bypassSubnets = defaultBypassSubnets,
-    this.dnsServers = defaultDnsServers,
-    this.activeServerConfigId,
-    this.serverConfigs = const [],
+    this.startOnBoot = false,
+    this.excludeLocalNetworks = true,
+    this.excludeApns = true,
+    this.disableMemoryLimit = false,
+    this.quickSettingsTile = false,
   });
 
-  /// Creates an object from Map (for deserialization)
+  /// Setting key for [autoConnectOnStart], used by `SingBox.updateSetting()`.
+  static const keyAutoConnectOnStart = 'autoConnectOnStart';
+
+  /// Setting key for [autoReconnectOnDisconnect].
+  static const keyAutoReconnectOnDisconnect = 'autoReconnectOnDisconnect';
+
+  /// Setting key for [killSwitch].
+  static const keyKillSwitch = 'killSwitch';
+
+  /// Setting key for [startOnBoot].
+  static const keyStartOnBoot = 'startOnBoot';
+
+  /// Setting key for [excludeLocalNetworks].
+  static const keyExcludeLocalNetworks = 'excludeLocalNetworks';
+
+  /// Setting key for [excludeApns].
+  static const keyExcludeApns = 'excludeApns';
+
+  /// Setting key for [disableMemoryLimit].
+  static const keyDisableMemoryLimit = 'disableMemoryLimit';
+
+  /// Setting key for [quickSettingsTile].
+  static const keyQuickSettingsTile = 'quickSettingsTile';
+
+  /// All valid setting keys.
+  static const keys = [
+    keyQuickSettingsTile,
+    keyAutoConnectOnStart,
+    keyAutoReconnectOnDisconnect,
+    keyKillSwitch,
+    keyStartOnBoot,
+    keyExcludeLocalNetworks,
+    keyExcludeApns,
+    keyDisableMemoryLimit,
+  ];
+
+  /// Connect to the active server automatically when
+  /// `SingBox.initialize()` is called (i.e. when the app starts).
+  final bool autoConnectOnStart;
+
+  /// Keep the tunnel up and reconnect automatically after network changes or
+  /// failures. iOS: VPN On Demand. Android: the service is restarted by the
+  /// system (`START_STICKY`) and you can additionally ask the user to enable
+  /// *Always-on VPN* via `SingBox.openVpnSettings()`.
+  final bool autoReconnectOnDisconnect;
+
+  /// Block traffic outside of the tunnel. iOS: `includeAllNetworks`.
+  /// Android cannot enable this programmatically: the user has to turn on
+  /// *Block connections without VPN* in system settings
+  /// (`SingBox.openVpnSettings()`); while the tunnel is running,
+  /// `strict_route` already prevents leaks.
+  final bool killSwitch;
+
+  /// Android: start the VPN with the last configuration after reboot.
+  final bool startOnBoot;
+
+  /// iOS: keep LAN traffic outside the tunnel when [killSwitch] is on.
+  final bool excludeLocalNetworks;
+
+  /// iOS 16.4+: let push notification traffic bypass the tunnel when
+  /// [killSwitch] is on.
+  final bool excludeApns;
+
+  /// Disable the sing-box memory limit (not recommended on iOS, where the
+  /// extension is killed above ~50 MB).
+  final bool disableMemoryLimit;
+
+  /// Android: show the plugin's Quick Settings tile (VPN toggle).
+  final bool quickSettingsTile;
+
+  /// Creates settings from a map (for deserialization). Unknown keys are
+  /// ignored.
   factory SingBoxSettings.fromMap(Map<dynamic, dynamic> map) {
-    final serverConfigsList = map['serverConfigs'] as List<dynamic>?;
+    bool read(String key, bool fallback) {
+      final value = map[key];
+      return value is bool ? value : fallback;
+    }
+
     return SingBoxSettings(
-      autoConnectOnStart: map['autoConnectOnStart'] as bool? ?? false,
-      autoReconnectOnDisconnect: map['autoReconnectOnDisconnect'] as bool? ?? false,
-      killSwitch: map['killSwitch'] as bool? ?? false,
-      blockedApps: (map['blockedApps'] as List<dynamic>?)?.cast<String>() ?? [],
-      blockedDomains: (map['blockedDomains'] as List<dynamic>?)?.cast<String>() ?? [],
-      bypassSubnets:
-          (map['bypassSubnets'] as List<dynamic>?)?.cast<String>() ?? defaultBypassSubnets,
-      dnsServers: (map['dnsServers'] as List<dynamic>?)?.cast<String>() ?? defaultDnsServers,
-      activeServerConfigId: map['activeServerConfigId'] as String?,
-      serverConfigs: serverConfigsList != null
-          ? serverConfigsList.map((e) => SingBoxServerConfig.fromMap(e as Map<dynamic, dynamic>)).toList()
-          : [],
+      autoConnectOnStart: read(keyAutoConnectOnStart, false),
+      autoReconnectOnDisconnect: read(keyAutoReconnectOnDisconnect, false),
+      killSwitch: read(keyKillSwitch, false),
+      startOnBoot: read(keyStartOnBoot, false),
+      excludeLocalNetworks: read(keyExcludeLocalNetworks, true),
+      excludeApns: read(keyExcludeApns, true),
+      disableMemoryLimit: read(keyDisableMemoryLimit, false),
+      quickSettingsTile: read(keyQuickSettingsTile, false),
     );
   }
 
-  /// Converts object to Map (for serialization)
-  Map<String, dynamic> toMap() {
-    return {
-      'autoConnectOnStart': autoConnectOnStart,
-      'autoReconnectOnDisconnect': autoReconnectOnDisconnect,
-      'killSwitch': killSwitch,
-      'blockedApps': blockedApps,
-      'blockedDomains': blockedDomains,
-      'bypassSubnets': bypassSubnets,
-      'dnsServers': dnsServers,
-      'activeServerConfigId': activeServerConfigId,
-      'serverConfigs': serverConfigs.map((e) => e.toMap()).toList(),
-    };
+  /// Converts the settings to a map (for serialization).
+  Map<String, dynamic> toMap() => {
+    keyAutoConnectOnStart: autoConnectOnStart,
+    keyAutoReconnectOnDisconnect: autoReconnectOnDisconnect,
+    keyKillSwitch: killSwitch,
+    keyStartOnBoot: startOnBoot,
+    keyExcludeLocalNetworks: excludeLocalNetworks,
+    keyExcludeApns: excludeApns,
+    keyDisableMemoryLimit: disableMemoryLimit,
+    keyQuickSettingsTile: quickSettingsTile,
+  };
+
+  /// Returns a copy with [key] set to [value].
+  ///
+  /// Throws [ArgumentError] for an unknown key or a non-boolean value.
+  SingBoxSettings withValue(String key, Object? value) {
+    if (!keys.contains(key)) {
+      throw ArgumentError.value(key, 'key', 'Unknown setting');
+    }
+    if (value is! bool) {
+      throw ArgumentError.value(value, 'value', 'Setting $key expects a bool');
+    }
+    return SingBoxSettings.fromMap({...toMap(), key: value});
   }
 
-  /// Creates a copy with modified fields
+  /// The native service options derived from these settings.
+  SingBoxServiceOptions toServiceOptions() => SingBoxServiceOptions(
+    startOnBoot: startOnBoot,
+    onDemand: autoReconnectOnDisconnect,
+    includeAllNetworks: killSwitch,
+    excludeLocalNetworks: excludeLocalNetworks,
+    excludeApns: excludeApns,
+    quickSettingsTile: quickSettingsTile,
+  );
+
+  /// Creates a copy with modified fields.
   SingBoxSettings copyWith({
     bool? autoConnectOnStart,
     bool? autoReconnectOnDisconnect,
     bool? killSwitch,
-    List<String>? blockedApps,
-    List<String>? blockedDomains,
-    List<String>? bypassSubnets,
-    List<String>? dnsServers,
-    String? activeServerConfigId,
-    List<SingBoxServerConfig>? serverConfigs,
+    bool? startOnBoot,
+    bool? excludeLocalNetworks,
+    bool? excludeApns,
+    bool? disableMemoryLimit,
+    bool? quickSettingsTile,
   }) {
     return SingBoxSettings(
       autoConnectOnStart: autoConnectOnStart ?? this.autoConnectOnStart,
-      autoReconnectOnDisconnect: autoReconnectOnDisconnect ?? this.autoReconnectOnDisconnect,
+      autoReconnectOnDisconnect:
+          autoReconnectOnDisconnect ?? this.autoReconnectOnDisconnect,
       killSwitch: killSwitch ?? this.killSwitch,
-      blockedApps: blockedApps ?? this.blockedApps,
-      blockedDomains: blockedDomains ?? this.blockedDomains,
-      bypassSubnets: bypassSubnets ?? this.bypassSubnets,
-      dnsServers: dnsServers ?? this.dnsServers,
-      activeServerConfigId: activeServerConfigId ?? this.activeServerConfigId,
-      serverConfigs: serverConfigs ?? this.serverConfigs,
+      startOnBoot: startOnBoot ?? this.startOnBoot,
+      excludeLocalNetworks: excludeLocalNetworks ?? this.excludeLocalNetworks,
+      excludeApns: excludeApns ?? this.excludeApns,
+      disableMemoryLimit: disableMemoryLimit ?? this.disableMemoryLimit,
+      quickSettingsTile: quickSettingsTile ?? this.quickSettingsTile,
     );
   }
 
   @override
-  String toString() {
-    return 'SingBoxSettings(autoConnectOnStart: $autoConnectOnStart, '
-        'autoReconnectOnDisconnect: $autoReconnectOnDisconnect, '
-        'killSwitch: $killSwitch, '
-        'blockedApps: ${blockedApps.length}, '
-        'blockedDomains: ${blockedDomains.length}, '
-        'bypassSubnets: ${bypassSubnets.length}, '
-        'dnsServers: ${dnsServers.length}, '
-        'activeServerConfigId: $activeServerConfigId, '
-        'serverConfigs: ${serverConfigs.length})';
-  }
+  bool operator ==(Object other) =>
+      other is SingBoxSettings &&
+      other.autoConnectOnStart == autoConnectOnStart &&
+      other.autoReconnectOnDisconnect == autoReconnectOnDisconnect &&
+      other.killSwitch == killSwitch &&
+      other.startOnBoot == startOnBoot &&
+      other.excludeLocalNetworks == excludeLocalNetworks &&
+      other.excludeApns == excludeApns &&
+      other.disableMemoryLimit == disableMemoryLimit &&
+      other.quickSettingsTile == quickSettingsTile;
+
+  @override
+  int get hashCode => Object.hash(
+    autoConnectOnStart,
+    autoReconnectOnDisconnect,
+    killSwitch,
+    startOnBoot,
+    excludeLocalNetworks,
+    excludeApns,
+    disableMemoryLimit,
+    quickSettingsTile,
+  );
+
+  @override
+  String toString() => 'SingBoxSettings(${toMap()})';
 }

@@ -1,652 +1,366 @@
+/// The default [SingBoxPlatform] implementation based on platform channels.
+library;
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'sing_box_platform_interface.dart';
-import 'src/models/connection_status.dart';
+import 'src/exceptions.dart';
+import 'src/models/clash_mode.dart';
+import 'src/models/connection.dart';
 import 'src/models/connection_stats.dart';
-import 'src/models/ping_result.dart';
-import 'src/models/speed_test_result.dart';
-import 'src/models/settings.dart';
-import 'src/models/server_config.dart';
+import 'src/models/connection_status.dart';
+import 'src/models/log_entry.dart';
+import 'src/models/network_quality.dart';
+import 'src/models/outbound_group.dart';
 import 'src/models/sing_box_notification.dart';
+import 'src/models/stun_result.dart';
+import 'src/options.dart';
 
-/// An implementation of [SingBoxPlatform] that uses method channels.
+/// An implementation of [SingBoxPlatform] that uses method and event
+/// channels, following `doc/platform_channel.md`.
+///
+/// Native [PlatformException]s are converted into [SingBoxException]s.
+/// Each event channel is backed by a single cached broadcast stream, so any
+/// number of Dart listeners share one native subscription.
 class MethodChannelSingBox extends SingBoxPlatform {
+  /// Creates the method channel implementation.
+  MethodChannelSingBox();
+
   /// The method channel used to interact with the native platform.
   @visibleForTesting
   final methodChannel = const MethodChannel('sing_box');
 
-  /// Event channel for connection status updates
+  /// Event channel for tunnel state updates.
   @visibleForTesting
   final statusEventChannel = const EventChannel('sing_box/status');
 
-  /// Event channel for connection stats updates
+  /// Event channel for traffic statistics.
   @visibleForTesting
   final statsEventChannel = const EventChannel('sing_box/stats');
 
-  /// Event channel for notifications
+  /// Event channel for log events.
   @visibleForTesting
-  final notificationsEventChannel = const EventChannel('sing_box/notifications');
+  final logsEventChannel = const EventChannel('sing_box/logs');
 
-  @override
-  Future<bool> initialize() async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('initialize');
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error initializing sing_box: $e');
-      return false;
-    }
+  /// Event channel for outbound groups.
+  @visibleForTesting
+  final groupsEventChannel = const EventChannel('sing_box/groups');
+
+  /// Event channel for all outbounds.
+  @visibleForTesting
+  final outboundsEventChannel = const EventChannel('sing_box/outbounds');
+
+  /// Event channel for clash mode updates.
+  @visibleForTesting
+  final clashModeEventChannel = const EventChannel('sing_box/clash_mode');
+
+  /// Event channel for connection snapshots.
+  @visibleForTesting
+  final connectionsEventChannel = const EventChannel('sing_box/connections');
+
+  /// Event channel for core notifications.
+  @visibleForTesting
+  final notificationsEventChannel = const EventChannel(
+    'sing_box/notifications',
+  );
+
+  /// Event channel for network quality tests.
+  @visibleForTesting
+  final networkQualityEventChannel = const EventChannel(
+    'sing_box/network_quality',
+  );
+
+  /// Event channel for STUN tests.
+  @visibleForTesting
+  final stunEventChannel = const EventChannel('sing_box/stun');
+
+  late final Stream<SingBoxConnectionState> _state = _events(
+    statusEventChannel,
+    (event) => SingBoxConnectionState.fromMap(event as Map),
+  );
+
+  late final Stream<SingBoxConnectionStats> _stats = _events(
+    statsEventChannel,
+    (event) => SingBoxConnectionStats.fromMap(event as Map),
+  );
+
+  late final Stream<SingBoxLogEvent> _logs = _events(
+    logsEventChannel,
+    (event) => SingBoxLogEvent.fromMap(event as Map),
+  ).where((event) => event != null).cast<SingBoxLogEvent>();
+
+  late final Stream<List<SingBoxOutboundGroup>> _groups = _events(
+    groupsEventChannel,
+    (event) => _list(event, SingBoxOutboundGroup.fromMap),
+  );
+
+  late final Stream<List<SingBoxOutboundItem>> _outbounds = _events(
+    outboundsEventChannel,
+    (event) => _list(event, SingBoxOutboundItem.fromMap),
+  );
+
+  late final Stream<SingBoxClashMode> _clashMode = _events(
+    clashModeEventChannel,
+    (event) => SingBoxClashMode.fromMap(event as Map),
+  );
+
+  late final Stream<List<SingBoxConnection>> _connections = _events(
+    connectionsEventChannel,
+    (event) => _list(event, SingBoxConnection.fromMap),
+  );
+
+  late final Stream<SingBoxNotification> _notifications = _events(
+    notificationsEventChannel,
+    (event) => SingBoxNotification.fromMap(event as Map),
+  );
+
+  static List<T> _list<T>(
+    Object? event,
+    T Function(Map<dynamic, dynamic>) parse,
+  ) {
+    if (event is! List) return const [];
+    return event
+        .whereType<Map<dynamic, dynamic>>()
+        .map(parse)
+        .toList(growable: false);
   }
 
-  @override
-  Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
-    return version;
+  static Stream<T> _events<T>(
+    EventChannel channel,
+    T Function(Object? event) parse, [
+    Object? arguments,
+  ]) {
+    return channel
+        .receiveBroadcastStream(arguments)
+        .map(parse)
+        .transform(_convertErrors<T>());
   }
 
-  @override
-  Future<bool> connect(String config) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('connect', {'config': config});
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error connecting to VPN: $e');
-      return false;
-    }
+  static StreamTransformer<T, T> _convertErrors<T>() {
+    return StreamTransformer<T, T>.fromHandlers(
+      handleError: (error, stackTrace, sink) {
+        sink.addError(
+          error is PlatformException
+              ? SingBoxException.fromPlatformException(error)
+              : error,
+          stackTrace,
+        );
+      },
+    );
   }
 
-  @override
-  Future<bool> disconnect() async {
+  Future<T?> _invoke<T>(
+    String method, [
+    Map<String, Object?>? arguments,
+  ]) async {
     try {
-      final result = await methodChannel.invokeMethod<bool>('disconnect');
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error disconnecting from VPN: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<SingBoxConnectionStatus> getConnectionStatus() async {
-    try {
-      final statusString = await methodChannel.invokeMethod<String>('getConnectionStatus');
-      if (statusString != null) {
-        return SingBoxConnectionStatusExtension.fromString(statusString);
-      }
-      return SingBoxConnectionStatus.disconnected;
-    } catch (e) {
-      debugPrint('Error getting connection status: $e');
-      return SingBoxConnectionStatus.disconnected;
-    }
-  }
-
-  @override
-  Future<SingBoxConnectionStats> getConnectionStats() async {
-    try {
-      final statsMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'getConnectionStats',
-      );
-      if (statsMap != null) {
-        return SingBoxConnectionStats.fromMap(statsMap);
-      }
-      return const SingBoxConnectionStats(
-        downloadSpeed: 0,
-        uploadSpeed: 0,
-        bytesSent: 0,
-        bytesReceived: 0,
-        connectionDuration: 0,
-      );
-    } catch (e) {
-      debugPrint('Error getting connection stats: $e');
-      return const SingBoxConnectionStats(
-        downloadSpeed: 0,
-        uploadSpeed: 0,
-        bytesSent: 0,
-        bytesReceived: 0,
-        connectionDuration: 0,
-      );
-    }
-  }
-
-  @override
-  Future<SingBoxSpeedTestResult> testSpeed() async {
-    try {
-      final resultMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('testSpeed');
-      if (resultMap != null) {
-        return SingBoxSpeedTestResult.fromMap(resultMap);
-      }
-      return const SingBoxSpeedTestResult(
-        downloadSpeed: 0,
-        uploadSpeed: 0,
-        success: false,
-        errorMessage: 'Failed to get speed test result',
-      );
-    } catch (e) {
-      debugPrint('Error testing speed: $e');
-      return SingBoxSpeedTestResult(
-        downloadSpeed: 0,
-        uploadSpeed: 0,
-        success: false,
-        errorMessage: e.toString(),
-      );
-    }
-  }
-
-  @override
-  Future<SingBoxPingResult> pingCurrentServer() async {
-    try {
-      final resultMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'pingCurrentServer',
-      );
-      if (resultMap != null) {
-        return SingBoxPingResult.fromMap(resultMap);
-      }
-      return const SingBoxPingResult(
-        ping: 0,
-        success: false,
-        errorMessage: 'Failed to get ping result',
-      );
-    } catch (e) {
-      debugPrint('Error pinging current server: $e');
-      return SingBoxPingResult(ping: 0, success: false, errorMessage: e.toString());
-    }
-  }
-
-  @override
-  Stream<SingBoxConnectionStatus> watchSingBoxConnectionStatus() {
-    try {
-      return statusEventChannel
-          .receiveBroadcastStream()
-          .map((dynamic event) {
-            if (event is String) {
-              return SingBoxConnectionStatusExtension.fromString(event);
-            }
-            return SingBoxConnectionStatus.disconnected;
-          })
-          .handleError((error) {
-            debugPrint('Error in connection status stream: $error');
-          });
-    } catch (e) {
-      debugPrint('Error creating connection status stream: $e');
-      return Stream.value(SingBoxConnectionStatus.disconnected);
-    }
-  }
-
-  @override
-  Stream<SingBoxConnectionStats> watchSingBoxConnectionStats() {
-    try {
-      return statsEventChannel
-          .receiveBroadcastStream()
-          .map((dynamic event) {
-            if (event is Map) {
-              return SingBoxConnectionStats.fromMap(event);
-            }
-            return const SingBoxConnectionStats(
-              downloadSpeed: 0,
-              uploadSpeed: 0,
-              bytesSent: 0,
-              bytesReceived: 0,
-              connectionDuration: 0,
-            );
-          })
-          .handleError((error) {
-            debugPrint('Error in connection stats stream: $error');
-          });
-    } catch (e) {
-      debugPrint('Error creating connection stats stream: $e');
-      return Stream.value(
-        const SingBoxConnectionStats(
-          downloadSpeed: 0,
-          uploadSpeed: 0,
-          bytesSent: 0,
-          bytesReceived: 0,
-          connectionDuration: 0,
-        ),
+      return await methodChannel.invokeMethod<T>(method, arguments);
+    } on PlatformException catch (e) {
+      throw SingBoxException.fromPlatformException(e);
+    } on MissingPluginException {
+      throw SingBoxUnsupportedException(
+        'sing_box has no implementation of "$method" on this platform.',
       );
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Lifecycle and information
+  // ---------------------------------------------------------------------------
+
   @override
-  Future<bool> addAppToBypass(String packageName) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addAppToBypass', {
-        'packageName': packageName,
+  Future<SingBoxRuntimeInfo> initialize(SingBoxOptions options) async {
+    final result = await _invoke<Map<dynamic, dynamic>>(
+      'initialize',
+      options.toMap(),
+    );
+    return SingBoxRuntimeInfo.fromMap(result ?? const {});
+  }
+
+  @override
+  Future<String?> getPlatformVersion() => _invoke<String>('getPlatformVersion');
+
+  @override
+  Future<String> getSingBoxVersion() async =>
+      await _invoke<String>('getSingBoxVersion') ?? '';
+
+  @override
+  Future<void> checkConfig(String config) =>
+      _invoke<void>('checkConfig', {'config': config});
+
+  @override
+  Future<String> formatConfig(String config) async =>
+      await _invoke<String>('formatConfig', {'config': config}) ?? config;
+
+  // ---------------------------------------------------------------------------
+  // Permissions
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<bool> hasVpnPermission() async =>
+      await _invoke<bool>('hasVpnPermission') ?? false;
+
+  @override
+  Future<bool> requestVpnPermission() async =>
+      await _invoke<bool>('requestVpnPermission') ?? false;
+
+  @override
+  Future<bool> hasNotificationPermission() async =>
+      await _invoke<bool>('hasNotificationPermission') ?? false;
+
+  @override
+  Future<bool> requestNotificationPermission() async =>
+      await _invoke<bool>('requestNotificationPermission') ?? false;
+
+  @override
+  Future<void> openVpnSettings() => _invoke<void>('openVpnSettings');
+
+  @override
+  Future<SingBoxQuickTileResult> requestAddQuickSettingsTile({
+    String? label,
+  }) async => SingBoxQuickTileResult.fromString(
+    await _invoke<String>('requestAddQuickSettingsTile', {'label': label}),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Service control
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> start(String config, {bool disableMemoryLimit = false}) =>
+      _invoke<void>('start', {
+        'config': config,
+        'disableMemoryLimit': disableMemoryLimit,
       });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding app to bypass: $e');
-      return false;
-    }
+
+  @override
+  Future<void> stop() => _invoke<void>('stop');
+
+  @override
+  Future<void> reload([String? config]) =>
+      _invoke<void>('reload', {'config': config});
+
+  @override
+  Future<SingBoxConnectionStatus> getStatus() async =>
+      SingBoxConnectionStatus.fromString(await _invoke<String>('getStatus'));
+
+  @override
+  Future<DateTime?> getStartedAt() async {
+    final value = await _invoke<int>('getStartedAt');
+    return value == null || value <= 0
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(value);
   }
 
   @override
-  Future<bool> removeAppFromBypass(String packageName) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeAppFromBypass', {
-        'packageName': packageName,
+  Future<String?> getLastConfig() => _invoke<String>('getLastConfig');
+
+  @override
+  Future<void> setServiceOptions(SingBoxServiceOptions options) =>
+      _invoke<void>('setServiceOptions', options.toMap());
+
+  // ---------------------------------------------------------------------------
+  // Command client operations
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> selectOutbound(String groupTag, String outboundTag) =>
+      _invoke<void>('selectOutbound', {
+        'groupTag': groupTag,
+        'outboundTag': outboundTag,
       });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing app from bypass: $e');
-      return false;
-    }
+
+  @override
+  Future<void> urlTest(String tag) => _invoke<void>('urlTest', {'tag': tag});
+
+  @override
+  Future<void> setClashMode(String mode) =>
+      _invoke<void>('setClashMode', {'mode': mode});
+
+  @override
+  Future<void> closeConnection(String id) =>
+      _invoke<void>('closeConnection', {'id': id});
+
+  @override
+  Future<void> closeAllConnections() => _invoke<void>('closeAllConnections');
+
+  @override
+  Future<void> clearLogs() => _invoke<void>('clearLogs');
+
+  @override
+  Future<void> setGroupExpand(String groupTag, bool expand) =>
+      _invoke<void>('setGroupExpand', {'groupTag': groupTag, 'expand': expand});
+
+  // ---------------------------------------------------------------------------
+  // Storage
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<String?> storageRead(String key) =>
+      _invoke<String>('storageRead', {'key': key});
+
+  @override
+  Future<void> storageWrite(String key, String? value) =>
+      _invoke<void>('storageWrite', {'key': key, 'value': value});
+
+  // ---------------------------------------------------------------------------
+  // Streams
+  // ---------------------------------------------------------------------------
+
+  @override
+  Stream<SingBoxConnectionState> watchState() => _state;
+
+  @override
+  Stream<SingBoxConnectionStats> watchStats() => _stats;
+
+  @override
+  Stream<SingBoxLogEvent> watchLogEvents() => _logs;
+
+  @override
+  Stream<List<SingBoxOutboundGroup>> watchGroups() => _groups;
+
+  @override
+  Stream<List<SingBoxOutboundItem>> watchOutbounds() => _outbounds;
+
+  @override
+  Stream<SingBoxClashMode> watchClashMode() => _clashMode;
+
+  @override
+  Stream<List<SingBoxConnection>> watchConnections() => _connections;
+
+  @override
+  Stream<SingBoxNotification> watchNotifications() => _notifications;
+
+  @override
+  Stream<SingBoxNetworkQuality> runNetworkQualityTest({
+    String? configUrl,
+    String? outboundTag,
+    bool serial = false,
+    Duration? maxRuntime,
+    bool http3 = false,
+  }) {
+    return _events(
+      networkQualityEventChannel,
+      (event) => SingBoxNetworkQuality.fromMap(event as Map),
+      {
+        'configUrl': configUrl,
+        'outboundTag': outboundTag,
+        'serial': serial,
+        'maxRuntimeSeconds': maxRuntime?.inSeconds,
+        'http3': http3,
+      },
+    );
   }
 
   @override
-  Future<List<String>> getBypassApps() async {
-    try {
-      final apps = await methodChannel.invokeMethod<List<dynamic>>('getBypassApps');
-      if (apps != null) {
-        return apps.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting bypass apps: $e');
-      return [];
-    }
-  }
-
-  @override
-  Future<bool> addDomainToBypass(String domain) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addDomainToBypass', {
-        'domain': domain,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding domain to bypass: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeDomainFromBypass(String domain) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeDomainFromBypass', {
-        'domain': domain,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing domain from bypass: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<String>> getBypassDomains() async {
-    try {
-      final domains = await methodChannel.invokeMethod<List<dynamic>>('getBypassDomains');
-      if (domains != null) {
-        return domains.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting bypass domains: $e');
-      return [];
-    }
-  }
-
-  @override
-  Future<bool> switchServer(String config) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('switchServer', {'config': config});
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error switching server: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> saveSettings(SingBoxSettings settings) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('saveSettings', {
-        'settings': settings.toMap(),
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error saving settings: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<SingBoxSettings> loadSettings() async {
-    try {
-      final settingsMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('loadSettings');
-      if (settingsMap != null) {
-        return SingBoxSettings.fromMap(settingsMap);
-      }
-      return const SingBoxSettings();
-    } catch (e) {
-      debugPrint('Error loading settings: $e');
-      return const SingBoxSettings();
-    }
-  }
-
-  @override
-  Future<SingBoxSettings> getSettings() async {
-    try {
-      final settingsMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('getSettings');
-      if (settingsMap != null) {
-        return SingBoxSettings.fromMap(settingsMap);
-      }
-      return const SingBoxSettings();
-    } catch (e) {
-      debugPrint('Error getting settings: $e');
-      return const SingBoxSettings();
-    }
-  }
-
-  @override
-  Future<bool> updateSetting(String key, dynamic value) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('updateSetting', {
-        'key': key,
-        'value': value,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error updating setting: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> addServerConfig(SingBoxServerConfig config) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addServerConfig', {
-        'config': config.toMap(),
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding server config: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeServerConfig(String configId) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeServerConfig', {
-        'configId': configId,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing server config: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> updateServerConfig(SingBoxServerConfig config) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('updateServerConfig', {
-        'config': config.toMap(),
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error updating server config: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<SingBoxServerConfig>> getServerConfigs() async {
-    try {
-      final configsList = await methodChannel.invokeMethod<List<dynamic>>('getServerConfigs');
-      if (configsList != null) {
-        return configsList
-            .map((e) => SingBoxServerConfig.fromMap(e as Map<dynamic, dynamic>))
-            .toList();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting server configs: $e');
-      return [];
-    }
-  }
-
-  @override
-  Future<SingBoxServerConfig?> getServerConfig(String configId) async {
-    try {
-      final configMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>('getServerConfig', {
-        'configId': configId,
-      });
-      if (configMap != null) {
-        return SingBoxServerConfig.fromMap(configMap);
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Error getting server config: $e');
-      return null;
-    }
-  }
-
-  @override
-  Future<bool> setActiveServerConfig(String configId) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('setActiveServerConfig', {
-        'configId': configId,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error setting active server config: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<SingBoxServerConfig?> getActiveSingBoxServerConfig() async {
-    try {
-      final configMap = await methodChannel.invokeMethod<Map<dynamic, dynamic>>(
-        'getActiveServerConfig',
-      );
-      if (configMap != null) {
-        return SingBoxServerConfig.fromMap(configMap);
-      }
-      return null;
-    } catch (e) {
-      debugPrint('Error getting active server config: $e');
-      return null;
-    }
-  }
-
-  @override
-  Future<bool> addBlockedApp(String packageName) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addBlockedApp', {
-        'packageName': packageName,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding blocked app: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeBlockedApp(String packageName) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeBlockedApp', {
-        'packageName': packageName,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing blocked app: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<String>> getBlockedApps() async {
-    try {
-      final apps = await methodChannel.invokeMethod<List<dynamic>>('getBlockedApps');
-      if (apps != null) {
-        return apps.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting blocked apps: $e');
-      return [];
-    }
-  }
-
-  @override
-  Future<bool> addBlockedDomain(String domain) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addBlockedDomain', {'domain': domain});
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding blocked domain: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeBlockedDomain(String domain) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeBlockedDomain', {
-        'domain': domain,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing blocked domain: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<String>> getBlockedDomains() async {
-    try {
-      final domains = await methodChannel.invokeMethod<List<dynamic>>('getBlockedDomains');
-      if (domains != null) {
-        return domains.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting blocked domains: $e');
-      return [];
-    }
-  }
-
-  // ========== Bypass Subnets ==========
-
-  @override
-  Future<bool> addSubnetToBypass(String subnet) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addSubnetToBypass', {
-        'subnet': subnet,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding subnet to bypass: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeSubnetFromBypass(String subnet) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeSubnetFromBypass', {
-        'subnet': subnet,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing subnet from bypass: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<String>> getBypassSubnets() async {
-    try {
-      final subnets = await methodChannel.invokeMethod<List<dynamic>>('getBypassSubnets');
-      if (subnets != null) {
-        return subnets.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting bypass subnets: $e');
-      return [];
-    }
-  }
-
-  // ========== DNS Servers ==========
-
-  @override
-  Future<bool> addDnsServer(String dnsServer) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('addDnsServer', {
-        'dnsServer': dnsServer,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error adding DNS server: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<bool> removeDnsServer(String dnsServer) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('removeDnsServer', {
-        'dnsServer': dnsServer,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error removing DNS server: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<List<String>> getDnsServers() async {
-    try {
-      final dnsServers = await methodChannel.invokeMethod<List<dynamic>>('getDnsServers');
-      if (dnsServers != null) {
-        return dnsServers.cast<String>();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('Error getting DNS servers: $e');
-      return [];
-    }
-  }
-
-  @override
-  Future<bool> setDnsServers(List<String> dnsServers) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('setDnsServers', {
-        'dnsServers': dnsServers,
-      });
-      return result ?? false;
-    } catch (e) {
-      debugPrint('Error setting DNS servers: $e');
-      return false;
-    }
-  }
-
-  @override
-  Stream<SingBoxNotification> watchNotifications() {
-    try {
-      final stream = notificationsEventChannel.receiveBroadcastStream();
-      return stream
-          .map((data) {
-            if (data is Map) {
-              return SingBoxNotification.fromMap(data.cast<dynamic, dynamic>());
-            }
-            throw Exception('Invalid notification data: $data');
-          })
-          .handleError((error) {
-            debugPrint('Error in notifications stream: $error');
-          });
-    } catch (e) {
-      debugPrint('Error creating notifications stream: $e');
-      return const Stream<SingBoxNotification>.empty();
-    }
+  Stream<SingBoxStunResult> runStunTest({String? server, String? outboundTag}) {
+    return _events(
+      stunEventChannel,
+      (event) => SingBoxStunResult.fromMap(event as Map),
+      {'server': server, 'outboundTag': outboundTag},
+    );
   }
 }

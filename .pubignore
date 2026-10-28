@@ -1,82 +1,43 @@
-# Exclude example app from publication
-example/
+# Files that must not be published to pub.dev.
+# A .pubignore replaces the .gitignore of its directory for publishing, so the
+# relevant .gitignore rules are repeated here.
 
-# Exclude libbox source files (Go files) - only compiled libraries are needed
-android/libbox/*.go
-android/libbox/**/*.go
-ios/libbox/*.go
-ios/libbox/**/*.go
+# Native libbox binaries - downloaded at build time from GitHub releases.
+android/libs/
+ios/sing_box/Frameworks/
+ios/Frameworks/
+*.xcframework
+*.xcframework.zip
+*.aar
 
-# Exclude libbox documentation and build scripts
-android/libbox/BUILD.md
-android/libbox/README.md
-ios/libbox/BUILD.md
-ios/libbox/build.sh
-
-# Exclude build artifacts
+# Build outputs and caches
+build/
 **/build/
 **/.dart_tool/
+**/.gradle/
+**/Pods/
+**/Podfile.lock
+**/.symlinks/
+**/Flutter/ephemeral/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
-
-# Exclude IDE files
+**/local.properties
 **/*.iml
 **/.idea/
 **/.vscode/
+**/xcuserdata/
+.DS_Store
 
-# Exclude local properties
-**/local.properties
+# Repository tooling and maintainer docs
+.github/
+CONTRIBUTING.md
+doc/releasing.md
+doc/releasing.ru.md
 
-# Exclude Pods (iOS)
-**/Pods/
-**/Podfile.lock
-
-# Exclude gradle wrapper (not needed in published package)
-**/gradlew
-**/gradlew.bat
-**/gradle/wrapper/gradle-wrapper.jar
-
-# Exclude test files if any
-**/test/
-**/*_test.dart
-
-# Exclude documentation that's not needed
-**/doc/
-**/docs/
-
-# Exclude README files in subdirectories (keep only root README.md)
-android/libbox/README.md
-android/libs/README.md
-ios/libbox/BUILD.md
-example/README.md
-
-# Exclude Go source files completely
-android/libbox/
-ios/libbox/
-
-# Exclude optimization scripts
-optimize_aar.sh
-optimize_xcframework.sh
-fix_xcframework_duplicates.sh
-
-# Exclude support request template
-PUBDEV_SUPPORT_REQUEST.md
-
-# Exclude installation scripts and documentation (available in repo, not in package)
-install_ios_framework.sh
-setup_git_lfs.sh
-INSTALL_IOS_FRAMEWORK.md
-CREATE_RELEASE.md
-PUBLISH_CHECKLIST.md
-SETUP_GITHUB_LFS.md
-
-# Exclude backup files
-*.backup
-**/*.backup
-
-# Exclude iOS framework - it will be distributed via GitHub LFS
-# Users need to download it manually using the installation script
-ios/Frameworks/Libbox.xcframework
-ios/Frameworks/Libbox.xcframework.zip
-ios/Frameworks/*.zip
-
+# Local files
+/pubspec.lock
+/coverage/
+**/.swiftpm/
+**/.build/
+*.class
+*.log
