@@ -163,8 +163,9 @@ fast-forward: `git push origin 1.0.0:main`.
 Релиз должен быть в `main` до публикации: pub.dev проверяет, что по адресу
 `repository` лежит тот же `pubspec.yaml`.
 
-Нативные jobs CI скачивают libbox из релиза, поэтому до шага 3 они красные —
-это ожидаемо.
+Нативным сборкам нужен libbox-релиз: пока он не опубликован (шаг 3), job CI
+*libbox release* падает с сообщением «libbox.aar is not downloadable», а сборки
+Android и iOS пропускаются. Это ожидаемо.
 
 ## 5. Публикация на pub.dev
 

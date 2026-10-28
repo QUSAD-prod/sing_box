@@ -53,12 +53,18 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+sha256() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+}
+
 check() {
   local name="$1" url="$2" expected="$3"
   log "$name: $url"
-  curl -fsSL --retry 3 --connect-timeout 30 -o "$TMP/$name" "$url" || die "$name is not downloadable from $url"
+  curl -fsSL --retry 3 --connect-timeout 30 -o "$TMP/$name" "$url" ||
+    die "$name is not downloadable from $url
+Publish the libbox release first: scripts/release_libbox.sh --publish (doc/releasing.md, step 3)."
   local actual
-  actual="$(shasum -a 256 "$TMP/$name" | cut -d' ' -f1)"
+  actual="$(sha256 "$TMP/$name")"
   [[ "$actual" == "$expected" ]] || die "$name sha256 mismatch
   expected: $expected
   actual:   $actual"

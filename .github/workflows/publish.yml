@@ -16,7 +16,7 @@ jobs:
     name: Verify the release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -33,12 +33,12 @@ jobs:
           grep -q "^## $version\$" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section" >&2; exit 1; }
       - name: libbox release assets match the pinned checksums
         run: scripts/verify_libbox_release.sh
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: sing-box-cli
         with:
           path: ~/.cache/sing-box-cli
           key: sing-box-cli-${{ hashFiles('LIBBOX_VERSION') }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         if: steps.sing-box-cli.outputs.cache-hit != 'true'
         with:
           go-version: '1.25'
@@ -67,7 +67,7 @@ jobs:
     permissions:
       id-token: write # OIDC token for pub.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Configures the pub.dev credentials from the OIDC token.
       - uses: dart-lang/setup-dart@v1
       - uses: subosito/flutter-action@v2
