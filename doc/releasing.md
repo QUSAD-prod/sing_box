@@ -148,6 +148,10 @@ changes, a fast-forward also works: `git push origin 1.0.0:main`.
 The release must be on `main` before publishing: pub.dev checks that the
 `repository` URL contains the same `pubspec.yaml`.
 
+The native builds need the libbox release: until it is published, the CI job
+*libbox release* fails with "libbox.aar is not downloadable" and the Android
+and iOS builds are skipped.
+
 ## 5. Publish to pub.dev
 
 Choose **one** of the two ways for a version.

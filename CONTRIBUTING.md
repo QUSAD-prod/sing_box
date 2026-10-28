@@ -57,7 +57,9 @@ flutter pub publish --dry-run
 ```
 
 CI runs the same checks plus Android and iOS (SwiftPM and CocoaPods) builds of
-the example.
+the example. The builds run only after the *libbox release* job confirmed that
+the libbox files of `LIBBOX_VERSION` are published with the pinned checksums
+(`scripts/verify_libbox_release.sh`).
 
 ### Config tests with the real sing-box
 
