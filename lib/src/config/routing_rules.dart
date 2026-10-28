@@ -1,5 +1,41 @@
 import 'internal/json_utils.dart';
 
+/// Which IP versions the VPN uses ([SingBoxRoutingRules.ipVersion]).
+///
+/// | Value | DNS (`dns.strategy`) | Connections |
+/// |-------|----------------------|-------------|
+/// | [dual] | both, preferring `SingBoxDnsOptions.strategy` | IPv4 and IPv6 |
+/// | [ipv4] | `ipv4_only` | IPv6 connections that would go through the proxy are rejected |
+/// | [ipv6] | `ipv6_only` | IPv4 addresses still work, but names resolve to IPv6 only |
+enum SingBoxIpVersion {
+  /// IPv4 and IPv6 (the default). Which family is preferred when a name has
+  /// both is set by `SingBoxDnsOptions.strategy` (IPv4 by default).
+  dual,
+
+  /// IPv4 only. Names resolve to IPv4 addresses and IPv6 connections that
+  /// would otherwise go through the proxy are rejected, so apps fall back to
+  /// IPv4 at once. Use it when a server or network has no working IPv6.
+  ///
+  /// The TUN interface keeps its IPv6 address, so IPv6 traffic is still
+  /// captured and cannot leave outside the VPN.
+  ipv4,
+
+  /// IPv6 only. Names resolve to IPv6 addresses (sites without IPv6 cannot
+  /// be opened by name); connections to IPv4 addresses still work. Requires
+  /// `SingBoxTunOptions.enableIpv6` (the default).
+  ipv6;
+
+  /// Returns the value whose [name] equals [name] (case-insensitive), or
+  /// [dual] when nothing matches.
+  static SingBoxIpVersion fromName(String? name) {
+    final normalized = name?.trim().toLowerCase();
+    for (final value in values) {
+      if (value.name == normalized) return value;
+    }
+    return dual;
+  }
+}
+
 /// User routing preferences applied on top of any server configuration:
 /// per-app split tunneling, bypassed and blocked domains/subnets, custom DNS
 /// servers, country based bypass and ad blocking.
@@ -18,6 +54,7 @@ import 'internal/json_utils.dart';
 /// | [bypassCountries] | remote rule-sets `geoip-<cc>` (+ geosite where available) → `direct` |
 /// | [blockAds] | rule-set `geosite-category-ads-all` → `reject` |
 /// | [dnsServers] | replace the remote (proxied) DNS server |
+/// | [ipVersion] | `dns.strategy` and, for IPv4 only, a route rule `ip_version: 6` → `reject` |
 ///
 /// Invalid entries (malformed domains, CIDRs, package names, unknown country
 /// codes) are skipped by the builder instead of producing a broken config.
@@ -34,7 +71,8 @@ import 'internal/json_utils.dart';
 /// ```
 class SingBoxRoutingRules {
   /// Creates routing rules. Every list defaults to empty, [bypassLan] to
-  /// `true` and [blockAds] to `false`.
+  /// `true`, [blockAds] to `false` and [ipVersion] to
+  /// [SingBoxIpVersion.dual].
   const SingBoxRoutingRules({
     this.bypassApps = const [],
     this.proxyApps = const [],
@@ -46,6 +84,7 @@ class SingBoxRoutingRules {
     this.bypassLan = true,
     this.bypassCountries = const [],
     this.blockAds = false,
+    this.ipVersion = SingBoxIpVersion.dual,
   });
 
   /// Android package names whose traffic does not enter the VPN
@@ -92,6 +131,10 @@ class SingBoxRoutingRules {
   /// (`geosite-category-ads-all`).
   final bool blockAds;
 
+  /// Which IP versions are used: IPv4 and IPv6 (default), IPv4 only or IPv6
+  /// only. See [SingBoxIpVersion].
+  final SingBoxIpVersion ipVersion;
+
   /// Whether no rule differs from the defaults.
   bool get isDefault => this == const SingBoxRoutingRules();
 
@@ -107,6 +150,7 @@ class SingBoxRoutingRules {
     'bypassLan': bypassLan,
     'bypassCountries': List<String>.of(bypassCountries),
     'blockAds': blockAds,
+    'ipVersion': ipVersion.name,
   };
 
   /// Creates rules from a map produced by [toMap].
@@ -125,6 +169,7 @@ class SingBoxRoutingRules {
       bypassLan: readBool(map['bypassLan']) ?? true,
       bypassCountries: readStringList(map['bypassCountries']),
       blockAds: readBool(map['blockAds']) ?? false,
+      ipVersion: SingBoxIpVersion.fromName(readString(map['ipVersion'])),
     );
   }
 
@@ -140,6 +185,7 @@ class SingBoxRoutingRules {
     bool? bypassLan,
     List<String>? bypassCountries,
     bool? blockAds,
+    SingBoxIpVersion? ipVersion,
   }) {
     return SingBoxRoutingRules(
       bypassApps: bypassApps ?? this.bypassApps,
@@ -152,6 +198,7 @@ class SingBoxRoutingRules {
       bypassLan: bypassLan ?? this.bypassLan,
       bypassCountries: bypassCountries ?? this.bypassCountries,
       blockAds: blockAds ?? this.blockAds,
+      ipVersion: ipVersion ?? this.ipVersion,
     );
   }
 
@@ -176,7 +223,8 @@ class SingBoxRoutingRules {
       _listEquals(other.dnsServers, dnsServers) &&
       other.bypassLan == bypassLan &&
       _listEquals(other.bypassCountries, bypassCountries) &&
-      other.blockAds == blockAds;
+      other.blockAds == blockAds &&
+      other.ipVersion == ipVersion;
 
   @override
   int get hashCode => Object.hash(
@@ -190,6 +238,7 @@ class SingBoxRoutingRules {
     bypassLan,
     Object.hashAll(bypassCountries),
     blockAds,
+    ipVersion,
   );
 
   @override

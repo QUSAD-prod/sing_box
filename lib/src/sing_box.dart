@@ -1734,6 +1734,16 @@ class SingBox {
     return true;
   }
 
+  /// Sets which IP versions the VPN uses: IPv4 and IPv6 (default), IPv4 only
+  /// or IPv6 only (see [SingBoxIpVersion]). A running tunnel is reloaded
+  /// when [reloadOnRulesChange] is enabled. Returns whether it changed.
+  Future<bool> setIpVersion(SingBoxIpVersion ipVersion) =>
+      updateRoutingRules((r) => r.copyWith(ipVersion: ipVersion));
+
+  /// The stored IP version mode.
+  Future<SingBoxIpVersion> getIpVersion() async =>
+      (await getRoutingRules()).ipVersion;
+
   // ===========================================================================
   // Server profiles
   // ===========================================================================

@@ -300,8 +300,11 @@ void main() {
         bypassLan: false,
         bypassCountries: ['ru'],
         blockAds: true,
+        ipVersion: SingBoxIpVersion.ipv4,
       );
       expect(SingBoxRoutingRules.fromMap(rules.toMap()), rules);
+      expect(rules.toMap()['ipVersion'], 'ipv4');
+      expect(rules.copyWith(ipVersion: SingBoxIpVersion.dual), isNot(rules));
       expect(
         SingBoxRoutingRules.fromMap(rules.toMap()).hashCode,
         rules.hashCode,
@@ -313,6 +316,14 @@ void main() {
       (rules.toMap()['bypassApps'] as List).add('mutated');
       expect(rules.bypassApps, ['a.b']);
     });
+  });
+
+  test('SingBoxIpVersion.fromName', () {
+    expect(SingBoxIpVersion.fromName('IPv4'), SingBoxIpVersion.ipv4);
+    expect(SingBoxIpVersion.fromName('ipv6'), SingBoxIpVersion.ipv6);
+    expect(SingBoxIpVersion.fromName('dual'), SingBoxIpVersion.dual);
+    expect(SingBoxIpVersion.fromName(null), SingBoxIpVersion.dual);
+    expect(SingBoxIpVersion.fromName('both'), SingBoxIpVersion.dual);
   });
 
   group('SingBoxOutbound', () {

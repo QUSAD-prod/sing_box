@@ -142,6 +142,7 @@ class SingBoxConfigBuilder {
         'rules': [
           ..._leadingRouteRules(),
           ..._routingRules(rules, directTag, includeClashModes: true),
+          ..._ipVersionRules(rules),
         ],
         if (ruleSetTags.isNotEmpty)
           'rule_set': ruleSetTags.map(_ruleSet).toList(),
@@ -205,6 +206,9 @@ class SingBoxConfigBuilder {
   ///   the outbounds keep being resolved as before: by the only original DNS
   ///   server, or by the system resolver when there was none.
   /// * Blocked domains are answered with NXDOMAIN by DNS.
+  /// * [SingBoxRoutingRules.ipVersion] other than `dual` sets `dns.strategy`
+  ///   and, for IPv4 only, appends a route rule rejecting IPv6 connections
+  ///   after the user's own rules.
   Map<String, dynamic> apply(
     Map<String, dynamic> config, {
     SingBoxRoutingRules rules = const SingBoxRoutingRules(),
@@ -274,6 +278,7 @@ class SingBoxConfigBuilder {
       insertAt,
       _routingRules(rules, direct, includeClashModes: false),
     );
+    routeRules.addAll(_ipVersionRules(rules));
     route.putIfAbsent('auto_detect_interface', () => true);
     final ruleSetTags = _ruleSetTags(rules);
     if (ruleSetTags.isNotEmpty) {
@@ -289,6 +294,9 @@ class SingBoxConfigBuilder {
     }
 
     // DNS.
+    if (rules.ipVersion != SingBoxIpVersion.dual) {
+      _map(result, 'dns')['strategy'] = _dnsStrategy(rules);
+    }
     final blockedDomains = _domains(rules.blockedDomains);
     final dnsServers = rules.dnsServers.where((s) => s.trim().isNotEmpty);
     if (blockedDomains.isNotEmpty || dnsServers.isNotEmpty) {
@@ -424,7 +432,8 @@ class SingBoxConfigBuilder {
       servers.add({'type': 'local', 'tag': dnsLocalTag});
     }
 
-    final ipv6 = options.tun.enableIpv6;
+    final ipv6 =
+        options.tun.enableIpv6 && rules.ipVersion != SingBoxIpVersion.ipv4;
     if (dnsOptions.fakeIp) {
       servers.add({
         'type': 'fakeip',
@@ -467,7 +476,7 @@ class SingBoxConfigBuilder {
       'servers': servers,
       'rules': dnsRules,
       'final': remoteTag,
-      'strategy': ipv6 ? dnsOptions.strategy.value : 'ipv4_only',
+      'strategy': _dnsStrategy(rules),
       if (dnsOptions.reverseMapping) 'reverse_mapping': true,
     };
   }
@@ -483,6 +492,25 @@ class SingBoxConfigBuilder {
       ],
       'action': 'hijack-dns',
     },
+  ];
+
+  /// `dns.strategy` for [SingBoxRoutingRules.ipVersion]; `dual` uses
+  /// [SingBoxDnsOptions.strategy] unless the TUN has no IPv6 address.
+  String _dnsStrategy(SingBoxRoutingRules rules) => switch (rules.ipVersion) {
+    SingBoxIpVersion.ipv4 => SingBoxDnsStrategy.ipv4Only.value,
+    SingBoxIpVersion.ipv6 => SingBoxDnsStrategy.ipv6Only.value,
+    SingBoxIpVersion.dual =>
+      options.tun.enableIpv6
+          ? options.dns.strategy.value
+          : SingBoxDnsStrategy.ipv4Only.value,
+  };
+
+  /// IPv4 only: IPv6 connections not matched by an earlier (direct) rule are
+  /// rejected instead of being proxied, so apps fall back to IPv4 at once.
+  /// It is the last rule, so LAN and bypass rules keep working over IPv6.
+  List<Map<String, dynamic>> _ipVersionRules(SingBoxRoutingRules rules) => [
+    if (rules.ipVersion == SingBoxIpVersion.ipv4)
+      {'ip_version': 6, 'action': 'reject'},
   ];
 
   static bool _isLeadingRule(Map<String, dynamic> rule) {

@@ -497,6 +497,46 @@ void main() {
       await expectSingBoxAccepts(config);
     });
 
+    test('IP version: IPv4 only rejects proxied IPv6 connections', () async {
+      final config = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      ).build([
+        vless,
+      ], rules: const SingBoxRoutingRules(ipVersion: SingBoxIpVersion.ipv4));
+      // The TUN keeps IPv6 so IPv6 traffic cannot leave outside the VPN.
+      expect(tun(config)['address'], [
+        '172.19.0.1/30',
+        'fdfe:dcba:9876::1/126',
+      ]);
+      expect((config['dns'] as Map)['strategy'], 'ipv4_only');
+      expect(dnsServers(config).last.containsKey('inet6_range'), isFalse);
+      expect(dnsRules(config).last['query_type'], ['A']);
+      expect(routeRules(config).last, {'ip_version': 6, 'action': 'reject'});
+      await expectSingBoxAccepts(config);
+    });
+
+    test('IP version: IPv6 only and dual', () async {
+      final v6 = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      ).build([
+        vless,
+      ], rules: const SingBoxRoutingRules(ipVersion: SingBoxIpVersion.ipv6));
+      expect((v6['dns'] as Map)['strategy'], 'ipv6_only');
+      expect(dnsServers(v6).last['inet6_range'], 'fc00::/18');
+      expect(dnsRules(v6).last['query_type'], ['A', 'AAAA']);
+      expect(routeRules(v6).any((r) => r.containsKey('ip_version')), isFalse);
+      await expectSingBoxAccepts(v6);
+
+      final dual = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          dns: SingBoxDnsOptions(strategy: SingBoxDnsStrategy.preferIpv6),
+        ),
+      ).build([vless]);
+      expect((dual['dns'] as Map)['strategy'], 'prefer_ipv6');
+      expect(routeRules(dual).any((r) => r.containsKey('ip_version')), isFalse);
+      await expectSingBoxAccepts(dual);
+    });
+
     test('FakeIP, reverse mapping and custom resolvers', () async {
       final config = const SingBoxConfigBuilder(
         SingBoxConfigOptions(
@@ -877,6 +917,41 @@ void main() {
         rules: const SingBoxRoutingRules(dnsServers: ['1.0.0.1']),
       );
       expect(dnsServers(result).last['detour'], 'my-proxy');
+    });
+  });
+
+  group('apply IP version', () {
+    test('dual leaves DNS and routing of the user config alone', () {
+      final result = builder.apply(userConfig());
+      expect((result['dns'] as Map?)?['strategy'], isNull);
+      expect(
+        routeRules(result).any((r) => r.containsKey('ip_version')),
+        isFalse,
+      );
+    });
+
+    test('IPv4 only sets the strategy and rejects IPv6 last', () async {
+      final result = builder.apply(
+        userConfig(),
+        rules: const SingBoxRoutingRules(ipVersion: SingBoxIpVersion.ipv4),
+      );
+      expect((result['dns'] as Map)['strategy'], 'ipv4_only');
+      expect(routeRules(result).last, {'ip_version': 6, 'action': 'reject'});
+      // The user's own rules stay in front of it.
+      expect(routeRules(result)[routeRules(result).length - 2], {
+        'domain_suffix': ['user.example'],
+        'outbound': 'bypass',
+      });
+      await expectSingBoxAccepts(result);
+    });
+
+    test('IPv6 only sets the strategy', () async {
+      final result = builder.apply(
+        userConfig(),
+        rules: const SingBoxRoutingRules(ipVersion: SingBoxIpVersion.ipv6),
+      );
+      expect((result['dns'] as Map)['strategy'], 'ipv6_only');
+      await expectSingBoxAccepts(result);
     });
   });
 

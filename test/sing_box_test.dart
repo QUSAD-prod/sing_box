@@ -712,6 +712,17 @@ void main() {
       ]);
       expect(await singBox.removeDnsServer('8.8.8.8'), isTrue);
     });
+
+    test('IP version is persisted and reaches the generated config', () async {
+      expect(await singBox.getIpVersion(), SingBoxIpVersion.dual);
+      expect(await singBox.setIpVersion(SingBoxIpVersion.ipv4), isTrue);
+      expect(await singBox.setIpVersion(SingBoxIpVersion.ipv4), isFalse);
+      expect(await singBox.getIpVersion(), SingBoxIpVersion.ipv4);
+      final config =
+          jsonDecode(await singBox.buildConfig(jsonEncode(_ssOutbound)))
+              as Map<String, dynamic>;
+      expect((config['dns'] as Map)['strategy'], 'ipv4_only');
+    });
   });
 
   group('settings and server profiles', () {
