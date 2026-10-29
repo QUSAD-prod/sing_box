@@ -28,6 +28,9 @@ class FakeSingBoxPlatform extends SingBoxPlatform
 
   /// Reported by [initialize]; enables the plugin's rule-set downloads.
   String? workingDirectory;
+
+  /// libbox version reported by [initialize] (`1.14.4-lx.25` = lx core).
+  String coreVersion = '1.14.4';
   final List<String> started = [];
   final List<String?> reloaded = [];
 
@@ -81,7 +84,7 @@ class FakeSingBoxPlatform extends SingBoxPlatform
     calls.add('initialize');
     initOptions = options;
     return SingBoxRuntimeInfo(
-      singBoxVersion: '1.14.4',
+      singBoxVersion: coreVersion,
       status: initialStatus,
       workingDirectory: workingDirectory,
     );
@@ -91,7 +94,7 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   Future<String?> getPlatformVersion() async => 'Fake 1.0';
 
   @override
-  Future<String> getSingBoxVersion() async => '1.14.4';
+  Future<String> getSingBoxVersion() async => coreVersion;
 
   @override
   Future<void> checkConfig(String config) async {

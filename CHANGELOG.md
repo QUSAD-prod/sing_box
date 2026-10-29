@@ -1,6 +1,13 @@
 ## 1.1.0
 
 ### Added
+- The sing-box-lx core (Android for now): `sing_box: core: lx` in the app's
+  `pubspec.yaml` (or `SING_BOX_CORE` / Gradle `singBox.core`) links the
+  sing-box-lx fork instead of the official core. `SingBox.core`,
+  `SingBox.supports(SingBoxCoreFeature)`, `SingBoxRuntimeInfo.core`,
+  `SingBoxCore`, `SingBoxCoreFeature`, and `SingBoxExtended` (same object as
+  `SingBox.instance`) for the members that need the lx core.
+  `scripts/build_libbox.sh --core lx` builds its libbox.
 - Subscriptions by URL: `addSubscription()`, `updateSubscription()`,
   `updateSubscriptions(onlyStale:)`, `editSubscription()`,
   `removeSubscription()`, `getSubscriptions()`, `watchSubscriptions()`.

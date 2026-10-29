@@ -61,20 +61,61 @@ if (extensions.findByName("kotlin") == null) {
 // no task wiring into AGP's native-library merge tasks.
 // -----------------------------------------------------------------------------
 
+/**
+ * The sing-box core to link: Gradle property `singBox.core`, env `SING_BOX_CORE`, or
+ * `sing_box: core:` in the app's pubspec.yaml (next to the app's `android/` directory);
+ * `standard` by default, `lx` = the sing-box-lx fork.
+ */
+fun selectCore(override: String?, appRootDir: File): String {
+    val core = override?.trim()?.takeIf { it.isNotEmpty() }
+        ?: readPubspecCore(File(appRootDir.parentFile, "pubspec.yaml"))
+        ?: "standard"
+    if (core != "standard" && core != "lx") {
+        throw GradleException("sing_box: unknown core `$core` (standard or lx)")
+    }
+    return core
+}
+
+/** `core` of the top-level `sing_box:` map in [pubspec] (block or flow style), if any. */
+fun readPubspecCore(pubspec: File): String? {
+    if (!pubspec.isFile) return null
+    val text = pubspec.readText()
+    Regex("""(?m)^sing_box:\s*\{[^}]*\bcore:\s*['"]?([\w-]+)""").find(text)?.let { return it.groupValues[1] }
+    var inBlock = false
+    for (line in text.lines()) {
+        val content = line.substringBefore('#').trimEnd()
+        if (content.isEmpty()) continue
+        if (!line.first().isWhitespace()) {
+            inBlock = content == "sing_box:"
+            continue
+        }
+        if (inBlock) {
+            Regex("""^\s+core:\s*['"]?([\w-]+)""").find(content)?.let { return it.groupValues[1] }
+        }
+    }
+    return null
+}
+
 class LibboxResolver(
     private val pluginDir: File,
     private val rootDir: File,
     private val gradleUserHome: File,
     private val properties: Properties,
+    private val core: String,
     private val aarOverride: String?,
     private val baseUrlOverride: String?,
     private val logger: org.gradle.api.logging.Logger,
 ) {
-    private val version: String = properties.getProperty("version")?.trim()
-        ?: throw GradleException("sing_box: `version` missing in android/libbox.properties")
-    private val expectedSha256: String = properties.getProperty("sha256")?.trim()?.lowercase()
-        ?: throw GradleException("sing_box: `sha256` missing in android/libbox.properties")
+    // The lx core uses the same keys with an `lx.` prefix.
+    private val keyPrefix = if (core == "lx") "lx." else ""
+    private val version: String = property("version")
+        ?: throw GradleException("sing_box: `${keyPrefix}version` missing in android/libbox.properties")
+    private val expectedSha256: String = property("sha256")?.lowercase()
+        ?: throw GradleException("sing_box: `${keyPrefix}sha256` missing in android/libbox.properties")
+    private val bundledName = if (core == "lx") "libbox-lx.aar" else "libbox.aar"
     private val cacheRoot = File(gradleUserHome, "caches/sing_box/libbox")
+
+    private fun property(key: String): String? = properties.getProperty("$keyPrefix$key")?.trim()
 
     /** Returns the directory containing `classes.jar` and `jni/<abi>/libbox.so`. */
     fun resolve(): File {
@@ -89,12 +130,12 @@ class LibboxResolver(
             logger.info("sing_box: using libbox from $aar")
             return extract(aar, localSha256(aar))
         }
-        val bundled = File(pluginDir, "libs/libbox.aar")
+        val bundled = File(pluginDir, "libs/$bundledName")
         if (bundled.isFile) {
             val sha = localSha256(bundled)
             if (sha != expectedSha256) {
                 logger.warn(
-                    "sing_box: android/libs/libbox.aar sha256 $sha differs from libbox.properties " +
+                    "sing_box: android/libs/$bundledName sha256 $sha differs from libbox.properties " +
                         "($expectedSha256, libbox $version); using the local copy anyway",
                 )
             }
@@ -105,13 +146,13 @@ class LibboxResolver(
 
     private fun download(): File {
         val dir = File(cacheRoot, version)
-        val target = File(dir, properties.getProperty("fileName", "libbox.aar").replace("{version}", version))
+        val target = File(dir, (property("fileName") ?: "libbox.aar").replace("{version}", version))
         if (target.isFile && localSha256(target) == expectedSha256) {
             return target
         }
-        val base = (baseUrlOverride?.takeIf { it.isNotBlank() } ?: properties.getProperty("baseUrl"))
+        val base = (baseUrlOverride?.takeIf { it.isNotBlank() } ?: property("baseUrl"))
             ?.replace("{version}", version)?.trimEnd('/')
-            ?: throw GradleException("sing_box: `baseUrl` missing in android/libbox.properties")
+            ?: throw GradleException("sing_box: `${keyPrefix}baseUrl` missing in android/libbox.properties")
         val url = "$base/${target.name}"
         dir.mkdirs()
         val part = File(dir, "${target.name}.${UUID.randomUUID()}.part")
@@ -267,11 +308,17 @@ val libboxProperties = Properties().apply {
     file("libbox.properties").inputStream().use { load(it) }
 }
 
+val libboxCore: String = selectCore(
+    providers.gradleProperty("singBox.core").orNull ?: providers.environmentVariable("SING_BOX_CORE").orNull,
+    rootProject.projectDir,
+).also { if (it != "standard") logger.lifecycle("sing_box: linking the sing-box-$it core") }
+
 val libboxDir: File = LibboxResolver(
     pluginDir = projectDir,
     rootDir = rootProject.projectDir,
     gradleUserHome = gradle.gradleUserHomeDir,
     properties = libboxProperties,
+    core = libboxCore,
     aarOverride = providers.gradleProperty("singBox.libboxAar").orNull
         ?: providers.environmentVariable("SING_BOX_LIBBOX_AAR").orNull,
     baseUrlOverride = providers.gradleProperty("singBox.libboxBaseUrl").orNull
@@ -291,7 +338,8 @@ android {
 
     sourceSets {
         getByName("main") {
-            java.srcDirs("src/main/kotlin")
+            // Members of libbox interfaces that differ between the cores.
+            java.srcDirs("src/main/kotlin", "src/core-$libboxCore/kotlin")
             jniLibs.srcDir(File(libboxDir, "jni"))
         }
         getByName("test") {
