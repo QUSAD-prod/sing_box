@@ -319,9 +319,11 @@ void main() {
   });
 
   testWidgets('downloads rule-sets on the first start', (tester) async {
+    // Iran has no third-party lists with fixed URLs: both rule-sets come from
+    // the local server (integration_test/server/rules).
     await singBox.connect(
       ssLink,
-      rules: const SingBoxRoutingRules(bypassCountries: ['ru']),
+      rules: const SingBoxRoutingRules(bypassCountries: ['ir']),
       options: const SingBoxConfigOptions(
         urlTestUrl: probeUrl,
         geoipRuleSetUrl: 'http://$host:18080/{tag}.srs',
@@ -329,32 +331,39 @@ void main() {
       ),
     );
     expect(singBox.isConnected, isTrue);
+    final ruleSets = {for (final s in await singBox.getRuleSets()) s.tag: s};
+    for (final tag in ['geosite-category-ir', 'geoip-ir']) {
+      expect(ruleSets[tag]?.isAvailable, isTrue, reason: '${ruleSets[tag]}');
+    }
     expect(await fetchProbe(), 'sing-box-e2e-ok');
     await singBox.disconnect();
     await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
   });
 
-  testWidgets('reports the core error when the start fails', (tester) async {
-    // The initial rule-set download fails, which aborts the start.
-    await expectLater(
-      singBox.connect(
-        ssLink,
-        rules: const SingBoxRoutingRules(bypassCountries: ['ru']),
-        options: const SingBoxConfigOptions(
-          geoipRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
-          geositeRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
-        ),
-      ),
-      throwsA(
-        isA<SingBoxStartException>().having(
-          (e) => e.message,
-          'message',
-          contains('rule-set'),
-        ),
+  testWidgets('starts without the rules of unreachable rule-sets', (
+    tester,
+  ) async {
+    // The plugin downloads rule-sets itself: a failed download leaves its
+    // rules out instead of aborting the start (sing-box would abort).
+    await singBox.connect(
+      ssLink,
+      rules: const SingBoxRoutingRules(bypassCountries: ['de']),
+      options: const SingBoxConfigOptions(
+        urlTestUrl: probeUrl,
+        geoipRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
+        geositeRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
       ),
     );
+    expect(singBox.isConnected, isTrue);
+    expect(singBox.state.error, isNull);
+    final geoip = (await singBox.getRuleSets()).firstWhere(
+      (s) => s.tag == 'geoip-de',
+    );
+    expect(geoip.isAvailable, isFalse);
+    expect(geoip.lastError, isNotNull);
+    expect(await fetchProbe(), 'sing-box-e2e-ok');
+    await singBox.disconnect();
     await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
-    expect(singBox.state.error, contains('rule-set'));
   });
 
   testWidgets('rapid toggles end in the last requested state', (tester) async {
