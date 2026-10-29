@@ -180,6 +180,20 @@ when libbox returns an error.
 | `clearLogs` | – | `clearLogs()` |
 | `setGroupExpand` | `{groupTag: String, expand: bool}` | `setGroupExpand(groupTag, expand)` |
 
+### Latency measurements
+
+The Dart side measures HTTP latency through a proxy itself: while the tunnel is
+connected it connects to the probe address of the running config (route rules
+with `override_address`, see `SingBoxConfigBuilder`), otherwise to a probe
+core started with `startProbe`. TCP and ICMP measurements are native because
+they must bypass the tunnel.
+
+| Method | Arguments | Result |
+| --- | --- | --- |
+| `startProbe` | `{config: String}` | `null`. Starts (or replaces) the probe core: a second libbox service (`CommandServer` without `Start()`, so no command socket) in the app process, running a config without TUN (`direct` inbounds on `127.0.0.1`). Android: its sockets are protected with `VpnService.protect` while the VPN service runs. Throws `INVALID_CONFIG` / `START_FAILED` |
+| `stopProbe` | – | `null`. Stops the probe core; no-op without one |
+| `pingServer` | `{method: "tcp" \| "icmp", host: String, port: int?, timeoutMs: int}` | Map `{success: bool, ping: int (ms), address: String? (IP used), error: String?}`. Measured outside the tunnel: the host is resolved by the underlying network (not the tunnel or FakeIP). Android protects the sockets while the VPN service runs; iOS runs the measurement in the extension (`sendProviderMessage`, `{"type": "ping", ...}`) while the tunnel is connected, in the app otherwise. `tcp`: time of the TCP handshake with `host:port`. `icmp`: round trip of one echo request (unprivileged ICMP datagram socket; ICMPv6 for IPv6). A failed measurement is a result with `success: false`, not an error |
+
 ### Key/value storage
 
 A tiny persistent string store used by the Dart side for settings, server

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../sing_box_platform_interface.dart';
 import 'config/config.dart';
 import 'exceptions.dart';
+import 'latency_probe.dart';
 import 'models/clash_mode.dart';
 import 'models/connection.dart';
 import 'models/connection_stats.dart';
@@ -1130,23 +1131,343 @@ class SingBox {
     return _platform.setGroupExpand(groupTag, expand);
   }
 
-  /// Measures the latency of the outbound [tag] through the running tunnel
-  /// with an HTTP request through the proxy.
+  /// Measures the latency of the outbound [tag] of the running tunnel.
   ///
-  /// When [tag] belongs to a `urltest` group (such as
-  /// [SingBoxConfigBuilder.autoTag]) the group is tested, so its configured
-  /// URL is used ([SingBoxConfigOptions.urlTestUrl]); libbox tests other
-  /// outbounds against its built-in default URL
-  /// (`https://www.gstatic.com/generate_204`).
+  /// The proxy methods (default [SingBoxPingMethod.proxyHead]) send an HTTP
+  /// request to [SingBoxConfigOptions.urlTestUrl] through the outbound, using
+  /// the latency probe route of the configuration (see
+  /// [SingBoxConfigBuilder.probeTargets]): no local port is opened. When the
+  /// configuration has no probe routes (a complete config used with
+  /// `applyRules: false`) or the app itself is not routed through the tunnel
+  /// (Android `bypassApps` / `proxyApps`), sing-box's own URL test is used
+  /// instead ([SingBoxPingMethod.proxyHead]; for a single outbound with
+  /// libbox's default URL `https://www.gstatic.com/generate_204`).
+  ///
+  /// [SingBoxPingMethod.tcp] and [SingBoxPingMethod.icmp] measure the path to
+  /// the outbound's server outside the tunnel.
   Future<SingBoxPingResult> pingOutbound(
     String tag, {
+    SingBoxPingMethod method = SingBoxPingMethod.proxyHead,
     Duration timeout = const Duration(seconds: 15),
   }) async {
     _ensureInitialized();
     if (!isConnected) {
-      return SingBoxPingResult.failure('Not connected to VPN', tag: tag);
+      return SingBoxPingResult.failure(
+        'Not connected to VPN',
+        tag: tag,
+        method: method,
+      );
     }
-    final address = await _serverAddressOf(tag);
+    return _pingTag(tag, await _runningConfig(), method, timeout);
+  }
+
+  /// Measures the latency of the server profile [server]; see [pingServers].
+  Future<SingBoxPingResult> ping(
+    SingBoxServerConfig server, {
+    SingBoxPingMethod method = SingBoxPingMethod.proxyHead,
+    Duration timeout = const Duration(seconds: 5),
+  }) => pingServers([server], method: method, timeout: timeout).first;
+
+  /// Measures the latency of several server profiles, at most [concurrency]
+  /// at a time, and emits one result per profile (with
+  /// [SingBoxPingResult.serverId] set) as soon as it is known. Disabled
+  /// profiles are measured as well; filter them out beforehand if needed.
+  ///
+  /// [method] (see [SingBoxPingMethod]):
+  ///
+  /// * [SingBoxPingMethod.proxyHead] (default) / [SingBoxPingMethod.proxyGet]:
+  ///   an HTTP request to [SingBoxConfigOptions.urlTestUrl] through the
+  ///   server, timed until the response headers arrive. While the tunnel is
+  ///   **connected** the profiles of the running configuration are measured
+  ///   through it ([pingOutbound]) and the others fail (connect with
+  ///   [connectToServers] to have them all); while it is **stopped** a
+  ///   temporary core without TUN is started in the app for the measurement.
+  ///   Works for every protocol, UDP based ones included.
+  /// * [SingBoxPingMethod.tcp]: the TCP handshake with the server; fails for
+  ///   UDP based protocols (Hysteria, TUIC, WireGuard, QUIC transports).
+  /// * [SingBoxPingMethod.icmp]: an ICMP echo; many servers do not answer.
+  ///
+  /// TCP and ICMP bypass the tunnel and resolve the server name with the
+  /// underlying network. [timeout] applies to every single measurement.
+  Stream<SingBoxPingResult> pingServers(
+    Iterable<SingBoxServerConfig> servers, {
+    SingBoxPingMethod method = SingBoxPingMethod.proxyHead,
+    int concurrency = 8,
+    Duration timeout = const Duration(seconds: 5),
+  }) {
+    _ensureInitialized();
+    if (concurrency < 1) {
+      throw ArgumentError.value(concurrency, 'concurrency', 'Must be >= 1');
+    }
+    final queue = servers.toList();
+    var cancelled = false;
+    late final StreamController<SingBoxPingResult> controller;
+
+    Future<void> each(
+      List<SingBoxServerConfig> items,
+      Future<SingBoxPingResult> Function(SingBoxServerConfig server) measure,
+    ) async {
+      var next = 0;
+      Future<void> worker() async {
+        while (!cancelled && next < items.length) {
+          final result = await measure(items[next++]);
+          if (!cancelled) controller.add(result);
+        }
+      }
+
+      await Future.wait([
+        for (var i = 0; i < math.min(concurrency, items.length); i++) worker(),
+      ]);
+    }
+
+    Future<void> run() async {
+      if (!method.isProxy) {
+        await each(
+          queue,
+          (server) => _pingProfileNatively(server, method, timeout),
+        );
+      } else if (isConnected) {
+        final config = await _runningConfig();
+        final tags = _outboundTagsByServer(config);
+        await each(queue, (server) async {
+          final tag =
+              tags[_serverKey(server.protocol, server.server, server.port)];
+          if (tag == null) {
+            return SingBoxPingResult.failure(
+              'Not part of the running configuration',
+              address: server.server,
+              serverId: server.id,
+              method: method,
+            );
+          }
+          return (await _pingTag(
+            tag,
+            config,
+            method,
+            timeout,
+          )).forServer(server.id);
+        });
+      } else if (!_state.status.isActive) {
+        await _pingWithProbeCore(
+          queue,
+          method,
+          timeout,
+          each,
+          (result) => controller.add(result),
+          () => cancelled,
+        );
+      } else {
+        for (final server in queue) {
+          controller.add(
+            SingBoxPingResult.failure(
+              'The VPN is starting or stopping',
+              address: server.server,
+              serverId: server.id,
+              method: method,
+            ),
+          );
+        }
+      }
+      await controller.close();
+    }
+
+    controller = StreamController<SingBoxPingResult>(
+      onListen: () => unawaited(run()),
+      onCancel: () => cancelled = true,
+    );
+    return controller.stream;
+  }
+
+  static const _udpProtocols = {'hysteria', 'hysteria2', 'tuic', 'wireguard'};
+
+  /// Profiles measured by one probe core at most.
+  static const _probeCoreBatch = 64;
+
+  Future<void> _probeCoreQueue = Future<void>.value();
+
+  static String _serverKey(String type, String server, int port) =>
+      '$type|${server.toLowerCase()}|$port';
+
+  /// The running configuration, or `null` when it cannot be read.
+  Future<Map<String, dynamic>?> _runningConfig() async {
+    try {
+      final config = await _platform.getLastConfig();
+      final decoded = config == null ? null : jsonDecode(config);
+      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+    } on Object catch (e) {
+      _observer.warning('Cannot read the running configuration', {
+        'error': '$e',
+      });
+      return null;
+    }
+  }
+
+  /// Tags of the outbounds and endpoints of [config] by [_serverKey].
+  static Map<String, String> _outboundTagsByServer(
+    Map<String, dynamic>? config,
+  ) {
+    final tags = <String, String>{};
+    if (config == null) return tags;
+    for (final key in const ['outbounds', 'endpoints']) {
+      final list = config[key];
+      if (list is! List) continue;
+      for (final item in list.whereType<Map<dynamic, dynamic>>()) {
+        try {
+          final outbound = SingBoxOutbound.fromJson(item);
+          final server = outbound.server;
+          if (server == null || outbound.serverPort == null) continue;
+          tags.putIfAbsent(
+            _serverKey(outbound.type, server, outbound.serverPort!),
+            () => outbound.tag,
+          );
+        } on ArgumentError {
+          continue;
+        }
+      }
+    }
+    return tags;
+  }
+
+  /// The outbound or endpoint [tag] of [config].
+  static Map<String, dynamic>? _outboundOf(
+    Map<String, dynamic>? config,
+    String tag,
+  ) {
+    for (final key in const ['outbounds', 'endpoints']) {
+      final list = config?[key];
+      if (list is! List) continue;
+      for (final item in list.whereType<Map<dynamic, dynamic>>()) {
+        if (item['tag'] == tag) return Map<String, dynamic>.from(item);
+      }
+    }
+    return null;
+  }
+
+  /// Measures the outbound [tag] of the running [config] with [method].
+  Future<SingBoxPingResult> _pingTag(
+    String tag,
+    Map<String, dynamic>? config,
+    SingBoxPingMethod method,
+    Duration timeout,
+  ) async {
+    final outbound = _outboundOf(config, tag);
+    final address = outbound?['server'] as String?;
+    if (!method.isProxy) {
+      final port = outbound?['server_port'];
+      return _pingNatively(
+        type: outbound?['type'] as String? ?? '',
+        host: address ?? '',
+        port: port is int ? port : 0,
+        transport: outbound?['transport'],
+        method: method,
+        timeout: timeout,
+        tag: tag,
+      );
+    }
+    final target =
+        config == null ? null : SingBoxConfigBuilder.probeTargets(config)[tag];
+    if (target != null) {
+      final url = _probeUrl(target.host, target.hostPort);
+      try {
+        return await _measure(
+          target.address,
+          target.port,
+          url,
+          method,
+          timeout,
+          tag: tag,
+          address: address,
+        );
+      } on ProbeConnectException catch (e) {
+        _observer.debug('Probe route unreachable, using a URL test', {
+          'tag': tag,
+          'error': e.message,
+        });
+      }
+    }
+    return _libboxUrlTest(tag, address, timeout);
+  }
+
+  /// [SingBoxConfigOptions.urlTestUrl] when it points to [host]:[port], else
+  /// the root of that host.
+  Uri _probeUrl(String host, int port) {
+    final configured = Uri.tryParse(configOptions.urlTestUrl);
+    if (configured != null &&
+        configured.host == host &&
+        (configured.hasPort
+                ? configured.port
+                : (configured.scheme == 'http' ? 80 : 443)) ==
+            port) {
+      return configured;
+    }
+    return Uri(
+      scheme: port == 80 ? 'http' : 'https',
+      host: host,
+      port: port == 80 || port == 443 ? null : port,
+      path: '/',
+    );
+  }
+
+  /// One HTTP measurement through [probeAddress]:[probePort]; failures other
+  /// than an unreachable probe ([ProbeConnectException]) become failed
+  /// results.
+  Future<SingBoxPingResult> _measure(
+    String probeAddress,
+    int probePort,
+    Uri url,
+    SingBoxPingMethod method,
+    Duration timeout, {
+    String? tag,
+    String? address,
+    String? serverId,
+  }) async {
+    final effective =
+        method == SingBoxPingMethod.proxyGet
+            ? SingBoxPingMethod.proxyGet
+            : SingBoxPingMethod.proxyHead;
+    SingBoxPingResult failure(String message) => SingBoxPingResult.failure(
+      message,
+      tag: tag,
+      address: address,
+      serverId: serverId,
+      method: effective,
+      url: '$url',
+    );
+    try {
+      final result = await measureHttp(
+        probeAddress,
+        probePort,
+        url,
+        head: effective == SingBoxPingMethod.proxyHead,
+        timeout: timeout,
+      );
+      return SingBoxPingResult(
+        ping: result.milliseconds,
+        success: true,
+        tag: tag,
+        address: address,
+        serverId: serverId,
+        method: effective,
+        url: '$url',
+        statusCode: result.statusCode,
+      );
+    } on TimeoutException {
+      return failure('Timed out');
+    } on HandshakeException catch (e) {
+      return failure('TLS handshake failed: ${e.message}');
+    } on SocketException catch (e) {
+      return failure(e.osError?.message ?? e.message);
+    } on FormatException catch (e) {
+      return failure(e.message);
+    }
+  }
+
+  /// sing-box's own URL test of [tag] (HEAD).
+  Future<SingBoxPingResult> _libboxUrlTest(
+    String tag,
+    String? address,
+    Duration timeout,
+  ) async {
     final startedAt = DateTime.now().subtract(const Duration(seconds: 1));
     try {
       final resultFuture = watchOutbounds()
@@ -1183,163 +1504,156 @@ class SingBox {
     }
   }
 
-  /// Measures the latency of several server profiles, at most [concurrency]
-  /// at a time, and emits one result per profile (with
-  /// [SingBoxPingResult.serverId] set) as soon as it is known. Disabled
-  /// profiles are measured as well; filter them out beforehand if needed.
-  ///
-  /// * While the tunnel is **stopped** the TCP handshake time to the server
-  ///   is measured ([SingBoxPingMethod.tcp]; DNS resolution is excluded).
-  ///   Profiles of UDP based protocols (Hysteria, Hysteria 2, TUIC,
-  ///   WireGuard, QUIC transports) cannot be measured this way and fail.
-  /// * While it is **active** the app's own connections go through the
-  ///   tunnel, so profiles found in the running configuration are measured
-  ///   with a URL test through the proxy ([pingOutbound]) and the others
-  ///   fail. Connect with [connectToServers] to have every profile in the
-  ///   running configuration.
-  ///
-  /// [timeout] applies to every single measurement.
-  Stream<SingBoxPingResult> pingServers(
-    Iterable<SingBoxServerConfig> servers, {
-    int concurrency = 8,
-    Duration timeout = const Duration(seconds: 5),
-  }) {
-    _ensureInitialized();
-    if (concurrency < 1) {
-      throw ArgumentError.value(concurrency, 'concurrency', 'Must be >= 1');
-    }
-    final queue = servers.toList();
-    var cancelled = false;
-    late final StreamController<SingBoxPingResult> controller;
-    Future<void> run() async {
-      final throughTunnel = _state.status.isActive;
-      final tags =
-          throughTunnel
-              ? await _runningOutboundTags()
-              : const <String, String>{};
-      var next = 0;
-      Future<void> worker() async {
-        while (!cancelled && next < queue.length) {
-          final server = queue[next++];
-          final result =
-              throughTunnel
-                  ? await _pingInTunnel(server, tags, timeout)
-                  : await _tcpPing(server, timeout);
-          if (!cancelled) controller.add(result);
-        }
+  /// Measures [servers] through probe cores, [_probeCoreBatch] at a time;
+  /// one probe core runs at a time.
+  Future<void> _pingWithProbeCore(
+    List<SingBoxServerConfig> servers,
+    SingBoxPingMethod method,
+    Duration timeout,
+    Future<void> Function(
+      List<SingBoxServerConfig> items,
+      Future<SingBoxPingResult> Function(SingBoxServerConfig server) measure,
+    )
+    each,
+    void Function(SingBoxPingResult result) emit,
+    bool Function() cancelled,
+  ) async {
+    SingBoxPingResult failure(SingBoxServerConfig server, String message) =>
+        SingBoxPingResult.failure(
+          message,
+          address: server.server,
+          serverId: server.id,
+          method: method,
+        );
+    final measurable = <SingBoxServerConfig>[];
+    for (final server in servers) {
+      final outbound = server.outbound;
+      if (outbound == null) {
+        emit(failure(server, 'A complete configuration cannot be measured'));
+        continue;
       }
-
-      await Future.wait([
-        for (var i = 0; i < math.min(concurrency, queue.length); i++) worker(),
-      ]);
-      await controller.close();
+      try {
+        SingBoxOutbound.fromJson(outbound);
+        measurable.add(server);
+      } on ArgumentError catch (e) {
+        emit(failure(server, '${e.message}'));
+      }
     }
-
-    controller = StreamController<SingBoxPingResult>(
-      onListen: () => unawaited(run()),
-      onCancel: () => cancelled = true,
-    );
-    return controller.stream;
-  }
-
-  static const _udpProtocols = {'hysteria', 'hysteria2', 'tuic', 'wireguard'};
-
-  static String _serverKey(String type, String server, int port) =>
-      '$type|${server.toLowerCase()}|$port';
-
-  /// Tags of the outbounds and endpoints of the running configuration by
-  /// [_serverKey].
-  Future<Map<String, String>> _runningOutboundTags() async {
-    final tags = <String, String>{};
-    try {
-      final config = await _platform.getLastConfig();
-      final decoded = config == null ? null : jsonDecode(config);
-      if (decoded is! Map) return tags;
-      for (final key in const ['outbounds', 'endpoints']) {
-        final list = decoded[key];
-        if (list is! List) continue;
-        for (final item in list.whereType<Map<dynamic, dynamic>>()) {
+    final url = Uri.tryParse(configOptions.urlTestUrl);
+    for (var start = 0; start < measurable.length; start += _probeCoreBatch) {
+      if (cancelled()) return;
+      final batch = measurable.sublist(
+        start,
+        math.min(start + _probeCoreBatch, measurable.length),
+      );
+      final previous = _probeCoreQueue;
+      final done = Completer<void>();
+      _probeCoreQueue = done.future;
+      await previous;
+      try {
+        final ports = await freeLoopbackPorts(batch.length);
+        final config = SingBoxConfigBuilder(configOptions).buildProbe([
+          for (final server in batch) server.outbound!,
+        ], ports: ports);
+        try {
+          await _platform.startProbe(jsonEncode(config));
+        } on SingBoxException catch (e) {
+          for (final server in batch) {
+            emit(failure(server, 'The probe core did not start: ${e.message}'));
+          }
+          continue;
+        }
+        final portOf = {
+          for (final (index, server) in batch.indexed) server.id: ports[index],
+        };
+        try {
+          await each(batch, (server) async {
+            try {
+              return await _measure(
+                '127.0.0.1',
+                portOf[server.id]!,
+                url!,
+                method,
+                timeout,
+                address: server.server,
+                serverId: server.id,
+              );
+            } on ProbeConnectException catch (e) {
+              return failure(
+                server,
+                'The probe core is unreachable: ${e.message}',
+              );
+            }
+          });
+        } finally {
           try {
-            final outbound = SingBoxOutbound.fromJson(item);
-            final server = outbound.server;
-            if (server == null || outbound.serverPort == null) continue;
-            tags.putIfAbsent(
-              _serverKey(outbound.type, server, outbound.serverPort!),
-              () => outbound.tag,
-            );
-          } on ArgumentError {
-            continue;
+            await _platform.stopProbe();
+          } on SingBoxException catch (e, s) {
+            _observer.error('Failed to stop the probe core', e, s);
           }
         }
+      } finally {
+        done.complete();
       }
-    } on Object catch (e) {
-      _observer.warning('Cannot read the running configuration', {
-        'error': '$e',
-      });
     }
-    return tags;
   }
 
-  Future<SingBoxPingResult> _pingInTunnel(
+  Future<SingBoxPingResult> _pingProfileNatively(
     SingBoxServerConfig server,
-    Map<String, String> tags,
+    SingBoxPingMethod method,
     Duration timeout,
-  ) async {
-    final tag = tags[_serverKey(server.protocol, server.server, server.port)];
-    if (tag == null) {
-      return SingBoxPingResult.failure(
-        'Not part of the running configuration',
-        address: server.server,
-        serverId: server.id,
-      );
-    }
-    final result = await pingOutbound(tag, timeout: timeout);
-    return result.forServer(server.id);
-  }
+  ) async => (await _pingNatively(
+    type: server.protocol,
+    host: server.server,
+    port: server.port,
+    transport: server.outbound?['transport'],
+    method: method,
+    timeout: timeout,
+  )).forServer(server.id);
 
-  Future<SingBoxPingResult> _tcpPing(
-    SingBoxServerConfig server,
-    Duration timeout,
-  ) async {
-    final host = server.server;
+  /// TCP or ICMP latency to [host] outside the tunnel.
+  Future<SingBoxPingResult> _pingNatively({
+    required String type,
+    required String host,
+    required int port,
+    required Object? transport,
+    required SingBoxPingMethod method,
+    required Duration timeout,
+    String? tag,
+  }) async {
     SingBoxPingResult failure(String message) => SingBoxPingResult.failure(
       message,
-      address: host,
-      serverId: server.id,
-      method: SingBoxPingMethod.tcp,
+      address: host.isEmpty ? null : host,
+      tag: tag,
+      method: method,
     );
-    if (host.isEmpty || server.port <= 0) {
+    if (host.isEmpty || (method == SingBoxPingMethod.tcp && port <= 0)) {
       return failure('The server has no address');
     }
-    final transport = server.outbound?['transport'];
-    if (_udpProtocols.contains(server.protocol) ||
-        (transport is Map && transport['type'] == 'quic')) {
-      return failure('${server.protocol} uses UDP; TCP latency is unavailable');
+    if (method == SingBoxPingMethod.tcp &&
+        (_udpProtocols.contains(type) ||
+            (transport is Map && transport['type'] == 'quic'))) {
+      return failure(
+        '$type uses UDP; measure it with proxyHead, proxyGet or icmp',
+      );
     }
-    Socket? socket;
     try {
-      final addresses = await InternetAddress.lookup(host).timeout(timeout);
-      if (addresses.isEmpty) return failure('Cannot resolve $host');
-      final stopwatch = Stopwatch()..start();
-      socket = await Socket.connect(
-        addresses.first,
-        server.port,
+      final result = await _platform.pingServer(
+        method: method.name,
+        host: host,
+        port: method == SingBoxPingMethod.tcp ? port : null,
         timeout: timeout,
       );
-      stopwatch.stop();
+      if (!result.success) return failure(result.error ?? 'No answer');
       return SingBoxPingResult(
-        ping: stopwatch.elapsedMilliseconds,
+        ping: result.ping,
         success: true,
         address: host,
-        serverId: server.id,
-        method: SingBoxPingMethod.tcp,
+        tag: tag,
+        method: method,
       );
-    } on TimeoutException {
-      return failure('Timed out');
-    } on SocketException catch (e) {
-      return failure(e.osError?.message ?? e.message);
-    } finally {
-      socket?.destroy();
+    } on SingBoxException catch (e) {
+      return failure(e.message);
     }
   }
 
@@ -1360,19 +1674,24 @@ class SingBox {
     return null;
   }
 
-  /// Measures the latency of the server currently used by the main selector.
+  /// Measures the latency of the server currently used by the main selector
+  /// with [method] (see [pingOutbound]).
   Future<SingBoxPingResult> pingCurrentServer({
+    SingBoxPingMethod method = SingBoxPingMethod.proxyHead,
     Duration timeout = const Duration(seconds: 15),
   }) async {
     _ensureInitialized();
     if (!isConnected) {
-      return const SingBoxPingResult.failure('Not connected to VPN');
+      return SingBoxPingResult.failure('Not connected to VPN', method: method);
     }
     final tag = await currentOutboundTag();
     if (tag == null) {
-      return const SingBoxPingResult.failure('No proxy outbound found');
+      return SingBoxPingResult.failure(
+        'No proxy outbound found',
+        method: method,
+      );
     }
-    return pingOutbound(tag, timeout: timeout);
+    return pingOutbound(tag, method: method, timeout: timeout);
   }
 
   /// Runs a URL test of all members of [groupTag] and returns the group once
@@ -1466,11 +1785,6 @@ class SingBox {
       return null;
     }
     return null;
-  }
-
-  Future<String?> _serverAddressOf(String tag) async {
-    final outbound = await _firstProxyOutbound(tag);
-    return outbound?['server'] as String?;
   }
 
   /// Clash mode state (available modes and the current one).

@@ -278,6 +278,31 @@ class MethodChannelSingBox extends SingBoxPlatform {
   Future<void> urlTest(String tag) => _invoke<void>('urlTest', {'tag': tag});
 
   @override
+  Future<void> startProbe(String config) =>
+      _invoke<void>('startProbe', {'config': config});
+
+  @override
+  Future<void> stopProbe() => _invoke<void>('stopProbe');
+
+  @override
+  Future<SingBoxNativePingResult> pingServer({
+    required String method,
+    required String host,
+    int? port,
+    required Duration timeout,
+  }) async {
+    final result = await _invoke<Map<dynamic, dynamic>>('pingServer', {
+      'method': method,
+      'host': host,
+      'port': port,
+      'timeoutMs': timeout.inMilliseconds,
+    });
+    return result == null
+        ? const SingBoxNativePingResult(success: false, error: 'No result')
+        : SingBoxNativePingResult.fromMap(result);
+  }
+
+  @override
   Future<void> setClashMode(String mode) =>
       _invoke<void>('setClashMode', {'mode': mode});
 

@@ -22,6 +22,38 @@ import 'src/options.dart';
 
 export 'src/models/runtime_info.dart';
 
+/// Result of [SingBoxPlatform.pingServer].
+class SingBoxNativePingResult {
+  /// Creates a result.
+  const SingBoxNativePingResult({
+    required this.success,
+    this.ping = 0,
+    this.address,
+    this.error,
+  });
+
+  /// Parses the map of the `pingServer` method.
+  factory SingBoxNativePingResult.fromMap(Map<dynamic, dynamic> map) =>
+      SingBoxNativePingResult(
+        success: map['success'] == true,
+        ping: (map['ping'] as num?)?.toInt() ?? 0,
+        address: map['address'] as String?,
+        error: map['error'] as String?,
+      );
+
+  /// Whether the server answered.
+  final bool success;
+
+  /// Latency in milliseconds.
+  final int ping;
+
+  /// The IP address that was measured.
+  final String? address;
+
+  /// Why the measurement failed.
+  final String? error;
+}
+
 /// The interface that platform implementations of `sing_box` must extend.
 ///
 /// Every method maps 1:1 to a message of the native contract described in
@@ -175,6 +207,28 @@ abstract class SingBoxPlatform extends PlatformInterface {
   /// Starts a URL test of a group or a single outbound.
   Future<void> urlTest(String tag) {
     throw UnimplementedError('urlTest() has not been implemented.');
+  }
+
+  /// Starts (or replaces) the probe core, a libbox service without TUN in the
+  /// app process that runs [config] for latency tests.
+  Future<void> startProbe(String config) {
+    throw UnimplementedError('startProbe() has not been implemented.');
+  }
+
+  /// Stops the probe core started by [startProbe].
+  Future<void> stopProbe() {
+    throw UnimplementedError('stopProbe() has not been implemented.');
+  }
+
+  /// Measures the TCP handshake (`method: 'tcp'`, needs [port]) or ICMP echo
+  /// (`method: 'icmp'`) latency to [host] outside the tunnel.
+  Future<SingBoxNativePingResult> pingServer({
+    required String method,
+    required String host,
+    int? port,
+    required Duration timeout,
+  }) {
+    throw UnimplementedError('pingServer() has not been implemented.');
   }
 
   /// Switches the clash mode.

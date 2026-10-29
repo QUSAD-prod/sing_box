@@ -24,8 +24,15 @@ Map<String, dynamic> tun(Map<String, dynamic> config) =>
       (i) => i['type'] == 'tun',
     );
 
+/// Route rules without the latency probe routes (tested on their own).
 List<Map<String, dynamic>> routeRules(Map<String, dynamic> config) =>
+    allRouteRules(config).where((r) => !isProbeRule(r)).toList();
+
+List<Map<String, dynamic>> allRouteRules(Map<String, dynamic> config) =>
     ((config['route'] as Map)['rules'] as List).cast<Map<String, dynamic>>();
+
+bool isProbeRule(Map<String, dynamic> rule) =>
+    rule.containsKey('override_address') && rule.containsKey('ip_cidr');
 
 List<Map<String, dynamic>> dnsServers(Map<String, dynamic> config) =>
     ((config['dns'] as Map)['servers'] as List).cast<Map<String, dynamic>>();
@@ -1136,6 +1143,132 @@ void main() {
     });
   });
 
+  group('latency probes', () {
+    test('probeAddress is the TUN neighbour', () {
+      expect(SingBoxConfigBuilder.probeAddress('172.19.0.1/30'), '172.19.0.2');
+      expect(SingBoxConfigBuilder.probeAddress('10.0.0.2/30'), '10.0.0.1');
+      expect(SingBoxConfigBuilder.probeAddress('10.10.0.1/24'), '10.10.0.2');
+      expect(
+        SingBoxConfigBuilder.probeAddress('10.10.0.254/24'),
+        '10.10.0.253',
+      );
+      expect(SingBoxConfigBuilder.probeAddress('10.0.0.1/32'), isNull);
+      expect(SingBoxConfigBuilder.probeAddress('10.0.0.1/31'), isNull);
+      expect(
+        SingBoxConfigBuilder.probeAddress('fdfe:dcba:9876::1/126'),
+        isNull,
+      );
+      expect(SingBoxConfigBuilder.probeAddress('nonsense'), isNull);
+    });
+
+    test('build routes every server, group and the selector', () async {
+      final config = builder.build([vless, trojan, wireguard]);
+      final probes = allRouteRules(config).where(isProbeRule).toList();
+      final tags = [
+        for (final o in [vless, trojan, wireguard]) o['tag'],
+      ];
+      expect(probes.map((r) => r['outbound']), ['proxy', 'auto', ...tags]);
+      expect(probes.first, {
+        'ip_cidr': ['172.19.0.2/32'],
+        'port': 20000,
+        'action': 'route',
+        'outbound': 'proxy',
+        'override_address': 'www.gstatic.com',
+        'override_port': 443,
+      });
+      // Right after sniff and DNS hijacking: nothing else may catch them.
+      expect(allRouteRules(config).indexOf(probes.first), 2);
+
+      final targets = SingBoxConfigBuilder.probeTargets(config);
+      expect(targets.keys, ['proxy', 'auto', ...tags]);
+      expect(targets['auto'], (
+        address: '172.19.0.2',
+        port: 20001,
+        host: 'www.gstatic.com',
+        hostPort: 443,
+      ));
+      await expectSingBoxAccepts(config);
+    });
+
+    test('the probe follows urlTestUrl and the TUN address', () {
+      final config = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          urlTestUrl: 'http://cp.cloudflare.com:8080/x',
+          tun: SingBoxTunOptions(inet4Address: '10.9.0.1/24'),
+        ),
+      ).build([vless]);
+      expect(SingBoxConfigBuilder.probeTargets(config)['proxy'], (
+        address: '10.9.0.2',
+        port: 20000,
+        host: 'cp.cloudflare.com',
+        hostPort: 8080,
+      ));
+      final noRoom = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          tun: SingBoxTunOptions(inet4Address: '10.9.0.1/32'),
+        ),
+      ).build([vless]);
+      expect(SingBoxConfigBuilder.probeTargets(noRoom), isEmpty);
+    });
+
+    test('probeTargets ignores ordinary rules', () {
+      expect(SingBoxConfigBuilder.probeTargets(const {}), isEmpty);
+      expect(
+        SingBoxConfigBuilder.probeTargets(
+          builder.build([vless], rules: fullRules),
+        ).keys,
+        ['proxy', vless['tag']],
+      );
+    });
+
+    test('buildProbe forwards local ports through each outbound', () async {
+      final config = builder.buildProbe(
+        [
+          vless,
+          {...trojan, 'tag': vless['tag']},
+          wireguard,
+        ],
+        ports: [41001, 41002, 41003],
+      );
+      expect(config.containsKey('experimental'), isFalse);
+      final inbounds =
+          (config['inbounds'] as List).cast<Map<String, dynamic>>();
+      expect(inbounds.first, {
+        'type': 'direct',
+        'tag': 'probe-0',
+        'listen': '127.0.0.1',
+        'listen_port': 41001,
+        'network': 'tcp',
+        'override_address': 'www.gstatic.com',
+        'override_port': 443,
+      });
+      expect(inbounds.every((i) => i['type'] == 'direct'), isTrue);
+      final rules =
+          ((config['route'] as Map)['rules'] as List)
+              .cast<Map<String, dynamic>>();
+      // Clashing tags are made unique; the WireGuard endpoint is routed too.
+      expect(rules.map((r) => r['outbound']), [
+        vless['tag'],
+        '${vless['tag']}-2',
+        wireguard['tag'],
+      ]);
+      expect(rules.first['inbound'], ['probe-0']);
+      expect((config['endpoints'] as List).single['tag'], wireguard['tag']);
+      await expectSingBoxAccepts(config);
+
+      expect(
+        () => builder.buildProbe([vless], ports: const []),
+        throwsArgumentError,
+      );
+      expect(
+        () => const SingBoxConfigBuilder(
+          SingBoxConfigOptions(urlTestUrl: 'nonsense'),
+        ).buildProbe([vless], ports: const [1]),
+        throwsArgumentError,
+      );
+    });
+  });
+
   group('options', () {
     test('logging, sniffing, clash modes and cache can be disabled', () async {
       final config = const SingBoxConfigBuilder(
@@ -1366,12 +1499,22 @@ void main() {
       await expectSingBoxAccepts(result);
     });
 
-    test('default rules only add LAN bypass and interface detection', () async {
+    test('default rules only add LAN bypass, probes and interface '
+        'detection', () async {
       final result = builder.apply(userConfig());
       final expected = userConfig();
       (expected['route'] as Map)['rules'] = [
         {'action': 'sniff'},
         {'protocol': 'dns', 'action': 'hijack-dns'},
+        // The user's TUN is 172.18.0.1/30.
+        {
+          'ip_cidr': ['172.18.0.2/32'],
+          'port': 20000,
+          'action': 'route',
+          'outbound': 'my-proxy',
+          'override_address': 'www.gstatic.com',
+          'override_port': 443,
+        },
         {'ip_is_private': true, 'action': 'route', 'outbound': 'bypass'},
         {
           'domain_suffix': ['user.example'],

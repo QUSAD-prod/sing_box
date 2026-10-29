@@ -28,6 +28,10 @@ import 'rule_sets.dart';
 /// * `experimental` with the cache file and the Clash API (modes `Rule`,
 ///   `Global`, `Direct`; traffic statistics).
 ///
+/// Both also add latency probe routes ([probeTargets]); [buildProbe] makes
+/// the configuration of a temporary core for measurements without the
+/// tunnel.
+///
 /// [apply] patches an existing user configuration with the same routing
 /// rules without touching anything else.
 ///
@@ -73,6 +77,9 @@ class SingBoxConfigBuilder {
 
   /// Tag of the HTTP client that downloads remote rule-sets.
   static const ruleSetHttpClientTag = 'rule-set-download';
+
+  /// First port of the latency probe routes (see [probeTargets]).
+  static const probePortBase = 20000;
 
   static const _reservedTags = {proxyTag, autoTag, directTag};
 
@@ -125,6 +132,11 @@ class SingBoxConfigBuilder {
     final custom = _CustomRules(rules, sniff: options.sniff);
     final routeRules = _withRuleSets([
       ..._leadingRouteRules(),
+      ..._probeRules(probeAddress(options.tun.inet4Address), [
+        proxyTag,
+        if (useAuto) autoTag,
+        ...memberTags,
+      ]),
       ..._routingRules(
         rules,
         custom,
@@ -246,6 +258,9 @@ class SingBoxConfigBuilder {
   ///   after the user's own rules.
   /// * [ruleSetPaths] works as in [build] for the inserted rules; the user's
   ///   own rule-sets are not changed.
+  /// * Latency probe routes (see [probeTargets]) are inserted for the proxy
+  ///   outbounds, endpoints and groups, using the peer address of the first
+  ///   TUN inbound's IPv4 subnet.
   Map<String, dynamic> apply(
     Map<String, dynamic> config, {
     SingBoxRoutingRules rules = const SingBoxRoutingRules(),
@@ -327,7 +342,10 @@ class SingBoxConfigBuilder {
       ),
       ruleSetPaths,
     );
-    routeRules.insertAll(insertAt, inserted);
+    routeRules.insertAll(insertAt, [
+      ..._probeRules(_tunProbeAddress(tuns), _proxyTags(result)),
+      ...inserted,
+    ]);
     routeRules.addAll(_ipVersionRules(rules));
     route.putIfAbsent('auto_detect_interface', () => true);
     if (_isListed(rules)) route['final'] = direct;
@@ -479,16 +497,7 @@ class SingBoxConfigBuilder {
     }
 
     // Direct resolver for bypassed domains and proxy server host names.
-    var direct = SingBoxDnsServer.tryParse(
-      dnsOptions.direct,
-      tag: dnsDirectTag,
-      domainResolver: dnsLocalTag,
-    );
-    direct ??= {'type': 'local', 'tag': dnsDirectTag};
-    servers.add(direct);
-    if (direct['domain_resolver'] == dnsLocalTag) {
-      servers.add({'type': 'local', 'tag': dnsLocalTag});
-    }
+    servers.addAll(_directDnsServers());
 
     final ipv6 =
         options.tun.enableIpv6 && rules.ipVersion != SingBoxIpVersion.ipv4;
@@ -572,6 +581,23 @@ class SingBoxConfigBuilder {
       'strategy': _dnsStrategy(rules),
       if (dnsOptions.reverseMapping) 'reverse_mapping': true,
     };
+  }
+
+  /// The direct DNS server [dnsDirectTag] from [SingBoxDnsOptions.direct]
+  /// (the system resolver when invalid), bootstrapped by the system resolver
+  /// when it is given by host name.
+  List<Map<String, dynamic>> _directDnsServers() {
+    var direct = SingBoxDnsServer.tryParse(
+      options.dns.direct,
+      tag: dnsDirectTag,
+      domainResolver: dnsLocalTag,
+    );
+    direct ??= {'type': 'local', 'tag': dnsDirectTag};
+    return [
+      direct,
+      if (direct['domain_resolver'] == dnsLocalTag)
+        {'type': 'local', 'tag': dnsLocalTag},
+    ];
   }
 
   List<Map<String, dynamic>> _leadingRouteRules() => [
@@ -682,6 +708,187 @@ class SingBoxConfigBuilder {
     // statistics and runtime mode switching.
     'clash_api': {if (options.enableClashModes) 'default_mode': 'Rule'},
   };
+
+  /// Latency probe routes for [tags]: a connection from the app to
+  /// `<address>:<probePortBase + i>` (inside the TUN) goes through outbound
+  /// `tags[i]` to the host of [SingBoxConfigOptions.urlTestUrl], so the app
+  /// can measure any server without a listening port. Empty without an
+  /// [address] or a valid URL.
+  List<Map<String, dynamic>> _probeRules(String? address, List<String> tags) {
+    final url = Uri.tryParse(options.urlTestUrl);
+    if (address == null || url == null || url.host.isEmpty) return const [];
+    return [
+      for (final (index, tag) in tags.indexed)
+        {
+          'ip_cidr': ['$address/32'],
+          'port': probePortBase + index,
+          'action': 'route',
+          'outbound': tag,
+          'override_address': url.host,
+          'override_port': _portOf(url),
+        },
+    ];
+  }
+
+  static int _portOf(Uri url) =>
+      url.hasPort ? url.port : (url.scheme == 'http' ? 80 : 443);
+
+  /// The probe address of the first TUN inbound with an IPv4 subnet.
+  static String? _tunProbeAddress(List<Map<String, dynamic>> tuns) {
+    for (final tun in tuns) {
+      for (final cidr in readStringList(tun['address'])) {
+        final address = probeAddress(cidr);
+        if (address != null) return address;
+      }
+    }
+    return null;
+  }
+
+  /// Tags of the proxy outbounds, groups and endpoints of [config].
+  static List<String> _proxyTags(Map<String, dynamic> config) => dedupe([
+    for (final key in const ['outbounds', 'endpoints'])
+      if (config[key] case final List<dynamic> list)
+        for (final item in list.whereType<Map<dynamic, dynamic>>())
+          if (item['tag'] case final String tag)
+            if (key == 'endpoints' ||
+                item['type'] == 'selector' ||
+                item['type'] == 'urltest' ||
+                (item['type'] is String &&
+                    SingBoxOutbound.isProxyType(item['type'] as String)))
+              tag,
+  ]);
+
+  /// The address the app connects to for latency probes: the neighbour of
+  /// the TUN address inside its IPv4 subnet (`172.19.0.1/30` →
+  /// `172.19.0.2`), or `null` for an IPv6 or too small subnet.
+  static String? probeAddress(String tunCidr) {
+    final parts = tunCidr.trim().split('/');
+    final octets = parts.first.split('.').map(int.tryParse).toList();
+    final prefix = parts.length == 2 ? int.tryParse(parts[1]) : 32;
+    if (octets.length != 4 ||
+        octets.any((o) => o == null || o < 0 || o > 255) ||
+        prefix == null ||
+        prefix < 8 ||
+        prefix > 30) {
+      return null;
+    }
+    final ip = octets.fold<int>(0, (value, o) => (value << 8) | o!);
+    final mask = (0xffffffff << (32 - prefix)) & 0xffffffff;
+    final network = ip & mask;
+    final broadcast = network | (~mask & 0xffffffff);
+    var peer = ip + 1;
+    if (peer >= broadcast) peer = ip - 1;
+    if (peer <= network) return null;
+    return [
+      for (var shift = 24; shift >= 0; shift -= 8) (peer >> shift) & 0xff,
+    ].join('.');
+  }
+
+  /// The latency probe routes of a running [config], by outbound tag: where
+  /// the app connects to measure that outbound and which host:port the
+  /// connection reaches (see [build]).
+  static Map<String, ({String address, int port, String host, int hostPort})>
+  probeTargets(Map<dynamic, dynamic> config) {
+    final targets =
+        <String, ({String address, int port, String host, int hostPort})>{};
+    final route = config['route'];
+    final rules = route is Map ? route['rules'] : null;
+    if (rules is! List) return targets;
+    for (final rule in rules.whereType<Map<dynamic, dynamic>>()) {
+      final cidrs = rule['ip_cidr'];
+      final port = rule['port'];
+      final outbound = rule['outbound'];
+      final host = rule['override_address'];
+      final hostPort = rule['override_port'];
+      if (cidrs is List &&
+          cidrs.length == 1 &&
+          cidrs.single is String &&
+          (cidrs.single as String).endsWith('/32') &&
+          port is int &&
+          outbound is String &&
+          host is String &&
+          hostPort is int &&
+          rule['action'] == 'route') {
+        final address = (cidrs.single as String).split('/').first;
+        targets.putIfAbsent(
+          outbound,
+          () => (address: address, port: port, host: host, hostPort: hostPort),
+        );
+      }
+    }
+    return targets;
+  }
+
+  /// A configuration for a temporary core without TUN that measures
+  /// [outbounds]: a `direct` inbound on `127.0.0.1:ports[i]` forwards to the
+  /// host of [SingBoxConfigOptions.urlTestUrl] through `outbounds[i]`.
+  ///
+  /// Throws an [ArgumentError] when the lists differ in length, are empty,
+  /// an outbound has no `type` or the URL is invalid.
+  Map<String, dynamic> buildProbe(
+    List<Map<String, dynamic>> outbounds, {
+    required List<int> ports,
+  }) {
+    if (outbounds.isEmpty || outbounds.length != ports.length) {
+      throw ArgumentError.value(ports, 'ports', 'One port per outbound needed');
+    }
+    final url = Uri.tryParse(options.urlTestUrl);
+    if (url == null || url.host.isEmpty) {
+      throw ArgumentError.value(options.urlTestUrl, 'urlTestUrl');
+    }
+    final taken = <String>{directTag};
+    final proxies = <Map<String, dynamic>>[];
+    final endpoints = <Map<String, dynamic>>[];
+    final tags = <String>[];
+    for (final raw in outbounds) {
+      final outbound = SingBoxOutbound.fromJson(raw);
+      final tag = uniqueTag(outbound.tag, taken);
+      tags.add(tag);
+      final json = deepCopyMap(outbound.json)..['tag'] = tag;
+      (outbound.isEndpoint ? endpoints : proxies).add(json);
+    }
+    return {
+      'log':
+          options.logLevel == SingBoxConfigLogLevel.disabled
+              ? {'disabled': true}
+              : {'level': 'warn'},
+      'dns': {
+        'servers': _directDnsServers(),
+        'final': dnsDirectTag,
+        'strategy': _dnsStrategy(const SingBoxRoutingRules()),
+      },
+      'inbounds': [
+        for (final (index, port) in ports.indexed)
+          {
+            'type': 'direct',
+            'tag': 'probe-$index',
+            'listen': '127.0.0.1',
+            'listen_port': port,
+            'network': 'tcp',
+            'override_address': url.host,
+            'override_port': _portOf(url),
+          },
+      ],
+      'outbounds': [
+        ...proxies,
+        {'type': 'direct', 'tag': directTag},
+      ],
+      if (endpoints.isNotEmpty) 'endpoints': endpoints,
+      'route': {
+        'rules': [
+          for (final (index, tag) in tags.indexed)
+            {
+              'inbound': ['probe-$index'],
+              'action': 'route',
+              'outbound': tag,
+            },
+        ],
+        'final': directTag,
+        'auto_detect_interface': true,
+        'default_domain_resolver': dnsDirectTag,
+      },
+    };
+  }
 
   /// Download URLs of the rule-sets that [build] references for [rules], by
   /// tag: the catalog lists of [SingBoxRuleSets] (with the URL templates of

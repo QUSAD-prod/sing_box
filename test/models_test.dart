@@ -248,16 +248,27 @@ void main() {
       address: 'a.com',
       tag: 't',
       serverId: 's',
-      method: SingBoxPingMethod.tcp,
+      method: SingBoxPingMethod.proxyGet,
+      url: 'https://example.com/',
+      statusCode: 204,
     );
     final copy = SingBoxPingResult.fromMap(result.toMap());
     expect(copy.toMap(), result.toMap());
     expect(copy.forServer('x').serverId, 'x');
+    expect(copy.forServer('x').statusCode, 204);
     expect(
       SingBoxPingResult.fromMap(const {}).method,
-      SingBoxPingMethod.urlTest,
+      SingBoxPingMethod.proxyHead,
     );
-    expect(result.toString(), contains('12ms tcp'));
+    // Results stored by 1.0 keep working.
+    expect(
+      SingBoxPingResult.fromMap(const {'method': 'urlTest'}).method,
+      SingBoxPingMethod.proxyHead,
+    );
+    expect(SingBoxPingMethod.fromName('icmp'), SingBoxPingMethod.icmp);
+    expect(SingBoxPingMethod.proxyGet.isProxy, isTrue);
+    expect(SingBoxPingMethod.tcp.isProxy, isFalse);
+    expect(result.toString(), contains('12ms proxyGet'));
   });
 
   test('exceptions map platform codes', () {

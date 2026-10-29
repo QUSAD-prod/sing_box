@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:sing_box/sing_box.dart';
@@ -127,6 +129,14 @@ class FakeSingBoxPlatform extends SingBoxPlatform
     if (configError != null) throw SingBoxConfigException(configError!);
     lastConfig = config;
     started.add(config);
+    if (serveProbeRoutes) {
+      final targets = SingBoxConfigBuilder.probeTargets(
+        jsonDecode(config) as Map,
+      );
+      for (final MapEntry(key: tag, value: target) in targets.entries) {
+        _routeServers.add(await _serve(target.port, tag));
+      }
+    }
     if (status == SingBoxConnectionStatus.connected) return;
     if (failBeforeStartReturns && runtimeError != null) {
       emitState(SingBoxConnectionStatus.disconnected, error: runtimeError);
@@ -182,6 +192,103 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   Future<void> urlTest(String tag) async {
     calls.add('urlTest:$tag');
     onUrlTest?.call(tag);
+  }
+
+  /// Configs passed to [startProbe].
+  final probeConfigs = <String>[];
+
+  /// Outbound tags whose probes fail (the fake closes the connection).
+  Set<String> failingProbes = {};
+
+  /// Error thrown by [startProbe].
+  String? probeStartError;
+
+  /// Whether [start] also serves the probe routes of the started config on
+  /// their (loopback) probe address, as the tunnel would.
+  bool serveProbeRoutes = false;
+
+  final _probeServers = <ServerSocket>[];
+  final _routeServers = <ServerSocket>[];
+
+  /// Answers HTTP requests with `204` for [tag] (or closes the connection
+  /// when it is in [failingProbes]).
+  Future<ServerSocket> _serve(int port, String tag) async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+    server.listen((socket) {
+      if (failingProbes.contains(tag)) {
+        socket.destroy();
+        return;
+      }
+      final request = <int>[];
+      socket.listen((data) {
+        request.addAll(data);
+        if (String.fromCharCodes(request).contains('\r\n\r\n')) {
+          socket.add('HTTP/1.1 204 No Content\r\n\r\n'.codeUnits);
+          socket.destroy();
+        }
+      }, onError: (_) {});
+    });
+    return server;
+  }
+
+  @override
+  Future<void> startProbe(String config) async {
+    calls.add('startProbe');
+    if (probeStartError != null) throw SingBoxStartException(probeStartError!);
+    await stopProbe();
+    calls.removeLast();
+    probeConfigs.add(config);
+    final decoded = jsonDecode(config) as Map<String, dynamic>;
+    final outboundOf = {
+      for (final rule
+          in (decoded['route']['rules'] as List).cast<Map<String, dynamic>>())
+        (rule['inbound'] as List).single: rule['outbound'] as String,
+    };
+    for (final inbound
+        in (decoded['inbounds'] as List).cast<Map<String, dynamic>>()) {
+      _probeServers.add(
+        await _serve(
+          inbound['listen_port'] as int,
+          outboundOf[inbound['tag']]!,
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<void> stopProbe() async {
+    calls.add('stopProbe');
+    final servers = [..._probeServers];
+    _probeServers.clear();
+    for (final server in servers) {
+      await server.close();
+    }
+  }
+
+  /// Answers [pingServer]; succeeds with 42 ms by default.
+  SingBoxNativePingResult Function(String method, String host, int? port)?
+  onPingServer;
+
+  @override
+  Future<SingBoxNativePingResult> pingServer({
+    required String method,
+    required String host,
+    int? port,
+    required Duration timeout,
+  }) async {
+    calls.add('pingServer:$method:$host:${port ?? ''}');
+    return onPingServer?.call(method, host, port) ??
+        const SingBoxNativePingResult(success: true, ping: 42);
+  }
+
+  /// Closes the sockets opened for probes.
+  Future<void> closeProbes() async {
+    await stopProbe();
+    final servers = [..._routeServers];
+    _routeServers.clear();
+    for (final server in servers) {
+      await server.close();
+    }
   }
 
   @override

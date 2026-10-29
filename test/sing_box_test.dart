@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/sing_box.dart';
@@ -463,40 +462,164 @@ void main() {
       ...extra,
     }, id: id);
 
-    test('measures TCP latency while disconnected', () async {
-      final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(listener.close);
-      listener.listen((socket) => socket.destroy());
-      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final closedPort = closed.port;
-      await closed.close();
+    tearDown(() => platform.closeProbes());
 
-      final results =
-          await singBox.pingServers([
-            profile('open', 'vless', '127.0.0.1', listener.port),
-            profile('closed', 'trojan', '127.0.0.1', closedPort),
-            profile('udp', 'hysteria2', '127.0.0.1', listener.port),
-            profile('quic', 'vless', '127.0.0.1', listener.port, {
-              'transport': {'type': 'quic'},
-            }),
-            profile('empty', 'vless', '', 0),
-          ], concurrency: 2).toList();
-
-      final byId = {for (final r in results) r.serverId!: r};
+    test('measures TCP and ICMP natively', () async {
+      platform.onPingServer =
+          (method, host, port) =>
+              host == 'down.example'
+                  ? const SingBoxNativePingResult(
+                    success: false,
+                    error: 'No reply',
+                  )
+                  : const SingBoxNativePingResult(success: true, ping: 31);
+      final servers = [
+        profile('open', 'vless', 'up.example', 443),
+        profile('down', 'trojan', 'down.example', 443),
+        profile('udp', 'hysteria2', 'up.example', 443),
+        profile('quic', 'vless', 'up.example', 443, {
+          'transport': {'type': 'quic'},
+        }),
+        profile('empty', 'vless', '', 0),
+      ];
+      final tcp = {
+        for (final r
+            in await singBox
+                .pingServers(
+                  servers,
+                  method: SingBoxPingMethod.tcp,
+                  concurrency: 2,
+                )
+                .toList())
+          r.serverId!: r,
+      };
       expect(
-        byId.keys,
-        unorderedEquals(['open', 'closed', 'udp', 'quic', 'empty']),
+        tcp.keys,
+        unorderedEquals(['open', 'down', 'udp', 'quic', 'empty']),
       );
-      expect(byId['open']!.success, isTrue);
-      expect(byId['open']!.method, SingBoxPingMethod.tcp);
-      expect(byId['open']!.address, '127.0.0.1');
-      expect(byId['closed']!.success, isFalse);
-      expect(byId['udp']!.errorMessage, contains('UDP'));
-      expect(byId['quic']!.errorMessage, contains('UDP'));
-      expect(byId['empty']!.errorMessage, 'The server has no address');
+      expect(tcp['open']!.success, isTrue);
+      expect(tcp['open']!.ping, 31);
+      expect(tcp['open']!.method, SingBoxPingMethod.tcp);
+      expect(tcp['open']!.address, 'up.example');
+      expect(tcp['down']!.errorMessage, 'No reply');
+      expect(tcp['udp']!.errorMessage, contains('UDP'));
+      expect(tcp['quic']!.errorMessage, contains('UDP'));
+      expect(tcp['empty']!.errorMessage, 'The server has no address');
+      expect(platform.calls, contains('pingServer:tcp:up.example:443'));
+
+      // ICMP works for UDP protocols and needs no port.
+      final icmp = await singBox.ping(
+        servers[2],
+        method: SingBoxPingMethod.icmp,
+      );
+      expect(icmp.success, isTrue);
+      expect(icmp.method, SingBoxPingMethod.icmp);
+      expect(platform.calls.last, 'pingServer:icmp:up.example:');
+      expect(platform.calls.where((c) => c.startsWith('startProbe')), isEmpty);
     });
 
-    test('uses URL tests for servers of the running config', () async {
+    test('proxy methods use a probe core while disconnected', () async {
+      singBox.configOptions = const SingBoxConfigOptions(
+        urlTestUrl: 'http://probe.test/generate_204',
+      );
+      platform.failingProbes = {'bad'};
+      final servers = [
+        profile('good', 'shadowsocks', '203.0.113.1', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+        profile('bad', 'shadowsocks', '203.0.113.2', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+        SingBoxServerConfig.fromFullConfig(
+          '{"outbounds": [{"type": "direct", "tag": "d"}]}',
+          id: 'full',
+          name: 'Full',
+        ),
+      ];
+      final results = {
+        for (final r in await singBox.pingServers(servers).toList())
+          r.serverId!: r,
+      };
+      expect(results['good']!.success, isTrue);
+      expect(results['good']!.method, SingBoxPingMethod.proxyHead);
+      expect(results['good']!.statusCode, 204);
+      expect(results['good']!.url, 'http://probe.test/generate_204');
+      expect(results['good']!.address, '203.0.113.1');
+      expect(results['bad']!.success, isFalse);
+      expect(results['full']!.errorMessage, contains('complete configuration'));
+      expect(platform.calls.where((c) => c == 'startProbe'), hasLength(1));
+      expect(platform.calls.last, 'stopProbe');
+      final probe = jsonDecode(platform.probeConfigs.single) as Map;
+      expect((probe['inbounds'] as List).length, 2);
+      expect(probe.containsKey('experimental'), isFalse);
+
+      final get = await singBox.ping(
+        servers[0],
+        method: SingBoxPingMethod.proxyGet,
+      );
+      expect(get.method, SingBoxPingMethod.proxyGet);
+      expect(get.success, isTrue);
+    });
+
+    test('a probe core that does not start fails every server', () async {
+      platform.probeStartError = 'boom';
+      final result = await singBox.ping(
+        profile('s', 'shadowsocks', '203.0.113.1', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+      );
+      expect(result.success, isFalse);
+      expect(result.errorMessage, contains('boom'));
+    });
+
+    test('connected: measured through the probe routes', () async {
+      singBox.configOptions = const SingBoxConfigOptions(
+        urlTestUrl: 'http://probe.test/generate_204',
+        // Probe address 127.0.0.1, served by the fake tunnel.
+        tun: SingBoxTunOptions(inet4Address: '127.0.0.0/30'),
+      );
+      platform.serveProbeRoutes = true;
+      final ss = SingBoxServerConfig.fromOutbound(
+        Map<String, dynamic>.from(_ssOutbound),
+        id: 'running',
+      );
+      await singBox.connectToServers([ss]);
+      final results =
+          await singBox.pingServers([
+            ss,
+            profile('other', 'vless', 'other.example.com', 443),
+          ]).toList();
+      final byId = {for (final r in results) r.serverId!: r};
+      expect(byId['running']!.success, isTrue);
+      expect(byId['running']!.tag, 'my-ss');
+      expect(byId['running']!.statusCode, 204);
+      expect(
+        byId['other']!.errorMessage,
+        'Not part of the running configuration',
+      );
+      final direct = await singBox.pingOutbound(
+        'my-ss',
+        method: SingBoxPingMethod.proxyGet,
+      );
+      expect(direct.method, SingBoxPingMethod.proxyGet);
+      expect(direct.address, '203.0.113.10');
+      expect(direct.success, isTrue);
+      // No sing-box URL test and no probe core were needed.
+      expect(platform.calls.where((c) => c.startsWith('urlTest')), isEmpty);
+      expect(platform.calls.where((c) => c == 'startProbe'), isEmpty);
+
+      final tcp = await singBox.pingOutbound(
+        'my-ss',
+        method: SingBoxPingMethod.tcp,
+      );
+      expect(tcp.success, isTrue);
+      expect(platform.calls.last, 'pingServer:tcp:203.0.113.10:8388');
+    });
+
+    test('without probe routes the URL test of sing-box is used', () async {
       platform.lastConfig = jsonEncode({
         'outbounds': [_ssOutbound],
       });
@@ -520,17 +643,18 @@ void main() {
               Map<String, dynamic>.from(_ssOutbound),
               id: 'running',
             ),
-            profile('other', 'vless', 'other.example.com', 443),
           ]).toList();
-      final byId = {for (final r in results) r.serverId!: r};
-      expect(byId['running']!.success, isTrue);
-      expect(byId['running']!.ping, 42);
-      expect(byId['running']!.tag, 'my-ss');
-      expect(byId['running']!.method, SingBoxPingMethod.urlTest);
-      expect(
-        byId['other']!.errorMessage,
-        'Not part of the running configuration',
-      );
+      expect(results.single.success, isTrue);
+      expect(results.single.ping, 42);
+      expect(results.single.tag, 'my-ss');
+      expect(results.single.method, SingBoxPingMethod.proxyHead);
+    });
+
+    test('proxy methods fail while the VPN changes state', () async {
+      platform.emitState(SingBoxConnectionStatus.connecting);
+      await pumpEventQueue();
+      final result = await singBox.ping(profile('s', 'vless', 'a.example', 1));
+      expect(result.errorMessage, 'The VPN is starting or stopping');
     });
 
     test('validates the concurrency', () {
