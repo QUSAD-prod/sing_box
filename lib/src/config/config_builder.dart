@@ -132,11 +132,7 @@ class SingBoxConfigBuilder {
     final custom = _CustomRules(rules, sniff: options.sniff);
     final routeRules = _withRuleSets([
       ..._leadingRouteRules(),
-      ..._probeRules(probeAddress(options.tun.inet4Address), [
-        proxyTag,
-        if (useAuto) autoTag,
-        ...memberTags,
-      ]),
+      ..._probeRules([proxyTag, if (useAuto) autoTag, ...memberTags]),
       ..._routingRules(
         rules,
         custom,
@@ -343,7 +339,7 @@ class SingBoxConfigBuilder {
       ruleSetPaths,
     );
     routeRules.insertAll(insertAt, [
-      ..._probeRules(_tunProbeAddress(tuns), _proxyTags(result)),
+      ..._probeRules(_proxyTags(result)),
       ...inserted,
     ]);
     routeRules.addAll(_ipVersionRules(rules));
@@ -710,13 +706,14 @@ class SingBoxConfigBuilder {
   };
 
   /// Latency probe routes for [tags]: a connection from the app to
-  /// `<address>:<probePortBase + i>` (inside the TUN) goes through outbound
-  /// `tags[i]` to the host of [SingBoxConfigOptions.urlTestUrl], so the app
-  /// can measure any server without a listening port. Empty without an
-  /// [address] or a valid URL.
-  List<Map<String, dynamic>> _probeRules(String? address, List<String> tags) {
+  /// `<SingBoxConfigOptions.probeAddress>:<probePortBase + i>` (inside the
+  /// TUN) goes through outbound `tags[i]` to the host of
+  /// [SingBoxConfigOptions.urlTestUrl], so the app can measure any server
+  /// without a listening port. Empty without a valid probe address or URL.
+  List<Map<String, dynamic>> _probeRules(List<String> tags) {
+    final address = options.probeAddress.trim();
     final url = Uri.tryParse(options.urlTestUrl);
-    if (address == null || url == null || url.host.isEmpty) return const [];
+    if (!_isIpv4(address) || url == null || url.host.isEmpty) return const [];
     return [
       for (final (index, tag) in tags.indexed)
         {
@@ -733,15 +730,13 @@ class SingBoxConfigBuilder {
   static int _portOf(Uri url) =>
       url.hasPort ? url.port : (url.scheme == 'http' ? 80 : 443);
 
-  /// The probe address of the first TUN inbound with an IPv4 subnet.
-  static String? _tunProbeAddress(List<Map<String, dynamic>> tuns) {
-    for (final tun in tuns) {
-      for (final cidr in readStringList(tun['address'])) {
-        final address = probeAddress(cidr);
-        if (address != null) return address;
-      }
+  static bool _isIpv4(String address) {
+    try {
+      Uri.parseIPv4Address(address);
+      return true;
+    } on FormatException {
+      return false;
     }
-    return null;
   }
 
   /// Tags of the proxy outbounds, groups and endpoints of [config].
@@ -757,32 +752,6 @@ class SingBoxConfigBuilder {
                     SingBoxOutbound.isProxyType(item['type'] as String)))
               tag,
   ]);
-
-  /// The address the app connects to for latency probes: the neighbour of
-  /// the TUN address inside its IPv4 subnet (`172.19.0.1/30` →
-  /// `172.19.0.2`), or `null` for an IPv6 or too small subnet.
-  static String? probeAddress(String tunCidr) {
-    final parts = tunCidr.trim().split('/');
-    final octets = parts.first.split('.').map(int.tryParse).toList();
-    final prefix = parts.length == 2 ? int.tryParse(parts[1]) : 32;
-    if (octets.length != 4 ||
-        octets.any((o) => o == null || o < 0 || o > 255) ||
-        prefix == null ||
-        prefix < 8 ||
-        prefix > 30) {
-      return null;
-    }
-    final ip = octets.fold<int>(0, (value, o) => (value << 8) | o!);
-    final mask = (0xffffffff << (32 - prefix)) & 0xffffffff;
-    final network = ip & mask;
-    final broadcast = network | (~mask & 0xffffffff);
-    var peer = ip + 1;
-    if (peer >= broadcast) peer = ip - 1;
-    if (peer <= network) return null;
-    return [
-      for (var shift = 24; shift >= 0; shift -= 8) (peer >> shift) & 0xff,
-    ].join('.');
-  }
 
   /// The latency probe routes of a running [config], by outbound tag: where
   /// the app connects to measure that outbound and which host:port the

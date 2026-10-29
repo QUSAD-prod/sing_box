@@ -1144,23 +1144,6 @@ void main() {
   });
 
   group('latency probes', () {
-    test('probeAddress is the TUN neighbour', () {
-      expect(SingBoxConfigBuilder.probeAddress('172.19.0.1/30'), '172.19.0.2');
-      expect(SingBoxConfigBuilder.probeAddress('10.0.0.2/30'), '10.0.0.1');
-      expect(SingBoxConfigBuilder.probeAddress('10.10.0.1/24'), '10.10.0.2');
-      expect(
-        SingBoxConfigBuilder.probeAddress('10.10.0.254/24'),
-        '10.10.0.253',
-      );
-      expect(SingBoxConfigBuilder.probeAddress('10.0.0.1/32'), isNull);
-      expect(SingBoxConfigBuilder.probeAddress('10.0.0.1/31'), isNull);
-      expect(
-        SingBoxConfigBuilder.probeAddress('fdfe:dcba:9876::1/126'),
-        isNull,
-      );
-      expect(SingBoxConfigBuilder.probeAddress('nonsense'), isNull);
-    });
-
     test('build routes every server, group and the selector', () async {
       final config = builder.build([vless, trojan, wireguard]);
       final probes = allRouteRules(config).where(isProbeRule).toList();
@@ -1169,7 +1152,7 @@ void main() {
       ];
       expect(probes.map((r) => r['outbound']), ['proxy', 'auto', ...tags]);
       expect(probes.first, {
-        'ip_cidr': ['172.19.0.2/32'],
+        'ip_cidr': ['198.51.100.1/32'],
         'port': 20000,
         'action': 'route',
         'outbound': 'proxy',
@@ -1182,7 +1165,7 @@ void main() {
       final targets = SingBoxConfigBuilder.probeTargets(config);
       expect(targets.keys, ['proxy', 'auto', ...tags]);
       expect(targets['auto'], (
-        address: '172.19.0.2',
+        address: '198.51.100.1',
         port: 20001,
         host: 'www.gstatic.com',
         hostPort: 443,
@@ -1190,25 +1173,25 @@ void main() {
       await expectSingBoxAccepts(config);
     });
 
-    test('the probe follows urlTestUrl and the TUN address', () {
+    test('the probe follows urlTestUrl and probeAddress', () {
       final config = const SingBoxConfigBuilder(
         SingBoxConfigOptions(
           urlTestUrl: 'http://cp.cloudflare.com:8080/x',
-          tun: SingBoxTunOptions(inet4Address: '10.9.0.1/24'),
+          probeAddress: '192.0.2.7',
         ),
       ).build([vless]);
       expect(SingBoxConfigBuilder.probeTargets(config)['proxy'], (
-        address: '10.9.0.2',
+        address: '192.0.2.7',
         port: 20000,
         host: 'cp.cloudflare.com',
         hostPort: 8080,
       ));
-      final noRoom = const SingBoxConfigBuilder(
-        SingBoxConfigOptions(
-          tun: SingBoxTunOptions(inet4Address: '10.9.0.1/32'),
-        ),
-      ).build([vless]);
-      expect(SingBoxConfigBuilder.probeTargets(noRoom), isEmpty);
+      for (final disabled in ['', 'fdfe::1', 'nonsense']) {
+        final config = SingBoxConfigBuilder(
+          SingBoxConfigOptions(probeAddress: disabled),
+        ).build([vless]);
+        expect(SingBoxConfigBuilder.probeTargets(config), isEmpty);
+      }
     });
 
     test('probeTargets ignores ordinary rules', () {
@@ -1508,7 +1491,7 @@ void main() {
         {'protocol': 'dns', 'action': 'hijack-dns'},
         // The user's TUN is 172.18.0.1/30.
         {
-          'ip_cidr': ['172.18.0.2/32'],
+          'ip_cidr': ['198.51.100.1/32'],
           'port': 20000,
           'action': 'route',
           'outbound': 'my-proxy',

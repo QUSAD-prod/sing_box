@@ -312,6 +312,7 @@ void main() {
         ruleSetUpdateInterval: Duration(hours: 3),
         geoipRuleSetUrl: 'https://m.example/ip/{tag}.srs',
         geositeRuleSetUrl: 'https://m.example/site/{tag}.srs',
+        probeAddress: '',
       );
       expect(SingBoxConfigOptions.fromMap(options.toMap()), options);
       expect(

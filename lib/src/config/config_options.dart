@@ -433,7 +433,12 @@ class SingBoxConfigOptions {
     this.ruleSetUpdateInterval = const Duration(days: 1),
     this.geoipRuleSetUrl = defaultGeoipRuleSetUrl,
     this.geositeRuleSetUrl = defaultGeositeRuleSetUrl,
+    this.probeAddress = defaultProbeAddress,
   });
+
+  /// Default [probeAddress]: `198.51.100.1` from TEST-NET-2 (RFC 5737), which
+  /// is never used on the Internet.
+  static const defaultProbeAddress = '198.51.100.1';
 
   /// Default download URL template of geoip rule-sets; `{tag}` is replaced
   /// by the rule-set tag, e.g. `geoip-ru`.
@@ -502,6 +507,15 @@ class SingBoxConfigOptions {
   /// Download URL template of geosite rule-sets (`{tag}` placeholder).
   final String geositeRuleSetUrl;
 
+  /// IPv4 address the app connects to for latency probes inside the tunnel:
+  /// generated and applied configurations route `<probeAddress>:<20000 + i>`
+  /// through outbound `i` to the host of [urlTestUrl] (see
+  /// `SingBoxConfigBuilder.probeTargets`). It must be routed into the TUN and
+  /// unused otherwise; it must not be the TUN's own subnet, whose neighbour
+  /// address is sing-box's DNS server. An empty string disables the probe
+  /// routes (latency tests then fall back to sing-box's URL test).
+  final String probeAddress;
+
   /// Converts the options to a JSON-safe map. Durations are stored in
   /// seconds.
   Map<String, dynamic> toMap() => {
@@ -520,6 +534,7 @@ class SingBoxConfigOptions {
     'ruleSetUpdateInterval': ruleSetUpdateInterval.inSeconds,
     'geoipRuleSetUrl': geoipRuleSetUrl,
     'geositeRuleSetUrl': geositeRuleSetUrl,
+    'probeAddress': probeAddress,
   };
 
   /// Creates options from a map produced by [toMap].
@@ -558,6 +573,10 @@ class SingBoxConfigOptions {
       geoipRuleSetUrl: readString(map['geoipRuleSetUrl']) ?? d.geoipRuleSetUrl,
       geositeRuleSetUrl:
           readString(map['geositeRuleSetUrl']) ?? d.geositeRuleSetUrl,
+      probeAddress:
+          map['probeAddress'] is String
+              ? map['probeAddress'] as String
+              : d.probeAddress,
     );
   }
 
@@ -578,6 +597,7 @@ class SingBoxConfigOptions {
     Duration? ruleSetUpdateInterval,
     String? geoipRuleSetUrl,
     String? geositeRuleSetUrl,
+    String? probeAddress,
   }) {
     return SingBoxConfigOptions(
       logLevel: logLevel ?? this.logLevel,
@@ -598,6 +618,7 @@ class SingBoxConfigOptions {
           ruleSetUpdateInterval ?? this.ruleSetUpdateInterval,
       geoipRuleSetUrl: geoipRuleSetUrl ?? this.geoipRuleSetUrl,
       geositeRuleSetUrl: geositeRuleSetUrl ?? this.geositeRuleSetUrl,
+      probeAddress: probeAddress ?? this.probeAddress,
     );
   }
 
@@ -618,7 +639,8 @@ class SingBoxConfigOptions {
       other.ruleSetDownloadDetour == ruleSetDownloadDetour &&
       other.ruleSetUpdateInterval == ruleSetUpdateInterval &&
       other.geoipRuleSetUrl == geoipRuleSetUrl &&
-      other.geositeRuleSetUrl == geositeRuleSetUrl;
+      other.geositeRuleSetUrl == geositeRuleSetUrl &&
+      other.probeAddress == probeAddress;
 
   @override
   int get hashCode => Object.hash(
@@ -637,6 +659,7 @@ class SingBoxConfigOptions {
     ruleSetUpdateInterval,
     geoipRuleSetUrl,
     geositeRuleSetUrl,
+    probeAddress,
   );
 
   @override

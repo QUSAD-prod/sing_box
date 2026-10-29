@@ -578,8 +578,8 @@ void main() {
     test('connected: measured through the probe routes', () async {
       singBox.configOptions = const SingBoxConfigOptions(
         urlTestUrl: 'http://probe.test/generate_204',
-        // Probe address 127.0.0.1, served by the fake tunnel.
-        tun: SingBoxTunOptions(inet4Address: '127.0.0.0/30'),
+        // Served on loopback by the fake tunnel.
+        probeAddress: '127.0.0.1',
       );
       platform.serveProbeRoutes = true;
       final ss = SingBoxServerConfig.fromOutbound(
