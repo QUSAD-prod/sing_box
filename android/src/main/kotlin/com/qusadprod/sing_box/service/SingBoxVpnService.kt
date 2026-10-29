@@ -12,7 +12,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.net.IpPrefix
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.ProxyInfo
 import android.net.Uri
 import android.net.VpnService
@@ -44,6 +47,7 @@ import io.nekohasekai.libbox.RoutePrefix
 import io.nekohasekai.libbox.RoutePrefixIterator
 import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +57,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetAddress
 
 /**
@@ -128,6 +133,10 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
 
     @Volatile
     internal var systemProxyAvailable = false
+
+    /** The last [openTun] routes this app's own traffic into the tunnel. */
+    @Volatile
+    private var appInTunnel = false
 
     /** Always-on VPN with "Block connections without VPN": stopping would cut the device off. */
     internal val isLockdown: Boolean
@@ -258,6 +267,8 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             }
             if (!isStarting()) return
             server.startOrReloadService(config, OverrideOptions())
+            if (!isStarting()) return
+            if (appInTunnel) awaitRoutedThroughVpn()
             if (!isStarting()) return
             if (server.needWIFIState()) {
                 Log.w(TAG, "configuration uses WIFI rules: reading the SSID needs location permission")
@@ -427,6 +438,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             }
             val includePackages = options.includePackage.toList()
             val excludePackages = options.excludePackage.toList()
+            appInTunnel = if (includePackages.isNotEmpty()) packageName in includePackages else packageName !in excludePackages
             var allowed = 0
             for (packageName in includePackages) {
                 // Recent Android versions accept unknown packages silently, so check first.
@@ -463,6 +475,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             }
         }
 
+        if (!options.autoRoute) appInTunnel = false
         systemProxyAvailable = false
         if (options.isHTTPProxyEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setHttpProxy(
@@ -481,6 +494,36 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         // establish() replaced the previous interface (reload); release its descriptor.
         runCatching { previous?.close() }
         return pfd.fd
+    }
+
+    /**
+     * Waits until Android routes this app through the VPN. `establish()` returns before the
+     * VPN network is connected and the per-app routing is in place, so a connection the app
+     * opens right after `connected` would still leave through the underlying network (seen
+     * as "connection reset" or a hang). Gives up after [timeoutMs].
+     */
+    private suspend fun awaitRoutedThroughVpn(timeoutMs: Long = 3000) {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val routed = CompletableDeferred<Unit>()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) routed.complete(Unit)
+            }
+        }
+        // The default network of this app's UID; reported right after registering.
+        try {
+            manager.registerDefaultNetworkCallback(callback)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "default network callback", e)
+            return
+        }
+        try {
+            if (withTimeoutOrNull(timeoutMs) { routed.await() } == null) {
+                Log.w(TAG, "the VPN did not become the app's default network within $timeoutMs ms")
+            }
+        } finally {
+            runCatching { manager.unregisterNetworkCallback(callback) }
+        }
     }
 
     @Suppress("DEPRECATION")
