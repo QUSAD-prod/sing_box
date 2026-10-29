@@ -313,8 +313,25 @@ void main() {
         geoipRuleSetUrl: 'https://m.example/ip/{tag}.srs',
         geositeRuleSetUrl: 'https://m.example/site/{tag}.srs',
         probeAddress: '',
+        localProxy: SingBoxLocalProxy(
+          listen: '0.0.0.0',
+          port: 7890,
+          systemProxy: true,
+          bypassDomains: ['example.com'],
+          matchDomains: ['example.org'],
+        ),
       );
       expect(SingBoxConfigOptions.fromMap(options.toMap()), options);
+      expect(
+        SingBoxConfigOptions.fromMap(
+          jsonDecode(jsonEncode(options.toMap())) as Map,
+        ),
+        options,
+      );
+      expect(
+        SingBoxLocalProxy.fromMap(const {'port': 70000, 'listen': ''}),
+        const SingBoxLocalProxy(),
+      );
       expect(
         SingBoxConfigOptions.fromMap(options.toMap()).hashCode,
         options.hashCode,

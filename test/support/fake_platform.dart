@@ -315,6 +315,27 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   @override
   Future<void> closeAllConnections() async => calls.add('closeAllConnections');
 
+  /// Returned by [getSystemProxyStatus].
+  SingBoxSystemProxyStatus systemProxyStatus =
+      SingBoxSystemProxyStatus.unavailable;
+
+  @override
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() async {
+    calls.add('getSystemProxyStatus');
+    return systemProxyStatus;
+  }
+
+  @override
+  Future<void> setSystemProxyEnabled(bool enabled) async {
+    calls.add('setSystemProxyEnabled:$enabled');
+    if (systemProxyStatus.available) {
+      systemProxyStatus = SingBoxSystemProxyStatus(
+        available: true,
+        enabled: enabled,
+      );
+    }
+  }
+
   @override
   Future<void> clearLogs() async => calls.add('clearLogs');
 

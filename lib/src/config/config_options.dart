@@ -400,6 +400,125 @@ class SingBoxDnsOptions {
   String toString() => 'SingBoxDnsOptions(${toMap()})';
 }
 
+/// A local proxy server (sing-box `mixed` inbound: HTTP and SOCKS5 on one
+/// port) that the generated configuration listens on, optionally announced
+/// as the system HTTP proxy of the VPN.
+///
+/// ```dart
+/// const options = SingBoxConfigOptions(
+///   localProxy: SingBoxLocalProxy(port: 2080, systemProxy: true),
+/// );
+/// ```
+///
+/// The proxy has no authentication: every app on the device can use it while
+/// the core runs (like in the official sing-box clients).
+class SingBoxLocalProxy {
+  /// Creates local proxy options.
+  const SingBoxLocalProxy({
+    this.listen = '127.0.0.1',
+    this.port = defaultPort,
+    this.systemProxy = false,
+    this.bypassDomains = const [],
+    this.matchDomains = const [],
+  });
+
+  /// Default [port].
+  static const defaultPort = 2080;
+
+  /// Tag of the generated inbound.
+  static const tag = 'mixed-in';
+
+  /// Address the proxy listens on (`127.0.0.1`: only this device).
+  final String listen;
+
+  /// TCP port of the proxy.
+  final int port;
+
+  /// Whether the VPN announces the proxy as the system HTTP proxy (TUN
+  /// `platform.http_proxy`): Android 10+ `VpnService.Builder.setHttpProxy`,
+  /// iOS `NEProxySettings`. Apps that honour the system proxy (browsers,
+  /// most HTTP clients) then send their HTTP(S) requests to it instead of
+  /// through the TUN, which is faster; other traffic still uses the TUN.
+  /// Toggle it at runtime with `SingBox.setSystemProxyEnabled()`.
+  final bool systemProxy;
+
+  /// Domains that skip the system proxy ([systemProxy]).
+  final List<String> bypassDomains;
+
+  /// iOS: only these domains use the system proxy ([systemProxy]); empty =
+  /// all. Android ignores it.
+  final List<String> matchDomains;
+
+  /// Converts the options to a JSON-safe map.
+  Map<String, dynamic> toMap() => {
+    'listen': listen,
+    'port': port,
+    'systemProxy': systemProxy,
+    'bypassDomains': bypassDomains,
+    'matchDomains': matchDomains,
+  };
+
+  /// Creates options from a map produced by [toMap]. Missing or malformed
+  /// values fall back to the defaults.
+  factory SingBoxLocalProxy.fromMap(Map<dynamic, dynamic> map) {
+    const d = SingBoxLocalProxy();
+    final port = readInt(map['port']);
+    return SingBoxLocalProxy(
+      listen: readString(map['listen']) ?? d.listen,
+      port: port != null && port > 0 && port < 65536 ? port : d.port,
+      systemProxy: readBool(map['systemProxy']) ?? d.systemProxy,
+      bypassDomains: readStringList(map['bypassDomains']),
+      matchDomains: readStringList(map['matchDomains']),
+    );
+  }
+
+  /// Returns a copy with the given fields replaced.
+  SingBoxLocalProxy copyWith({
+    String? listen,
+    int? port,
+    bool? systemProxy,
+    List<String>? bypassDomains,
+    List<String>? matchDomains,
+  }) {
+    return SingBoxLocalProxy(
+      listen: listen ?? this.listen,
+      port: port ?? this.port,
+      systemProxy: systemProxy ?? this.systemProxy,
+      bypassDomains: bypassDomains ?? this.bypassDomains,
+      matchDomains: matchDomains ?? this.matchDomains,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is SingBoxLocalProxy &&
+      other.listen == listen &&
+      other.port == port &&
+      other.systemProxy == systemProxy &&
+      _sameList(other.bypassDomains, bypassDomains) &&
+      _sameList(other.matchDomains, matchDomains);
+
+  @override
+  int get hashCode => Object.hash(
+    listen,
+    port,
+    systemProxy,
+    Object.hashAll(bypassDomains),
+    Object.hashAll(matchDomains),
+  );
+
+  @override
+  String toString() => 'SingBoxLocalProxy(${toMap()})';
+
+  static bool _sameList(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
 /// Global options of `SingBoxConfigBuilder`: logging, TUN, DNS, URL test,
 /// Clash modes, cache file and rule-set downloads.
 ///
@@ -434,6 +553,7 @@ class SingBoxConfigOptions {
     this.geoipRuleSetUrl = defaultGeoipRuleSetUrl,
     this.geositeRuleSetUrl = defaultGeositeRuleSetUrl,
     this.probeAddress = defaultProbeAddress,
+    this.localProxy,
   });
 
   /// Default [probeAddress]: `198.51.100.1` from TEST-NET-2 (RFC 5737), which
@@ -516,6 +636,11 @@ class SingBoxConfigOptions {
   /// routes (latency tests then fall back to sing-box's URL test).
   final String probeAddress;
 
+  /// A local HTTP/SOCKS5 proxy (`mixed` inbound) next to the TUN, optionally
+  /// set as the system HTTP proxy of the VPN; `null` (default) = none.
+  /// `SingBoxConfigBuilder.apply()` adds it to complete configurations too.
+  final SingBoxLocalProxy? localProxy;
+
   /// Converts the options to a JSON-safe map. Durations are stored in
   /// seconds.
   Map<String, dynamic> toMap() => {
@@ -535,6 +660,7 @@ class SingBoxConfigOptions {
     'geoipRuleSetUrl': geoipRuleSetUrl,
     'geositeRuleSetUrl': geositeRuleSetUrl,
     'probeAddress': probeAddress,
+    if (localProxy != null) 'localProxy': localProxy!.toMap(),
   };
 
   /// Creates options from a map produced by [toMap].
@@ -545,6 +671,7 @@ class SingBoxConfigOptions {
     const d = SingBoxConfigOptions();
     final tun = map['tun'];
     final dns = map['dns'];
+    final localProxy = map['localProxy'];
     final interval = readInt(map['urlTestInterval']);
     final updateInterval = readInt(map['ruleSetUpdateInterval']);
     return SingBoxConfigOptions(
@@ -577,6 +704,8 @@ class SingBoxConfigOptions {
           map['probeAddress'] is String
               ? map['probeAddress'] as String
               : d.probeAddress,
+      localProxy:
+          localProxy is Map ? SingBoxLocalProxy.fromMap(localProxy) : null,
     );
   }
 
@@ -598,6 +727,7 @@ class SingBoxConfigOptions {
     String? geoipRuleSetUrl,
     String? geositeRuleSetUrl,
     String? probeAddress,
+    SingBoxLocalProxy? localProxy,
   }) {
     return SingBoxConfigOptions(
       logLevel: logLevel ?? this.logLevel,
@@ -619,6 +749,7 @@ class SingBoxConfigOptions {
       geoipRuleSetUrl: geoipRuleSetUrl ?? this.geoipRuleSetUrl,
       geositeRuleSetUrl: geositeRuleSetUrl ?? this.geositeRuleSetUrl,
       probeAddress: probeAddress ?? this.probeAddress,
+      localProxy: localProxy ?? this.localProxy,
     );
   }
 
@@ -640,7 +771,8 @@ class SingBoxConfigOptions {
       other.ruleSetUpdateInterval == ruleSetUpdateInterval &&
       other.geoipRuleSetUrl == geoipRuleSetUrl &&
       other.geositeRuleSetUrl == geositeRuleSetUrl &&
-      other.probeAddress == probeAddress;
+      other.probeAddress == probeAddress &&
+      other.localProxy == localProxy;
 
   @override
   int get hashCode => Object.hash(
@@ -660,6 +792,7 @@ class SingBoxConfigOptions {
     geoipRuleSetUrl,
     geositeRuleSetUrl,
     probeAddress,
+    localProxy,
   );
 
   @override

@@ -230,6 +230,15 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         case "closeAllConnections":
             try await command { try $0.closeConnections() }
             return nil
+        case "getSystemProxyStatus":
+            return try await commandResult { client -> Any? in
+                let status = try client.getSystemProxyStatus()
+                return ["available": status.available, "enabled": status.enabled]
+            }
+        case "setSystemProxyEnabled":
+            let enabled = args.bool("enabled") ?? false
+            try await command { try $0.setSystemProxyEnabled(enabled) }
+            return nil
         case "clearLogs":
             try await command { try $0.clearLogs() }
             return nil
@@ -265,6 +274,7 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         "requestNotificationPermission", "openVpnSettings",
         "start", "stop", "reload", "getStatus", "getStartedAt", "getLastConfig", "setServiceOptions",
         "selectOutbound", "urlTest", "setClashMode", "closeConnection", "closeAllConnections",
+        "getSystemProxyStatus", "setSystemProxyEnabled",
         "clearLogs", "setGroupExpand", "startProbe", "stopProbe", "pingServer",
         "storageRead", "storageWrite",
     ]
@@ -357,16 +367,24 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
 
     @MainActor
     private func command(_ work: @escaping (LibboxCommandClient) throws -> Void) async throws {
+        _ = try await commandResult { client -> Any? in
+            try work(client)
+            return nil
+        }
+    }
+
+    @MainActor
+    private func commandResult(_ work: @escaping (LibboxCommandClient) throws -> Any?) async throws -> Any? {
         guard controller?.isActive == true else {
             throw PluginError.serviceNotRunning()
         }
         do {
-            try await runInBackground {
+            return try await runInBackground {
                 guard let client = LibboxNewStandaloneCommandClient() else {
                     throw SingBoxError("cannot create command client")
                 }
                 defer { try? client.disconnect() }
-                try work(client)
+                return try work(client)
             }
         } catch {
             throw PluginError.commandFailed(error.localizedDescription)

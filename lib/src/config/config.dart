@@ -17,6 +17,7 @@ export 'config_options.dart'
         SingBoxConfigOptions,
         SingBoxDnsOptions,
         SingBoxDnsStrategy,
+        SingBoxLocalProxy,
         SingBoxTunOptions,
         SingBoxTunStack;
 export 'dns_server.dart' show SingBoxDnsServer;

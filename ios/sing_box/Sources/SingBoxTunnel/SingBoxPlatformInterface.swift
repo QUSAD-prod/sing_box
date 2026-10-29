@@ -53,6 +53,8 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
         let excludeDefaultRoute = (serviceOptions["excludeDefaultRoute"] as? NSNumber)?.boolValue ?? false
         let noDefaultRoute = (serviceOptions["noDefaultRoute"] as? NSNumber)?.boolValue ?? false
         let excludeAPNsRoute = (serviceOptions["excludeAPNsRoute"] as? NSNumber)?.boolValue ?? false
+        // The system proxy switch (`setSystemProxyEnabled`), on by default.
+        let systemProxyEnabled = (tunnel.paths?.defaults.object(forKey: SingBoxKeys.systemProxyEnabled) as? NSNumber)?.boolValue ?? true
 
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         if options.getAutoRoute() {
@@ -173,8 +175,8 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
             let proxyServer = NEProxyServer(address: options.getHTTPProxyServer(), port: Int(options.getHTTPProxyServerPort()))
             proxySettings.httpServer = proxyServer
             proxySettings.httpsServer = proxyServer
-            proxySettings.httpEnabled = true
-            proxySettings.httpsEnabled = true
+            proxySettings.httpEnabled = systemProxyEnabled
+            proxySettings.httpsEnabled = systemProxyEnabled
             var bypassDomains = options.getHTTPProxyBypassDomain()?.toArray() ?? []
             if excludeAPNsRoute, !bypassDomains.contains("push.apple.com") {
                 bypassDomains.append("push.apple.com")
@@ -383,6 +385,8 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
     }
 
     func setSystemProxyEnabled(_ isEnabled: Bool) throws {
+        // Remembered for later sessions.
+        tunnel.paths?.defaults.set(isEnabled, forKey: SingBoxKeys.systemProxyEnabled)
         guard let networkSettings,
               let proxySettings = networkSettings.proxySettings,
               proxySettings.httpServer != nil,

@@ -1462,9 +1462,99 @@ void main() {
       expect(sets.map((s) => s['update_interval']).toSet(), {'12h'});
       await expectSingBoxAccepts(config);
     });
+
+    test('a local proxy listens next to the TUN', () async {
+      final config = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(localProxy: SingBoxLocalProxy()),
+      ).build([vless]);
+      expect((config['inbounds'] as List).last, {
+        'type': 'mixed',
+        'tag': 'mixed-in',
+        'listen': '127.0.0.1',
+        'listen_port': 2080,
+      });
+      expect(tun(config).containsKey('platform'), isFalse);
+      await expectSingBoxAccepts(config);
+    });
+
+    test('the local proxy can be the system proxy of the VPN', () async {
+      final config = const SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          localProxy: SingBoxLocalProxy(
+            listen: '0.0.0.0',
+            port: 7890,
+            systemProxy: true,
+            bypassDomains: ['example.com', 'localhost'],
+            matchDomains: ['example.org'],
+          ),
+        ),
+      ).build([vless]);
+      expect(tun(config)['platform'], {
+        'http_proxy': {
+          'enabled': true,
+          // The wildcard listen address is reached through loopback.
+          'server': '127.0.0.1',
+          'server_port': 7890,
+          'bypass_domain': ['example.com', 'localhost'],
+          'match_domain': ['example.org'],
+        },
+      });
+      await expectSingBoxAccepts(config);
+    });
   });
 
   group('apply', () {
+    test('adds the local proxy and the system proxy', () async {
+      const proxyBuilder = SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          localProxy: SingBoxLocalProxy(port: 7890, systemProxy: true),
+        ),
+      );
+      final result = proxyBuilder.apply(userConfig());
+      final inbounds =
+          (result['inbounds'] as List).cast<Map<dynamic, dynamic>>();
+      expect(inbounds.where((i) => i['type'] == 'mixed').single, {
+        'type': 'mixed',
+        'tag': 'mixed-in',
+        'listen': '127.0.0.1',
+        'listen_port': 7890,
+      });
+      expect((tun(result)['platform'] as Map)['http_proxy'], {
+        'enabled': true,
+        'server': '127.0.0.1',
+        'server_port': 7890,
+      });
+      await expectSingBoxAccepts(result);
+
+      // A config that already listens there and sets its own system proxy
+      // keeps both.
+      final own = userConfig();
+      (own['inbounds'] as List).add({
+        'type': 'http',
+        'tag': 'http-in',
+        'listen': '127.0.0.1',
+        'listen_port': 7890,
+      });
+      final ownTun = tun(own);
+      ownTun['platform'] = {
+        'http_proxy': {
+          'enabled': true,
+          'server': '127.0.0.1',
+          'server_port': 7890,
+          'bypass_domain': ['lan'],
+        },
+      };
+      final kept = proxyBuilder.apply(own);
+      expect(
+        (kept['inbounds'] as List).cast<Map<dynamic, dynamic>>().where(
+          (i) => i['listen_port'] == 7890,
+        ),
+        hasLength(1),
+      );
+      expect(tun(kept)['platform'], ownTun['platform']);
+      await expectSingBoxAccepts(kept);
+    });
+
     test('does not modify the input and keeps unknown fields', () async {
       final input = userConfig();
       final before = jsonEncode(input);

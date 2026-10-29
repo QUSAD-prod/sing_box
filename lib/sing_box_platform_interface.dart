@@ -19,6 +19,7 @@ import 'src/models/runtime_info.dart';
 import 'src/models/settings.dart';
 import 'src/models/sing_box_notification.dart';
 import 'src/models/stun_result.dart';
+import 'src/models/system_proxy_status.dart';
 import 'src/options.dart';
 
 export 'src/models/runtime_info.dart';
@@ -254,6 +255,20 @@ abstract class SingBoxPlatform extends PlatformInterface {
   /// Closes all connections.
   Future<void> closeAllConnections() {
     throw UnimplementedError('closeAllConnections() has not been implemented.');
+  }
+
+  /// State of the system HTTP proxy of the running tunnel.
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() {
+    throw UnimplementedError(
+      'getSystemProxyStatus() has not been implemented.',
+    );
+  }
+
+  /// Turns the system HTTP proxy of the running tunnel on or off.
+  Future<void> setSystemProxyEnabled(bool enabled) {
+    throw UnimplementedError(
+      'setSystemProxyEnabled() has not been implemented.',
+    );
   }
 
   /// Clears the log buffer of the core.

@@ -79,6 +79,11 @@ internal class ServiceSettings(context: Context) {
             prefs.edit().putBoolean(KEY_WAS_RUNNING, value).commit()
         }
 
+    /** The system HTTP proxy of the VPN (`setSystemProxyEnabled`), on by default like SFA. */
+    var systemProxyEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SYSTEM_PROXY_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_SYSTEM_PROXY_ENABLED, value).apply()
+
     /** Memory monitor mode of `start` (`platformDefault`, `off`, `reportOnly`, `enabled`). */
     var oomKiller: String
         get() = prefs.getString(KEY_OOM_KILLER, null) ?: OOM_KILLER_PLATFORM_DEFAULT
@@ -129,6 +134,7 @@ internal class ServiceSettings(context: Context) {
         private const val KEY_QS_TILE = "quickSettingsTile"
         private const val KEY_TILE_LABEL = "tileLabel"
         private const val KEY_WAS_RUNNING = "wasRunning"
+        private const val KEY_SYSTEM_PROXY_ENABLED = "systemProxyEnabled"
         private const val KEY_OOM_KILLER = "oomKiller"
         private const val KEY_MEMORY_LIMIT = "memoryLimit"
         private const val KEY_N_CHANNEL_ID = "notification.channelId"

@@ -221,6 +221,13 @@ class SingBoxPlugin :
             "setClashMode" -> command(result) { it.setClashMode(call.requireString("mode")) }
             "closeConnection" -> command(result) { it.closeConnection(call.requireString("id")) }
             "closeAllConnections" -> command(result) { it.closeConnections() }
+            "getSystemProxyStatus" -> commandResult(result) {
+                val status = it.systemProxyStatus
+                mapOf("available" to status.available, "enabled" to status.enabled)
+            }
+            "setSystemProxyEnabled" -> command(result) {
+                it.setSystemProxyEnabled(call.argument<Boolean>("enabled") ?: false)
+            }
             "clearLogs" -> command(result) { it.clearLogs() }
             "setGroupExpand" -> command(result) {
                 it.setGroupExpand(call.requireString("groupTag"), call.argument<Boolean>("expand") ?: false)
@@ -495,7 +502,13 @@ class SingBoxPlugin :
     // Command client operations
     // ---------------------------------------------------------------------------------------
 
-    private fun command(result: MethodChannel.Result, block: (CommandClient) -> Unit) = respond(result) {
+    private fun command(result: MethodChannel.Result, block: (CommandClient) -> Unit) =
+        commandResult(result) {
+            block(it)
+            null
+        }
+
+    private fun commandResult(result: MethodChannel.Result, block: (CommandClient) -> Any?) = respond(result) {
         if (!ServiceState.isRunning) throw SingBoxError.notRunning()
         io {
             try {
@@ -505,7 +518,6 @@ class SingBoxPlugin :
                 throw SingBoxError(SingBoxError.COMMAND_FAILED, e.libboxMessage)
             }
         }
-        null
     }
 
     private companion object {

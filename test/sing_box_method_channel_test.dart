@@ -48,6 +48,8 @@ void main() {
           return 'value';
         case 'hasVpnPermission':
           return true;
+        case 'getSystemProxyStatus':
+          return {'available': true, 'enabled': false};
       }
       return null;
     });
@@ -92,6 +94,13 @@ void main() {
     );
     expect((log.last.arguments as Map)['startOnBoot'], isTrue);
     expect((log.last.arguments as Map)['excludeAPNs'], isTrue);
+    expect(
+      await platform.getSystemProxyStatus(),
+      const SingBoxSystemProxyStatus(available: true, enabled: false),
+    );
+    await platform.setSystemProxyEnabled(true);
+    expect(log.last.method, 'setSystemProxyEnabled');
+    expect(log.last.arguments, {'enabled': true});
   });
 
   test('platform errors become typed exceptions', () async {

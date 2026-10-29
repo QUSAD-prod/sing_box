@@ -142,8 +142,13 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
     /** A [doStart] of this instance is queued or running (main thread only). */
     private var startInProgress = false
 
+    /** The last [openTun] had a TUN `platform.http_proxy` (Android 10+). */
     @Volatile
     internal var systemProxyAvailable = false
+
+    /** The last [openTun] applied that proxy (`ServiceSettings.systemProxyEnabled`). */
+    @Volatile
+    private var systemProxyEnabled = false
 
     /** The last [openTun] routes this app's own traffic into the tunnel. */
     @Volatile
@@ -407,11 +412,16 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
 
     override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus().apply {
         available = systemProxyAvailable
-        enabled = systemProxyAvailable
+        enabled = systemProxyEnabled
     }
 
     override fun setSystemProxyEnabled(isEnabled: Boolean) {
-        // The HTTP proxy of the tun inbound is applied whenever the config enables it.
+        // Remembered for later sessions; VpnService.Builder.setHttpProxy only takes effect
+        // with a new interface, so reload like SFA.
+        settings.systemProxyEnabled = isEnabled
+        if (systemProxyAvailable && systemProxyEnabled != isEnabled) {
+            runBlocking(Dispatchers.IO) { reload() }
+        }
     }
 
     override fun triggerNativeCrash() {
@@ -500,8 +510,9 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         }
 
         if (!options.autoRoute) appInTunnel = false
-        systemProxyAvailable = false
-        if (options.isHTTPProxyEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val proxyAvailable = options.isHTTPProxyEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        val proxyEnabled = proxyAvailable && settings.systemProxyEnabled
+        if (proxyEnabled) {
             builder.setHttpProxy(
                 ProxyInfo.buildDirectProxy(
                     options.httpProxyServer,
@@ -509,10 +520,11 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
                     options.httpProxyBypassDomain.toList(),
                 ),
             )
-            systemProxyAvailable = true
         }
 
         val pfd = builder.establish() ?: error("android: the application is not prepared or is revoked")
+        systemProxyAvailable = proxyAvailable
+        systemProxyEnabled = proxyEnabled
         val previous = tunFd
         tunFd = pfd
         // establish() replaced the previous interface (reload); release its descriptor.

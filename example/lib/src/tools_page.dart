@@ -21,6 +21,7 @@ class _ToolsPageState extends State<ToolsPage> {
   SingBoxSettings _settings = const SingBoxSettings();
   bool? _vpnPermission;
   bool? _notificationPermission;
+  SingBoxSystemProxyStatus _systemProxy = SingBoxSystemProxyStatus.unavailable;
   SingBoxStunResult? _stun;
   bool _stunRunning = false;
 
@@ -34,8 +35,10 @@ class _ToolsPageState extends State<ToolsPage> {
     final settings = await _singBox.getSettings();
     final vpn = await _singBox.hasVpnPermission();
     final notifications = await _singBox.hasNotificationPermission();
+    final systemProxy = await _singBox.getSystemProxyStatus();
     if (!mounted) return;
     setState(() {
+      _systemProxy = systemProxy;
       _settings = settings;
       _vpnPermission = vpn;
       _notificationPermission = notifications;
@@ -199,6 +202,46 @@ class _ToolsPageState extends State<ToolsPage> {
               },
             ),
           ),
+          const SectionHeader('Local proxy'),
+          SwitchListTile(
+            title: const Text('HTTP/SOCKS5 proxy on 127.0.0.1:2080'),
+            subtitle: const Text('Set as the system proxy; applied on connect'),
+            value: _singBox.configOptions.localProxy != null,
+            onChanged: (v) => setState(() {
+              // Through the map: copyWith cannot reset localProxy to null.
+              final options = _singBox.configOptions.toMap()
+                ..remove('localProxy');
+              _singBox.configOptions = SingBoxConfigOptions.fromMap({
+                ...options,
+                if (v)
+                  'localProxy': const SingBoxLocalProxy(
+                    systemProxy: true,
+                  ).toMap(),
+              });
+            }),
+          ),
+          if (connected)
+            SwitchListTile(
+              title: const Text('System proxy'),
+              subtitle: Text(
+                _systemProxy.available
+                    ? 'Toggles the proxy without changing the config'
+                    : 'Not available in this configuration',
+              ),
+              value: _systemProxy.enabled,
+              onChanged: _systemProxy.available
+                  ? (v) async {
+                      try {
+                        await _singBox.setSystemProxyEnabled(v);
+                      } on SingBoxException catch (e) {
+                        if (context.mounted) {
+                          showMessage(context, e.message, error: true);
+                        }
+                      }
+                      await _reload();
+                    }
+                  : null,
+            ),
           const SectionHeader('Permissions'),
           ListTile(
             leading: const Icon(Icons.vpn_key_outlined),

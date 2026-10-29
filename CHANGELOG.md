@@ -65,6 +65,13 @@
   starts on both platforms (Android was always off, iOS always on).
   `SingBoxSettings.disableMemoryLimit` is deprecated in favour of
   `oomKiller: SingBoxOomKiller.off`.
+- Local proxy and system proxy: `SingBoxConfigOptions.localProxy`
+  (`SingBoxLocalProxy`: a `mixed` HTTP/SOCKS5 inbound, by default on
+  `127.0.0.1:2080`) and `SingBoxLocalProxy.systemProxy`, which sets the TUN
+  `platform.http_proxy` (Android 10+ `setHttpProxy`, iOS `NEProxySettings`);
+  `apply()` adds both to complete configurations. `getSystemProxyStatus()`
+  and `setSystemProxyEnabled()` switch the system proxy of the running
+  tunnel and remember the choice, like the official clients.
 - `dart run sing_box:setup_ios` adds the Packet Tunnel extension without
   Ruby gems. With Swift Package Manager (default since Flutter 3.44) the
   extension links `SingBoxTunnel` through Flutter's generated Swift package,
@@ -76,6 +83,8 @@
   through the VPN, so the app's first connection right after it went around
   the tunnel (reset or hang). The service now waits until the VPN is the
   app's default network (at most 3 s; not when the app is excluded).
+- Android: `getSystemProxyStatus` of the core reported the system proxy as
+  enabled whenever it was available, and switching it did nothing.
 - Android: a configuration with `wifi_ssid` / `wifi_bssid` rules but without
   the location permission now logs a warning in the core log instead of
   silently never matching.

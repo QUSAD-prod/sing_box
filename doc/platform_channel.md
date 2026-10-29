@@ -185,6 +185,8 @@ when libbox returns an error.
 | `setClashMode` | `{mode: String}` | `setClashMode(mode)` |
 | `closeConnection` | `{id: String}` | `closeConnection(id)` |
 | `closeAllConnections` | – | `closeConnections()` |
+| `getSystemProxyStatus` | – | `getSystemProxyStatus()`; returns `{available: bool, enabled: bool}` |
+| `setSystemProxyEnabled` | `{enabled: bool}` | `setSystemProxyEnabled(enabled)`. The handler persists the choice for later sessions (Android: `ServiceSettings.systemProxyEnabled`; iOS: app group defaults `sing_box.system_proxy_enabled`; both default `true`) and applies it: Android reloads the service so `openTun` calls (or skips) `VpnService.Builder.setHttpProxy`; iOS updates `NEProxySettings.httpEnabled/httpsEnabled` with `setTunnelNetworkSettings`. `openTun` applies the TUN `platform.http_proxy` only when the stored value is `true`; the status reports `available` when the TUN options enable the HTTP proxy (Android: and Android 10+) and `enabled` when it was applied |
 | `clearLogs` | – | `clearLogs()` |
 | `setGroupExpand` | `{groupTag: String, expand: bool}` | `setGroupExpand(groupTag, expand)` |
 

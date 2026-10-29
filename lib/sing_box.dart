@@ -46,6 +46,7 @@ export 'src/models/sing_box_notification.dart';
 export 'src/models/speed_test_result.dart';
 export 'src/models/stun_result.dart';
 export 'src/models/subscription.dart';
+export 'src/models/system_proxy_status.dart';
 export 'src/observer/sing_box_observer.dart';
 export 'src/observer/talker_observer.dart';
 export 'src/options.dart';

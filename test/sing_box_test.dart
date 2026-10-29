@@ -937,6 +937,26 @@ void main() {
       );
     });
 
+    test('system proxy status and switch', () async {
+      expect(
+        await singBox.getSystemProxyStatus(),
+        SingBoxSystemProxyStatus.unavailable,
+      );
+      // Not connected: the platform is not asked.
+      expect(platform.calls, isNot(contains('getSystemProxyStatus')));
+      await singBox.connect(jsonEncode(_ssOutbound));
+      platform.systemProxyStatus = const SingBoxSystemProxyStatus(
+        available: true,
+        enabled: true,
+      );
+      await singBox.setSystemProxyEnabled(false);
+      expect(platform.calls, contains('setSystemProxyEnabled:false'));
+      expect(
+        await singBox.getSystemProxyStatus(),
+        const SingBoxSystemProxyStatus(available: true, enabled: false),
+      );
+    });
+
     test('memory monitor settings reach start', () async {
       await singBox.connect(jsonEncode(_ssOutbound));
       expect(platform.startOomKiller, SingBoxOomKiller.platformDefault);

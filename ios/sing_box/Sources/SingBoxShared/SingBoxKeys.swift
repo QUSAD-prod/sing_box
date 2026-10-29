@@ -25,6 +25,9 @@ public enum SingBoxKeys {
     /// App group `UserDefaults` key with the core memory limit in bytes of the
     /// last start (0 = default).
     public static let memoryLimit = "sing_box.memory_limit"
+    /// App group `UserDefaults` key: `false` turns the system HTTP proxy of the
+    /// tunnel (TUN `platform.http_proxy`) off (`setSystemProxyEnabled`).
+    public static let systemProxyEnabled = "sing_box.system_proxy_enabled"
     /// App group `UserDefaults` key with notifications the extension posted
     /// that the app has not consumed yet.
     public static let pendingNotifications = "sing_box.pending_notifications"

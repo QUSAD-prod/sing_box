@@ -25,6 +25,7 @@ import 'models/sing_box_notification.dart';
 import 'models/speed_test_result.dart';
 import 'models/stun_result.dart';
 import 'models/subscription.dart';
+import 'models/system_proxy_status.dart';
 import 'observer/sing_box_observer.dart';
 import 'options.dart';
 import 'rule_set_manager.dart';
@@ -1821,6 +1822,33 @@ class SingBox {
   Future<void> closeAllConnections() {
     _ensureInitialized();
     return _platform.closeAllConnections();
+  }
+
+  /// State of the system HTTP proxy that the running tunnel announces
+  /// (`SingBoxLocalProxy.systemProxy`).
+  /// [SingBoxSystemProxyStatus.unavailable] while the tunnel is not
+  /// connected.
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() async {
+    _ensureInitialized();
+    if (!isConnected) return SingBoxSystemProxyStatus.unavailable;
+    try {
+      return await _platform.getSystemProxyStatus();
+    } on SingBoxServiceNotRunningException {
+      return SingBoxSystemProxyStatus.unavailable;
+    }
+  }
+
+  /// Turns the system HTTP proxy of the running tunnel on or off without
+  /// changing the configuration (like the "System proxy" switch of the
+  /// official sing-box clients). The choice is remembered for later
+  /// connections on the device. Android reloads the tunnel to apply it; iOS
+  /// updates the tunnel's network settings.
+  ///
+  /// Does nothing when [getSystemProxyStatus] is not `available`. Throws a
+  /// [SingBoxServiceNotRunningException] when the tunnel is not running.
+  Future<void> setSystemProxyEnabled(bool enabled) {
+    _ensureInitialized();
+    return _platform.setSystemProxyEnabled(enabled);
   }
 
   // ===========================================================================

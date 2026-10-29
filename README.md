@@ -588,6 +588,32 @@ SingBox.instance.configOptions = const SingBoxConfigOptions(
 );
 ```
 
+#### Local proxy and system proxy
+
+`localProxy` adds a local HTTP + SOCKS5 proxy (sing-box `mixed` inbound) next
+to the TUN; with `systemProxy: true` the VPN also announces it as the system
+HTTP proxy (Android 10+, iOS). Apps that honour the system proxy (browsers,
+most HTTP clients) then reach it directly instead of through the TUN, which
+saves a round of packet processing; all other traffic still uses the TUN.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  localProxy: SingBoxLocalProxy(
+    port: 2080,                   // 127.0.0.1:2080, HTTP and SOCKS5
+    systemProxy: true,            // TUN platform.http_proxy
+    bypassDomains: ['example.com'],
+  ),
+);
+
+// While connected: the "System proxy" switch of the official clients.
+final status = await singBox.getSystemProxyStatus(); // available / enabled
+await singBox.setSystemProxyEnabled(false); // remembered on the device
+```
+
+The proxy has no authentication, so every app on the device can use it while
+the VPN runs. Android applies `setSystemProxyEnabled()` by reloading the
+tunnel; iOS updates the tunnel's network settings in place.
+
 Use `SingBoxConfigBuilder` directly to generate configs without connecting:
 
 ```dart

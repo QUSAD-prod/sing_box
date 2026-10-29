@@ -153,7 +153,10 @@ class SingBoxConfigBuilder {
     final config = <String, dynamic>{
       'log': _log(),
       'dns': dns,
-      'inbounds': [_tunInbound(rules)],
+      'inbounds': [
+        _tunInbound(rules),
+        if (options.localProxy case final proxy?) _localProxyInbound(proxy),
+      ],
       'outbounds': [
         {
           'type': 'selector',
@@ -294,7 +297,21 @@ class SingBoxConfigBuilder {
     }
     final packages = _packages(rules);
     final subnets = _subnets(rules);
+    final localProxy = options.localProxy;
+    if (localProxy != null) {
+      final listening = inbounds.any(
+        (i) =>
+            i['tag'] == SingBoxLocalProxy.tag ||
+            (i['listen_port'] == localProxy.port &&
+                (i['listen'] == localProxy.listen || i['listen'] == '::')),
+      );
+      if (!listening) inbounds.add(_localProxyInbound(localProxy));
+    }
     for (final tun in tuns) {
+      if (localProxy != null && localProxy.systemProxy) {
+        final platform = _map(tun, 'platform');
+        platform.putIfAbsent('http_proxy', () => _httpProxy(localProxy));
+      }
       if (packages.include.isNotEmpty) {
         tun['include_package'] = dedupe([
           ...readStringList(tun['include_package']),
@@ -455,8 +472,30 @@ class SingBoxConfigBuilder {
       if (packages.include.isNotEmpty) 'include_package': packages.include,
       if (packages.include.isEmpty && packages.exclude.isNotEmpty)
         'exclude_package': packages.exclude,
+      if (options.localProxy case final proxy? when proxy.systemProxy)
+        'platform': {'http_proxy': _httpProxy(proxy)},
     };
   }
+
+  Map<String, dynamic> _localProxyInbound(SingBoxLocalProxy proxy) => {
+    'type': 'mixed',
+    'tag': SingBoxLocalProxy.tag,
+    'listen': proxy.listen,
+    'listen_port': proxy.port,
+  };
+
+  /// TUN `platform.http_proxy`: the system HTTP proxy of the VPN.
+  static Map<String, dynamic> _httpProxy(SingBoxLocalProxy proxy) => {
+    'enabled': true,
+    // A wildcard listen address is reached through the loopback address.
+    'server': switch (proxy.listen) {
+      '0.0.0.0' || '::' || '' => '127.0.0.1',
+      final address => address,
+    },
+    'server_port': proxy.port,
+    if (proxy.bypassDomains.isNotEmpty) 'bypass_domain': proxy.bypassDomains,
+    if (proxy.matchDomains.isNotEmpty) 'match_domain': proxy.matchDomains,
+  };
 
   Map<String, dynamic> _dns(SingBoxRoutingRules rules, _CustomRules custom) {
     final dnsOptions = options.dns;
