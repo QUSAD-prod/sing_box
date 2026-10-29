@@ -794,7 +794,8 @@ class SingBox {
         _observer.onConnect(config);
         await _platform.start(
           config,
-          disableMemoryLimit: settings.disableMemoryLimit,
+          oomKiller: settings.effectiveOomKiller,
+          memoryLimit: settings.memoryLimitMb * 1024 * 1024,
         );
         _observer.info(
           wasConnected ? 'Tunnel reloaded' : 'Tunnel start requested',

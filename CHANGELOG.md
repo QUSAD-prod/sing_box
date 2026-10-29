@@ -59,6 +59,12 @@
   ("hide VPN icon"), `noDefaultRoute` (routes in ranges instead of a default
   route) and `excludeApnsRoute`.
 
+- Configurable memory monitor of the core (libbox OOM killer):
+  `SingBoxSettings.oomKiller` (`SingBoxOomKiller.platformDefault`, `off`,
+  `reportOnly`, `enabled`) and `memoryLimitMb`, applied when the tunnel
+  starts on both platforms (Android was always off, iOS always on).
+  `SingBoxSettings.disableMemoryLimit` is deprecated in favour of
+  `oomKiller: SingBoxOomKiller.off`.
 - `dart run sing_box:setup_ios` adds the Packet Tunnel extension without
   Ruby gems. With Swift Package Manager (default since Flutter 3.44) the
   extension links `SingBoxTunnel` through Flutter's generated Swift package,

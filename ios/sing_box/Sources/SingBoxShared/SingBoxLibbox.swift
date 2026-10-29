@@ -25,6 +25,10 @@ public enum SingBoxLibbox {
     /// - Parameters:
     ///   - force: run setup again even if this process already did (the
     ///     extension does this for every tunnel session).
+    ///   - oomKillerReportOnly: the OOM killer only records reports
+    ///     (`SetupOptions.oomKillerDisabled`), it never resets connections.
+    ///   - oomMemoryLimit: memory limit in bytes, 0 = the Network Extension
+    ///     limit.
     ///   - oomKillerEnabled: enables libbox's memory limit / OOM killer, which
     ///     keeps the extension below the Network Extension memory limit.
     ///   - platformMetadata: extra JSON fields for crash and OOM reports.
@@ -34,6 +38,8 @@ public enum SingBoxLibbox {
         debug: Bool,
         crashReportSource: String,
         oomKillerEnabled: Bool,
+        oomKillerReportOnly: Bool = false,
+        oomMemoryLimit: Int64 = 0,
         platformMetadata: [String: Any] = [:],
         force: Bool
     ) throws {
@@ -51,6 +57,8 @@ public enum SingBoxLibbox {
         options.debug = debug
         options.crashReportSource = crashReportSource
         options.oomKillerEnabled = oomKillerEnabled
+        options.oomKillerDisabled = oomKillerReportOnly
+        options.oomMemoryLimit = max(oomMemoryLimit, 0)
         options.platformMetadata = Self.platformMetadata(platformMetadata)
         let info = Bundle.main.infoDictionary
         if let build = info?["CFBundleVersion"] as? String {

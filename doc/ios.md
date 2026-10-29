@@ -141,7 +141,11 @@ which broke local networking for many users.
 
 The extension is limited to about 50 MB. libbox for iOS is built with
 `with_low_memory` and the libbox OOM killer is enabled in the extension
-(`SingBoxSettings.disableMemoryLimit` turns it off - only for debugging).
+(`SingBoxSettings.oomKiller`: `platformDefault` = `enabled`; `reportOnly`
+only records out-of-memory reports, `off` disables it - only for debugging).
+Under a Network Extension the monitor always uses the system limit (50 MB);
+`SingBoxSettings.memoryLimitMb` only moves the Go garbage collector target
+(80 % of it).
 Keep configurations lean: large remote rule-sets, many outbounds or big
 connection counts raise the memory use.
 

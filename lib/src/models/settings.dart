@@ -1,5 +1,33 @@
 import '../options.dart';
 
+/// What the sing-box memory monitor (libbox "OOM killer") does while the
+/// tunnel runs. See `SingBoxSettings.oomKiller`.
+enum SingBoxOomKiller {
+  /// The platform default: [enabled] on iOS, where the Network Extension is
+  /// killed by the system above ~50 MB, [off] on Android (like the official
+  /// sing-box clients).
+  platformDefault,
+
+  /// No memory monitoring and no Go memory limit.
+  off,
+
+  /// Monitors the memory and writes out-of-memory reports
+  /// (`SingBox.getCoreReports()`) without closing connections.
+  reportOnly,
+
+  /// Monitors the memory and resets the network (closes connections and
+  /// frees memory) when it reaches the limit; also writes reports.
+  enabled;
+
+  /// Parses [name] (one of the enum names); `null` for an unknown value.
+  static SingBoxOomKiller? tryParse(Object? name) {
+    for (final value in values) {
+      if (value.name == name) return value;
+    }
+    return null;
+  }
+}
+
 /// User facing behaviour settings persisted by the plugin.
 ///
 /// Read with `SingBox.getSettings()` and store with `SingBox.saveSettings()`
@@ -25,7 +53,9 @@ class SingBoxSettings {
     this.excludeDefaultRoute = false,
     this.noDefaultRoute = false,
     this.excludeApnsRoute = false,
-  });
+    this.oomKiller = SingBoxOomKiller.platformDefault,
+    this.memoryLimitMb = 0,
+  }) : assert(memoryLimitMb >= 0, 'memoryLimitMb must not be negative');
 
   /// Setting key for [autoConnectOnStart], used by `SingBox.updateSetting()`.
   static const keyAutoConnectOnStart = 'autoConnectOnStart';
@@ -69,6 +99,13 @@ class SingBoxSettings {
   /// Setting key for [excludeApnsRoute].
   static const keyExcludeApnsRoute = 'excludeApnsRoute';
 
+  /// Setting key for [oomKiller]; `updateSetting()` takes a
+  /// [SingBoxOomKiller] or its name.
+  static const keyOomKiller = 'oomKiller';
+
+  /// Setting key for [memoryLimitMb]; `updateSetting()` takes an `int`.
+  static const keyMemoryLimitMb = 'memoryLimitMb';
+
   /// All valid setting keys.
   static const keys = [
     keyQuickSettingsTile,
@@ -85,6 +122,8 @@ class SingBoxSettings {
     keyExcludeDefaultRoute,
     keyNoDefaultRoute,
     keyExcludeApnsRoute,
+    keyOomKiller,
+    keyMemoryLimitMb,
   ];
 
   /// Connect to the active server automatically when
@@ -115,7 +154,9 @@ class SingBoxSettings {
   final bool excludeApns;
 
   /// Disable the sing-box memory limit (not recommended on iOS, where the
-  /// extension is killed above ~50 MB).
+  /// extension is killed above ~50 MB). `true` overrides [oomKiller] with
+  /// [SingBoxOomKiller.off].
+  @Deprecated('Use oomKiller: SingBoxOomKiller.off')
   final bool disableMemoryLimit;
 
   /// Android: show the plugin's Quick Settings tile (VPN toggle).
@@ -151,6 +192,27 @@ class SingBoxSettings {
   /// system HTTP proxy (unlike [excludeApns] it works without [killSwitch]).
   final bool excludeApnsRoute;
 
+  /// What the sing-box memory monitor does (libbox `oomKillerEnabled` /
+  /// `oomKillerDisabled`), see [SingBoxOomKiller]. Applied when the tunnel
+  /// starts: change it while connected and reconnect.
+  final SingBoxOomKiller oomKiller;
+
+  /// Memory limit of the sing-box core in MiB for [oomKiller]
+  /// (libbox `oomMemoryLimit`); `0` = the platform default.
+  ///
+  /// The Go garbage collector targets 80 % of it. Android: with `0` the
+  /// monitor reacts to low available system memory instead of a fixed limit.
+  /// iOS: `0` = the Network Extension limit (50 MiB); the monitor of the
+  /// extension always uses that system limit, a different value only moves
+  /// the garbage collector target.
+  final int memoryLimitMb;
+
+  /// The memory monitor mode actually used: [SingBoxOomKiller.off] when the
+  /// deprecated [disableMemoryLimit] is set, [oomKiller] otherwise.
+  SingBoxOomKiller get effectiveOomKiller =>
+      // ignore: deprecated_member_use_from_same_package
+      disableMemoryLimit ? SingBoxOomKiller.off : oomKiller;
+
   /// Creates settings from a map (for deserialization). Unknown keys are
   /// ignored.
   factory SingBoxSettings.fromMap(Map<dynamic, dynamic> map) {
@@ -174,6 +236,13 @@ class SingBoxSettings {
       excludeDefaultRoute: read(keyExcludeDefaultRoute, false),
       noDefaultRoute: read(keyNoDefaultRoute, false),
       excludeApnsRoute: read(keyExcludeApnsRoute, false),
+      oomKiller:
+          SingBoxOomKiller.tryParse(map[keyOomKiller]) ??
+          SingBoxOomKiller.platformDefault,
+      memoryLimitMb: switch (map[keyMemoryLimitMb]) {
+        final int value when value >= 0 => value,
+        _ => 0,
+      },
     );
   }
 
@@ -193,19 +262,54 @@ class SingBoxSettings {
     keyExcludeDefaultRoute: excludeDefaultRoute,
     keyNoDefaultRoute: noDefaultRoute,
     keyExcludeApnsRoute: excludeApnsRoute,
+    keyOomKiller: oomKiller.name,
+    keyMemoryLimitMb: memoryLimitMb,
   };
 
   /// Returns a copy with [key] set to [value].
   ///
-  /// Throws [ArgumentError] for an unknown key or a non-boolean value.
+  /// [keyOomKiller] takes a [SingBoxOomKiller] or its name,
+  /// [keyMemoryLimitMb] a non-negative `int`, every other key a `bool`.
+  /// Throws [ArgumentError] for an unknown key or a wrong value.
   SingBoxSettings withValue(String key, Object? value) {
     if (!keys.contains(key)) {
       throw ArgumentError.value(key, 'key', 'Unknown setting');
     }
-    if (value is! bool) {
-      throw ArgumentError.value(value, 'value', 'Setting $key expects a bool');
+    final Object stored;
+    switch (key) {
+      case keyOomKiller:
+        final mode =
+            value is SingBoxOomKiller
+                ? value
+                : SingBoxOomKiller.tryParse(value);
+        if (mode == null) {
+          throw ArgumentError.value(
+            value,
+            'value',
+            'Setting $key expects a SingBoxOomKiller',
+          );
+        }
+        stored = mode.name;
+      case keyMemoryLimitMb:
+        if (value is! int || value < 0) {
+          throw ArgumentError.value(
+            value,
+            'value',
+            'Setting $key expects a non-negative int',
+          );
+        }
+        stored = value;
+      default:
+        if (value is! bool) {
+          throw ArgumentError.value(
+            value,
+            'value',
+            'Setting $key expects a bool',
+          );
+        }
+        stored = value;
     }
-    return SingBoxSettings.fromMap({...toMap(), key: value});
+    return SingBoxSettings.fromMap({...toMap(), key: stored});
   }
 
   /// The native service options derived from these settings.
@@ -240,6 +344,8 @@ class SingBoxSettings {
     bool? excludeDefaultRoute,
     bool? noDefaultRoute,
     bool? excludeApnsRoute,
+    SingBoxOomKiller? oomKiller,
+    int? memoryLimitMb,
   }) {
     return SingBoxSettings(
       autoConnectOnStart: autoConnectOnStart ?? this.autoConnectOnStart,
@@ -259,6 +365,8 @@ class SingBoxSettings {
       excludeDefaultRoute: excludeDefaultRoute ?? this.excludeDefaultRoute,
       noDefaultRoute: noDefaultRoute ?? this.noDefaultRoute,
       excludeApnsRoute: excludeApnsRoute ?? this.excludeApnsRoute,
+      oomKiller: oomKiller ?? this.oomKiller,
+      memoryLimitMb: memoryLimitMb ?? this.memoryLimitMb,
     );
   }
 
@@ -278,7 +386,9 @@ class SingBoxSettings {
       other.excludeDeviceCommunication == excludeDeviceCommunication &&
       other.excludeDefaultRoute == excludeDefaultRoute &&
       other.noDefaultRoute == noDefaultRoute &&
-      other.excludeApnsRoute == excludeApnsRoute;
+      other.excludeApnsRoute == excludeApnsRoute &&
+      other.oomKiller == oomKiller &&
+      other.memoryLimitMb == memoryLimitMb;
 
   @override
   int get hashCode => Object.hash(
@@ -296,6 +406,8 @@ class SingBoxSettings {
     excludeDefaultRoute,
     noDefaultRoute,
     excludeApnsRoute,
+    oomKiller,
+    memoryLimitMb,
   );
 
   @override

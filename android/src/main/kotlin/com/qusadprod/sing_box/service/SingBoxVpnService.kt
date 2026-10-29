@@ -273,6 +273,8 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             if (!isStarting()) return
             DefaultNetworkMonitor.start(this, DefaultNetworkMonitor.OWNER_VPN)
             if (commandServer == null) {
+                // The command server reads the memory monitor options when it is created.
+                LibboxRuntime.reloadOptions(this)
                 // Files the memory pressure recorded by the previous session as an OOM report
                 // (`<working>/oom_reports`), like SFA.
                 Libbox.promoteOOMDraft()

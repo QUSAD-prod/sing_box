@@ -105,7 +105,9 @@ Arguments:
 | Key | Type | Description |
 | --- | --- | --- |
 | `config` | String | Complete sing-box JSON configuration (required) |
-| `disableMemoryLimit` | bool | iOS: starts the extension with the libbox OOM killer disabled (`SetupOptions.oomKillerEnabled = false`). Android: accepted and ignored (the OOM killer is always off there, like in sing-box-for-android). Default false |
+| `oomKiller` | String | Memory monitor (libbox OOM killer): `platformDefault` (iOS: `enabled`, Android: `off`), `off` (`SetupOptions.oomKillerEnabled = false`), `reportOnly` (`oomKillerEnabled = true`, `oomKillerDisabled = true`: reports only) or `enabled` (`oomKillerEnabled = true`, `oomKillerDisabled = false`). Persisted for starts without the app (Android boot/tile/always-on: `ServiceSettings`; iOS on-demand: app group defaults `sing_box.oom_killer`). Android applies it with `Libbox.reloadSetupOptions` before creating the command server; iOS passes it to the extension as start option `oomKiller`. Default `platformDefault` |
+| `memoryLimit` | int | `SetupOptions.oomMemoryLimit` in bytes, 0 = default (Android: available system memory; iOS: the 50 MB Network Extension limit). Persisted like `oomKiller` (iOS: `sing_box.memory_limit`, start option `memoryLimit`). Default 0 |
+| `disableMemoryLimit` | bool | Pre-1.1.0 form of `oomKiller: off`, still sent (`true` when `oomKiller` is `off`); used only when `oomKiller` is missing. Default false |
 
 Behaviour:
 

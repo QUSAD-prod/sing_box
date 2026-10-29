@@ -178,8 +178,15 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
         let providerConfiguration = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration
         let logMaxLines = providerConfiguration?[SingBoxKeys.providerLogMaxLines] as? Int ?? SingBoxKeys.defaultLogMaxLines
         let debug = providerConfiguration?[SingBoxKeys.providerDebug] as? Bool ?? false
-        let disableMemoryLimit = (options?[SingBoxKeys.startOptionDisableMemoryLimit] as? NSNumber)?.boolValue
+        // On-demand and system starts have no options: use the last start's values.
+        let legacyOff = (options?[SingBoxKeys.startOptionDisableMemoryLimit] as? NSNumber)?.boolValue
             ?? paths.defaults.bool(forKey: SingBoxKeys.disableMemoryLimit)
+        let oomKiller = options?[SingBoxKeys.startOptionOomKiller] as? String
+            ?? paths.defaults.string(forKey: SingBoxKeys.oomKiller)
+            ?? (legacyOff ? SingBoxKeys.oomKillerOff : SingBoxKeys.oomKillerPlatformDefault)
+        let memoryLimit = (options?[SingBoxKeys.startOptionMemoryLimit] as? NSNumber)?.int64Value
+            ?? (paths.defaults.object(forKey: SingBoxKeys.memoryLimit) as? NSNumber)?.int64Value
+            ?? 0
 
         // The OOM killer / memory limit keeps the extension below the
         // Network Extension memory limit (like sing-box-for-apple).
@@ -188,7 +195,9 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
             logMaxLines: logMaxLines,
             debug: debug,
             crashReportSource: "NetworkExtension",
-            oomKillerEnabled: !disableMemoryLimit,
+            oomKillerEnabled: oomKiller != SingBoxKeys.oomKillerOff,
+            oomKillerReportOnly: oomKiller == SingBoxKeys.oomKillerReportOnly,
+            oomMemoryLimit: memoryLimit,
             platformMetadata: networkExtensionMetadata(),
             force: true
         )

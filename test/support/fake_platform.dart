@@ -16,6 +16,12 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   bool notificationPermission = true;
   String? configError;
   String? lastConfig;
+
+  /// Memory monitor options of the last [start].
+  SingBoxOomKiller? startOomKiller;
+
+  /// Memory limit in bytes of the last [start].
+  int? startMemoryLimit;
   SingBoxServiceOptions? serviceOptions;
   SingBoxOptions? initOptions;
   SingBoxConnectionStatus initialStatus = SingBoxConnectionStatus.disconnected;
@@ -124,8 +130,15 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   /// returns, the outcome (`connected` or `disconnected` with
   /// [runtimeError]) afterwards. A connected tunnel is reloaded.
   @override
-  Future<void> start(String config, {bool disableMemoryLimit = false}) async {
+  Future<void> start(
+    String config, {
+    bool disableMemoryLimit = false,
+    SingBoxOomKiller oomKiller = SingBoxOomKiller.platformDefault,
+    int memoryLimit = 0,
+  }) async {
     calls.add('start');
+    startOomKiller = disableMemoryLimit ? SingBoxOomKiller.off : oomKiller;
+    startMemoryLimit = memoryLimit;
     if (configError != null) throw SingBoxConfigException(configError!);
     lastConfig = config;
     started.add(config);

@@ -171,7 +171,16 @@ class SingBoxPlugin :
             }
             "requestAddQuickSettingsTile" -> requestAddQuickSettingsTile(call.argument<String>("label"), result)
             "start" -> respond(result) {
-                start(call.requireString("config"), call.argument<Boolean>("disableMemoryLimit") ?: false)
+                start(
+                    call.requireString("config"),
+                    oomKiller = call.argument<String>("oomKiller")
+                        ?: if (call.argument<Boolean>("disableMemoryLimit") == true) {
+                            ServiceSettings.OOM_KILLER_OFF
+                        } else {
+                            ServiceSettings.OOM_KILLER_PLATFORM_DEFAULT
+                        },
+                    memoryLimit = call.argument<Number>("memoryLimit")?.toLong() ?: 0L,
+                )
                 null
             }
             "stop" -> respond(result) {
@@ -416,12 +425,13 @@ class SingBoxPlugin :
     // Service control
     // ---------------------------------------------------------------------------------------
 
-    private suspend fun start(config: String, disableMemoryLimit: Boolean) {
+    private suspend fun start(config: String, oomKiller: String, memoryLimit: Long) {
         checkConfig(config)
         if (!hasVpnPermission()) throw SingBoxError.permissionDenied()
         val settings = ServiceSettings(context)
         io {
-            settings.disableMemoryLimit = disableMemoryLimit
+            settings.oomKiller = oomKiller
+            settings.memoryLimit = memoryLimit
             Paths.writeLastConfig(context, config)
         }
         val service = SingBoxVpnService.instance

@@ -158,7 +158,12 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         // Service control
         case "start":
             let config = try requireString(args, "config")
-            try await controller.start(config: config, disableMemoryLimit: args.bool("disableMemoryLimit") ?? false)
+            let legacyOff = args.bool("disableMemoryLimit") ?? false
+            try await controller.start(
+                config: config,
+                oomKiller: args.string("oomKiller") ?? (legacyOff ? SingBoxKeys.oomKillerOff : SingBoxKeys.oomKillerPlatformDefault),
+                memoryLimit: args.int64("memoryLimit") ?? 0
+            )
             return nil
         case "stop":
             try await controller.stop()

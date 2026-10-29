@@ -937,6 +937,32 @@ void main() {
       );
     });
 
+    test('memory monitor settings reach start', () async {
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.platformDefault);
+      expect(platform.startMemoryLimit, 0);
+      await singBox.disconnect();
+
+      expect(
+        await singBox.updateSetting(
+          SingBoxSettings.keyOomKiller,
+          SingBoxOomKiller.enabled,
+        ),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 200),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, -1),
+        isFalse,
+      );
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.enabled);
+      expect(platform.startMemoryLimit, 200 * 1024 * 1024);
+    });
+
     test('server profile CRUD and active selection', () async {
       final server = SingBoxServerConfig.fromOutbound(
         Map<String, dynamic>.from(_ssOutbound),

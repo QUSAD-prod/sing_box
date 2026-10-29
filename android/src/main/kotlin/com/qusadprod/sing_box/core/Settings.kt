@@ -79,9 +79,15 @@ internal class ServiceSettings(context: Context) {
             prefs.edit().putBoolean(KEY_WAS_RUNNING, value).commit()
         }
 
-    var disableMemoryLimit: Boolean
-        get() = prefs.getBoolean(KEY_DISABLE_MEMORY_LIMIT, false)
-        set(value) = prefs.edit().putBoolean(KEY_DISABLE_MEMORY_LIMIT, value).apply()
+    /** Memory monitor mode of `start` (`platformDefault`, `off`, `reportOnly`, `enabled`). */
+    var oomKiller: String
+        get() = prefs.getString(KEY_OOM_KILLER, null) ?: OOM_KILLER_PLATFORM_DEFAULT
+        set(value) = prefs.edit().putString(KEY_OOM_KILLER, value).apply()
+
+    /** Memory limit of the core in bytes, 0 = default. */
+    var memoryLimit: Long
+        get() = prefs.getLong(KEY_MEMORY_LIMIT, 0L)
+        set(value) = prefs.edit().putLong(KEY_MEMORY_LIMIT, value).apply()
 
     var notificationOptions: NotificationOptions
         get() = NotificationOptions(
@@ -112,6 +118,10 @@ internal class ServiceSettings(context: Context) {
     companion object {
         const val PREFS_NAME = "sing_box_service"
         const val DEFAULT_LOG_MAX_LINES = 3000
+        const val OOM_KILLER_PLATFORM_DEFAULT = "platformDefault"
+        const val OOM_KILLER_OFF = "off"
+        const val OOM_KILLER_REPORT_ONLY = "reportOnly"
+        const val OOM_KILLER_ENABLED = "enabled"
 
         private const val KEY_LOG_MAX_LINES = "logMaxLines"
         private const val KEY_DEBUG = "debug"
@@ -119,7 +129,8 @@ internal class ServiceSettings(context: Context) {
         private const val KEY_QS_TILE = "quickSettingsTile"
         private const val KEY_TILE_LABEL = "tileLabel"
         private const val KEY_WAS_RUNNING = "wasRunning"
-        private const val KEY_DISABLE_MEMORY_LIMIT = "disableMemoryLimit"
+        private const val KEY_OOM_KILLER = "oomKiller"
+        private const val KEY_MEMORY_LIMIT = "memoryLimit"
         private const val KEY_N_CHANNEL_ID = "notification.channelId"
         private const val KEY_N_CHANNEL_NAME = "notification.channelName"
         private const val KEY_N_TITLE = "notification.title"

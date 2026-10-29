@@ -15,6 +15,8 @@ class ToolsPage extends StatefulWidget {
 }
 
 class _ToolsPageState extends State<ToolsPage> {
+  static const _memoryLimits = [0, 50, 100, 200, 300, 500, 1024];
+
   final _singBox = SingBox.instance;
   SingBoxSettings _settings = const SingBoxSettings();
   bool? _vpnPermission;
@@ -40,7 +42,7 @@ class _ToolsPageState extends State<ToolsPage> {
     });
   }
 
-  Future<void> _set(String key, bool value) async {
+  Future<void> _set(String key, Object value) async {
     await _singBox.updateSetting(key, value);
     await _reload();
   }
@@ -149,6 +151,53 @@ class _ToolsPageState extends State<ToolsPage> {
               await _set(SingBoxSettings.keyKillSwitch, v);
               if (v && Platform.isAndroid) await _singBox.openVpnSettings();
             },
+          ),
+          const SectionHeader('Memory limit (applied on connect)'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SegmentedButton<SingBoxOomKiller>(
+              segments: const [
+                ButtonSegment(
+                  value: SingBoxOomKiller.platformDefault,
+                  label: Text('Default'),
+                ),
+                ButtonSegment(value: SingBoxOomKiller.off, label: Text('Off')),
+                ButtonSegment(
+                  value: SingBoxOomKiller.reportOnly,
+                  label: Text('Report'),
+                ),
+                ButtonSegment(
+                  value: SingBoxOomKiller.enabled,
+                  label: Text('On'),
+                ),
+              ],
+              selected: {_settings.oomKiller},
+              onSelectionChanged: (s) =>
+                  _set(SingBoxSettings.keyOomKiller, s.first),
+            ),
+          ),
+          ListTile(
+            title: const Text('Memory limit'),
+            subtitle: Text(
+              _settings.memoryLimitMb == 0
+                  ? 'Platform default'
+                  : '${_settings.memoryLimitMb} MiB',
+            ),
+            trailing: DropdownButton<int>(
+              value: _memoryLimits.contains(_settings.memoryLimitMb)
+                  ? _settings.memoryLimitMb
+                  : 0,
+              items: [
+                for (final mb in _memoryLimits)
+                  DropdownMenuItem(
+                    value: mb,
+                    child: Text(mb == 0 ? 'Default' : '$mb MiB'),
+                  ),
+              ],
+              onChanged: (mb) {
+                if (mb != null) _set(SingBoxSettings.keyMemoryLimitMb, mb);
+              },
+            ),
           ),
           const SectionHeader('Permissions'),
           ListTile(

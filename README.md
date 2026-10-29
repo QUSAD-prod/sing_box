@@ -628,6 +628,32 @@ await singBox.openVpnSettings();     // Android: Always-on VPN / Block connectio
 await singBox.requestAddQuickSettingsTile(); // Android 13+
 ```
 
+#### Memory limit (OOM killer)
+
+sing-box can watch its own memory and reset the network (close connections
+and free memory) before the system kills it. `oomKiller` and `memoryLimitMb`
+are applied when the tunnel starts - reconnect after changing them:
+
+```dart
+await singBox.updateSetting(
+  SingBoxSettings.keyOomKiller,
+  SingBoxOomKiller.reportOnly, // only write out-of-memory reports
+);
+await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 300);
+```
+
+| `SingBoxOomKiller` | Behaviour |
+| --- | --- |
+| `platformDefault` | iOS: `enabled` (the Network Extension is killed above ~50 MB). Android: `off`, like sing-box-for-android |
+| `off` | No monitoring, no Go memory limit |
+| `reportOnly` | Monitors and writes reports (`getCoreReports()`), never closes connections |
+| `enabled` | Monitors, resets the network at the limit and writes reports |
+
+`memoryLimitMb` (`0` = default) sets the limit; the Go garbage collector
+targets 80 % of it. Android without a limit reacts to low available system
+memory. iOS: the monitor of the extension always uses the system limit
+(50 MB), a different value only moves the garbage collector target.
+
 ### Error handling
 
 Every failure is a `SingBoxException` with a `code`:
@@ -764,7 +790,7 @@ features.
   *Thin Binary* in the Runner build phases.
 - **iOS: the extension is killed under load** - Network Extensions are limited
   to about 50 MB of memory. The bundled core is built for low memory use;
-  avoid huge rule-sets and keep `disableMemoryLimit` off.
+  avoid huge rule-sets and keep `oomKiller` at `platformDefault` or `enabled`.
 - **The first build is slow** - the native library is downloaded once and
   cached.
 

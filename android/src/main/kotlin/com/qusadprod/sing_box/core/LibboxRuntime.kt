@@ -30,39 +30,66 @@ internal object LibboxRuntime {
             if (isSetup) return
             val app = context.applicationContext
             val settings = ServiceSettings(app)
-            val base = Paths.baseDir(app).apply { mkdirs() }
+            Paths.baseDir(app).mkdirs()
             val working = Paths.workingDir(app).apply { mkdirs() }
-            val temp = Paths.tempDir(app).apply { mkdirs() }
+            Paths.tempDir(app).mkdirs()
             runCatching { Libbox.setLocale(Locale.getDefault().toLanguageTag()) }
                 .onFailure { Log.d(TAG, "set locale: ${it.message}") }
-            val options = SetupOptions().apply {
-                basePath = base.path
-                workingPath = working.path
-                tempPath = temp.path
-                fixAndroidStack = fixAndroidStack(app)
-                logMaxLines = settings.logMaxLines.toLong()
-                debug = settings.debug
-                crashReportSource = "sing_box"
-                appVersion = appVersionCode(app)
-                appMarketingVersion = appVersionName(app)
-                // libbox 1.14 has no fixed memory limit on Android (that is an
-                // iOS network extension constraint); keep the OOM killer off like SFA.
-                oomKillerEnabled = false
-                oomKillerDisabled = true
-                oomMemoryLimit = 0
-                powerReportEnabled = false
-                // Part of crash and OOM reports.
-                platformMetadata = JSONObject().apply {
-                    put("os", "Android " + Build.VERSION.RELEASE)
-                    put("sdk", Build.VERSION.SDK_INT)
-                    put("manufacturer", Build.MANUFACTURER)
-                    put("model", Build.MODEL)
-                }.toString()
-            }
-            Libbox.setup(options)
+            Libbox.setup(setupOptions(app, settings))
             isSetup = true
             Log.i(TAG, "libbox ${Libbox.version()} set up in ${working.path}")
         }
+    }
+
+    /**
+     * Applies the stored memory monitor options (`ServiceSettings.oomKiller` /
+     * `memoryLimit`) to libbox. A command server reads them when it is created,
+     * so call this before `Libbox.newCommandServer`. Requires [ensureSetup].
+     */
+    fun reloadOptions(context: Context) {
+        synchronized(lock) {
+            if (!isSetup) return
+            val app = context.applicationContext
+            Libbox.reloadSetupOptions(setupOptions(app, ServiceSettings(app)))
+        }
+    }
+
+    private fun setupOptions(app: Context, settings: ServiceSettings) = SetupOptions().apply {
+        basePath = Paths.baseDir(app).path
+        workingPath = Paths.workingDir(app).path
+        tempPath = Paths.tempDir(app).path
+        fixAndroidStack = fixAndroidStack(app)
+        logMaxLines = settings.logMaxLines.toLong()
+        debug = settings.debug
+        crashReportSource = "sing_box"
+        appVersion = appVersionCode(app)
+        appMarketingVersion = appVersionName(app)
+        // libbox has no fixed memory limit on Android (that is an iOS network
+        // extension constraint): the OOM killer is off by default, like SFA.
+        when (settings.oomKiller) {
+            ServiceSettings.OOM_KILLER_ENABLED -> {
+                oomKillerEnabled = true
+                oomKillerDisabled = false
+            }
+            ServiceSettings.OOM_KILLER_REPORT_ONLY -> {
+                oomKillerEnabled = true
+                oomKillerDisabled = true
+            }
+            else -> {
+                oomKillerEnabled = false
+                oomKillerDisabled = true
+            }
+        }
+        // 0: the killer watches the available system memory instead of a limit.
+        oomMemoryLimit = settings.memoryLimit.coerceAtLeast(0L)
+        powerReportEnabled = false
+        // Part of crash and OOM reports.
+        platformMetadata = JSONObject().apply {
+            put("os", "Android " + Build.VERSION.RELEASE)
+            put("sdk", Build.VERSION.SDK_INT)
+            put("manufacturer", Build.MANUFACTURER)
+            put("model", Build.MODEL)
+        }.toString()
     }
 
     // TODO: remove once https://github.com/golang/go/issues/68760 is fixed (same as SFA).
