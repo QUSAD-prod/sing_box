@@ -1,6 +1,5 @@
 import Foundation
 import Libbox
-import Network
 import NetworkExtension
 import os
 import UserNotifications
@@ -16,9 +15,9 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
 
     private unowned let tunnel: SingBoxPacketTunnelProvider
     private var networkSettings: NEPacketTunnelNetworkSettings?
-    private var pathMonitor: NWPathMonitor?
-    private var lastNetworkPath: String?
-    private let monitorQueue = DispatchQueue(label: "sing_box.path-monitor")
+    /// The core's default interface monitor; also tells `pingServer` which
+    /// physical interface to use.
+    let interfaceMonitor = SingBoxInterfaceMonitor()
 
     init(_ tunnel: SingBoxPacketTunnelProvider) {
         self.tunnel = tunnel
@@ -26,9 +25,7 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
 
     func reset() {
         networkSettings = nil
-        pathMonitor?.cancel()
-        pathMonitor = nil
-        lastNetworkPath = nil
+        interfaceMonitor.close()
     }
 
     private static func error(_ message: String) -> NSError {
@@ -186,121 +183,15 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
         guard let listener else {
             return
         }
-        pathMonitor?.cancel()
-        let monitor = NWPathMonitor()
-        pathMonitor = monitor
-        lastNetworkPath = nil
-        let semaphore = DispatchSemaphore(value: 0)
-        var signaled = false
-        monitor.pathUpdateHandler = { [weak self] path in
-            self?.onPathUpdate(listener, path)
-            if !signaled {
-                signaled = true
-                semaphore.signal()
-            }
-        }
-        monitor.start(queue: monitorQueue)
-        // libbox expects the first default interface before returning.
-        _ = semaphore.wait(timeout: .now() + 5)
-    }
-
-    private func onPathUpdate(_ listener: LibboxInterfaceUpdateListenerProtocol, _ path: Network.NWPath) {
-        let description = describe(path)
-        listener.updateNetworkPath(description)
-        if description == lastNetworkPath {
-            return
-        }
-        lastNetworkPath = description
-        guard path.status != .unsatisfied, let defaultInterface = path.availableInterfaces.first else {
-            listener.updateDefaultInterface("", interfaceIndex: -1, isExpensive: false, isConstrained: false)
-            return
-        }
-        // libbox resets connections when the default interface changes
-        // (Wi-Fi <-> cellular).
-        listener.updateDefaultInterface(
-            defaultInterface.name,
-            interfaceIndex: Int32(defaultInterface.index),
-            isExpensive: path.isExpensive,
-            isConstrained: path.isConstrained
-        )
-    }
-
-    private func describe(_ path: Network.NWPath) -> String {
-        var components: [String] = []
-        switch path.status {
-        case .satisfied:
-            components.append("satisfied")
-        case .unsatisfied:
-            components.append("unsatisfied")
-        case .requiresConnection:
-            components.append("requiresConnection")
-        @unknown default:
-            components.append("unknown")
-        }
-        if !path.availableInterfaces.isEmpty {
-            components.append("interfaces=" + path.availableInterfaces.map { "\($0.name)#\($0.index)/\($0.type)" }.joined(separator: ","))
-        }
-        if !path.gateways.isEmpty {
-            components.append("gateways=" + path.gateways.map { "\($0)" }.sorted().joined(separator: ","))
-        }
-        if path.supportsIPv4 { components.append("ipv4") }
-        if path.supportsIPv6 { components.append("ipv6") }
-        if path.supportsDNS { components.append("dns") }
-        if path.isExpensive { components.append("expensive") }
-        if path.isConstrained { components.append("constrained") }
-        return components.joined(separator: " ")
+        interfaceMonitor.start(listener)
     }
 
     func closeDefaultInterfaceMonitor(_: LibboxInterfaceUpdateListenerProtocol?) throws {
-        pathMonitor?.cancel()
-        pathMonitor = nil
-        lastNetworkPath = nil
+        interfaceMonitor.close()
     }
 
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        guard let pathMonitor else {
-            throw Self.error("path monitor not started")
-        }
-        let path = pathMonitor.currentPath
-        if path.status == .unsatisfied {
-            return NetworkInterfaceIterator([])
-        }
-        var interfaces: [LibboxNetworkInterface] = []
-        for item in path.availableInterfaces {
-            let interface = LibboxNetworkInterface()
-            interface.name = item.name
-            interface.index = Int32(item.index)
-            switch item.type {
-            case .wifi:
-                interface.type = LibboxInterfaceTypeWIFI
-            case .cellular:
-                interface.type = LibboxInterfaceTypeCellular
-            case .wiredEthernet:
-                interface.type = LibboxInterfaceTypeEthernet
-            default:
-                interface.type = LibboxInterfaceTypeOther
-            }
-            interfaces.append(interface)
-        }
-        return NetworkInterfaceIterator(interfaces)
-    }
-
-    private final class NetworkInterfaceIterator: NSObject, LibboxNetworkInterfaceIteratorProtocol {
-        private var iterator: IndexingIterator<[LibboxNetworkInterface]>
-        private var current: LibboxNetworkInterface?
-
-        init(_ array: [LibboxNetworkInterface]) {
-            iterator = array.makeIterator()
-        }
-
-        func hasNext() -> Bool {
-            current = iterator.next()
-            return current != nil
-        }
-
-        func next() -> LibboxNetworkInterface? {
-            current
-        }
+        try interfaceMonitor.interfaces()
     }
 
     // MARK: - Environment

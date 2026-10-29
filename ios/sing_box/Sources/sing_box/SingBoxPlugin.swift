@@ -34,6 +34,9 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         }
         eventChannels.removeAll()
         commandStreams.removeAll()
+        DispatchQueue.global(qos: .utility).async {
+            ProbeCore.shared.stop()
+        }
     }
 
     // MARK: - Event channels
@@ -183,6 +186,34 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
             let tag = try requireString(args, "tag")
             try await command { try $0.urlTest(tag) }
             return nil
+
+        // Latency measurements
+        case "startProbe":
+            let config = try requireString(args, "config")
+            try await runInBackground { try ProbeCore.shared.start(config: config) }
+            return nil
+        case "stopProbe":
+            try await runInBackground { ProbeCore.shared.stop() }
+            return nil
+        case "pingServer":
+            let name = try requireString(args, "method")
+            let host = try requireString(args, "host")
+            let port = args.int("port")
+            let timeoutMs = args.int("timeoutMs") ?? 5000
+            let method: SingBoxNativePing.Method
+            do {
+                method = try SingBoxNativePing.method(name, port: port)
+            } catch {
+                throw PluginError.invalidArgument(error.localizedDescription)
+            }
+            // While the tunnel runs the app's sockets and DNS go through it.
+            if controller.isActive {
+                return await controller.ping(method: name, host: host, port: port, timeoutMs: timeoutMs)
+            }
+            return try await runInBackground {
+                SingBoxNativePing.ping(method, host: host, port: port, timeoutMs: timeoutMs)
+            }
+
         case "setClashMode":
             let mode = try requireString(args, "mode")
             try await command { try $0.setClashMode(mode) }
@@ -229,7 +260,8 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         "requestNotificationPermission", "openVpnSettings",
         "start", "stop", "reload", "getStatus", "getStartedAt", "getLastConfig", "setServiceOptions",
         "selectOutbound", "urlTest", "setClashMode", "closeConnection", "closeAllConnections",
-        "clearLogs", "setGroupExpand", "storageRead", "storageWrite",
+        "clearLogs", "setGroupExpand", "startProbe", "stopProbe", "pingServer",
+        "storageRead", "storageWrite",
     ]
 
     private func requireString(_ args: [String: Any], _ key: String) throws -> String {

@@ -498,11 +498,43 @@ final class TunnelController {
 
     /// Asks the extension to re-read the configuration file and reload.
     private func sendReload() async throws {
+        let response = try await sendMessage([SingBoxKeys.messageCommand: SingBoxKeys.messageReload])
+        if let response, !response.isEmpty {
+            throw SingBoxError(String(data: response, encoding: .utf8) ?? "reload failed")
+        }
+        onServiceRestarted?()
+    }
+
+    /// `pingServer` in the extension, whose sockets bypass the tunnel. A
+    /// failure to reach the extension is a failed measurement.
+    func ping(method: String, host: String, port: Int?, timeoutMs: Int) async -> [String: Any] {
+        var message: [String: Any] = [
+            SingBoxKeys.messageCommand: SingBoxKeys.messagePing,
+            "method": method,
+            "host": host,
+            "timeoutMs": timeoutMs,
+        ]
+        message["port"] = port
+        do {
+            let response = try await sendMessage(message)
+            if let response,
+               let result = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+            {
+                return result
+            }
+            let text = response.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            return ["success": false, "error": "The tunnel did not measure: \(text.isEmpty ? "no reply" : text)"]
+        } catch {
+            return ["success": false, "error": "The tunnel did not measure: \(error.localizedDescription)"]
+        }
+    }
+
+    private func sendMessage(_ object: [String: Any]) async throws -> Data? {
         guard let session = manager?.connection as? NETunnelProviderSession else {
             throw PluginError.serviceNotRunning()
         }
-        let message = try JSONSerialization.data(withJSONObject: [SingBoxKeys.messageCommand: SingBoxKeys.messageReload])
-        let response: Data? = try await withCheckedThrowingContinuation { continuation in
+        let message = try JSONSerialization.data(withJSONObject: object)
+        return try await withCheckedThrowingContinuation { continuation in
             do {
                 try session.sendProviderMessage(message) { response in
                     continuation.resume(returning: response)
@@ -511,9 +543,5 @@ final class TunnelController {
                 continuation.resume(throwing: error)
             }
         }
-        if let response, !response.isEmpty {
-            throw SingBoxError(String(data: response, encoding: .utf8) ?? "reload failed")
-        }
-        onServiceRestarted?()
     }
 }

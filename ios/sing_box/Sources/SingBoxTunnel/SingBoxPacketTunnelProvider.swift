@@ -106,8 +106,18 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override open func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
+        let message = (try? JSONSerialization.jsonObject(with: messageData) as? [String: Any]) ?? [:]
+        let command = message[SingBoxKeys.messageCommand] as? String
+        if command == SingBoxKeys.messagePing {
+            // Measurements take up to their timeout and run concurrently:
+            // not on the serial queue that reloads use.
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                let result = ping(message)
+                completionHandler?(try? JSONSerialization.data(withJSONObject: result))
+            }
+            return
+        }
         queue.async { [self] in
-            let command = (try? JSONSerialization.jsonObject(with: messageData) as? [String: Any])?[SingBoxKeys.messageCommand] as? String
             switch command {
             case SingBoxKeys.messageReload:
                 do {
@@ -119,6 +129,27 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
             default:
                 completionHandler?(Data("unknown message".utf8))
             }
+        }
+    }
+
+    /// `pingServer` sent by the app: measured on the physical interface, so
+    /// it bypasses the tunnel and its DNS.
+    private func ping(_ message: [String: Any]) -> [String: Any] {
+        let name = message["method"] as? String ?? ""
+        let host = message["host"] as? String ?? ""
+        let port = (message["port"] as? NSNumber)?.intValue
+        let timeoutMs = (message["timeoutMs"] as? NSNumber)?.intValue ?? 5000
+        do {
+            let method = try SingBoxNativePing.method(name, port: port)
+            return SingBoxNativePing.ping(
+                method,
+                host: host,
+                port: port,
+                timeoutMs: timeoutMs,
+                interfaceIndex: platformInterface.interfaceMonitor.defaultInterfaceIndex
+            )
+        } catch {
+            return ["success": false, "error": error.localizedDescription]
         }
     }
 

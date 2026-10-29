@@ -32,6 +32,10 @@ public enum SingBoxKeys {
     public static let messageCommand = "command"
     /// Provider message command: re-read the configuration file and reload.
     public static let messageReload = "reload"
+    /// Provider message command: `pingServer` outside the tunnel. The message
+    /// also has the `pingServer` arguments (`method`, `host`, `port`,
+    /// `timeoutMs`); the reply is the JSON result map.
+    public static let messagePing = "ping"
 
     /// Darwin notification posted by the extension when it queued a core
     /// notification for the app.
