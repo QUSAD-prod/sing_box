@@ -79,9 +79,33 @@ internal class ServiceSettings(context: Context) {
             prefs.edit().putBoolean(KEY_WAS_RUNNING, value).commit()
         }
 
-    var disableMemoryLimit: Boolean
-        get() = prefs.getBoolean(KEY_DISABLE_MEMORY_LIMIT, false)
-        set(value) = prefs.edit().putBoolean(KEY_DISABLE_MEMORY_LIMIT, value).apply()
+    /** The last config has no TUN inbound: it runs in `SingBoxProxyService` (no VPN). */
+    var proxyMode: Boolean
+        get() = prefs.getBoolean(KEY_PROXY_MODE, false)
+        set(value) {
+            // commit(): read by the service right after the plugin starts it.
+            prefs.edit().putBoolean(KEY_PROXY_MODE, value).commit()
+        }
+
+    /** `VpnService.Builder.allowBypass()` (applied by the next `openTun`). */
+    var allowBypass: Boolean
+        get() = prefs.getBoolean(KEY_ALLOW_BYPASS, false)
+        set(value) = prefs.edit().putBoolean(KEY_ALLOW_BYPASS, value).apply()
+
+    /** The system HTTP proxy of the VPN (`setSystemProxyEnabled`), on by default like SFA. */
+    var systemProxyEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SYSTEM_PROXY_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_SYSTEM_PROXY_ENABLED, value).apply()
+
+    /** Memory monitor mode of `start` (`platformDefault`, `off`, `reportOnly`, `enabled`). */
+    var oomKiller: String
+        get() = prefs.getString(KEY_OOM_KILLER, null) ?: OOM_KILLER_PLATFORM_DEFAULT
+        set(value) = prefs.edit().putString(KEY_OOM_KILLER, value).apply()
+
+    /** Memory limit of the core in bytes, 0 = default. */
+    var memoryLimit: Long
+        get() = prefs.getLong(KEY_MEMORY_LIMIT, 0L)
+        set(value) = prefs.edit().putLong(KEY_MEMORY_LIMIT, value).apply()
 
     var notificationOptions: NotificationOptions
         get() = NotificationOptions(
@@ -112,6 +136,10 @@ internal class ServiceSettings(context: Context) {
     companion object {
         const val PREFS_NAME = "sing_box_service"
         const val DEFAULT_LOG_MAX_LINES = 3000
+        const val OOM_KILLER_PLATFORM_DEFAULT = "platformDefault"
+        const val OOM_KILLER_OFF = "off"
+        const val OOM_KILLER_REPORT_ONLY = "reportOnly"
+        const val OOM_KILLER_ENABLED = "enabled"
 
         private const val KEY_LOG_MAX_LINES = "logMaxLines"
         private const val KEY_DEBUG = "debug"
@@ -119,7 +147,11 @@ internal class ServiceSettings(context: Context) {
         private const val KEY_QS_TILE = "quickSettingsTile"
         private const val KEY_TILE_LABEL = "tileLabel"
         private const val KEY_WAS_RUNNING = "wasRunning"
-        private const val KEY_DISABLE_MEMORY_LIMIT = "disableMemoryLimit"
+        private const val KEY_PROXY_MODE = "proxyMode"
+        private const val KEY_ALLOW_BYPASS = "allowBypass"
+        private const val KEY_SYSTEM_PROXY_ENABLED = "systemProxyEnabled"
+        private const val KEY_OOM_KILLER = "oomKiller"
+        private const val KEY_MEMORY_LIMIT = "memoryLimit"
         private const val KEY_N_CHANNEL_ID = "notification.channelId"
         private const val KEY_N_CHANNEL_NAME = "notification.channelName"
         private const val KEY_N_TITLE = "notification.title"

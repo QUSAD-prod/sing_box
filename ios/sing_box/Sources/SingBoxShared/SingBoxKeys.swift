@@ -16,17 +16,38 @@ public enum SingBoxKeys {
 
     /// App group `UserDefaults` key with the persisted service options.
     public static let serviceOptions = "sing_box.service_options"
-    /// App group `UserDefaults` key: `true` disables the libbox memory limit.
+    /// App group `UserDefaults` key: `true` disables the libbox memory limit
+    /// (written by plugin versions before 1.1.0; see `oomKiller`).
     public static let disableMemoryLimit = "sing_box.disable_memory_limit"
+    /// App group `UserDefaults` key with the memory monitor mode of the last
+    /// start (`platformDefault`, `off`, `reportOnly`, `enabled`).
+    public static let oomKiller = "sing_box.oom_killer"
+    /// App group `UserDefaults` key with the core memory limit in bytes of the
+    /// last start (0 = default).
+    public static let memoryLimit = "sing_box.memory_limit"
+    /// App group `UserDefaults` key: `false` turns the system HTTP proxy of the
+    /// tunnel (TUN `platform.http_proxy`) off (`setSystemProxyEnabled`).
+    public static let systemProxyEnabled = "sing_box.system_proxy_enabled"
     /// App group `UserDefaults` key with notifications the extension posted
     /// that the app has not consumed yet.
     public static let pendingNotifications = "sing_box.pending_notifications"
 
     /// `startVPNTunnel(options:)` key mirroring `disableMemoryLimit`.
     public static let startOptionDisableMemoryLimit = "disableMemoryLimit"
+    /// `startVPNTunnel(options:)` key mirroring `oomKiller`.
+    public static let startOptionOomKiller = "oomKiller"
+    /// `startVPNTunnel(options:)` key mirroring `memoryLimit`.
+    public static let startOptionMemoryLimit = "memoryLimit"
     /// `startVPNTunnel(options:)` key with an inline configuration that takes
     /// precedence over the configuration file.
     public static let startOptionConfigContent = "configContent"
+
+    /// Memory monitor mode (`start` argument `oomKiller`): no OOM killer.
+    public static let oomKillerOff = "off"
+    /// Memory monitor mode: records reports without resetting connections.
+    public static let oomKillerReportOnly = "reportOnly"
+    /// Memory monitor mode: the platform default (enabled on iOS).
+    public static let oomKillerPlatformDefault = "platformDefault"
 
     /// Provider message (`sendProviderMessage`) JSON key.
     public static let messageCommand = "command"

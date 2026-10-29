@@ -16,8 +16,10 @@ import 'src/models/log_entry.dart';
 import 'src/models/network_quality.dart';
 import 'src/models/outbound_group.dart';
 import 'src/models/runtime_info.dart';
+import 'src/models/settings.dart';
 import 'src/models/sing_box_notification.dart';
 import 'src/models/stun_result.dart';
+import 'src/models/system_proxy_status.dart';
 import 'src/options.dart';
 
 export 'src/models/runtime_info.dart';
@@ -161,7 +163,16 @@ abstract class SingBoxPlatform extends PlatformInterface {
   // ---------------------------------------------------------------------------
 
   /// Starts the tunnel with a complete sing-box [config].
-  Future<void> start(String config, {bool disableMemoryLimit = false}) {
+  ///
+  /// [oomKiller] and [memoryLimit] (bytes, `0` = platform default) configure
+  /// the libbox memory monitor; [disableMemoryLimit] is the pre-1.1.0 form of
+  /// `oomKiller: SingBoxOomKiller.off`.
+  Future<void> start(
+    String config, {
+    bool disableMemoryLimit = false,
+    SingBoxOomKiller oomKiller = SingBoxOomKiller.platformDefault,
+    int memoryLimit = 0,
+  }) {
     throw UnimplementedError('start() has not been implemented.');
   }
 
@@ -244,6 +255,20 @@ abstract class SingBoxPlatform extends PlatformInterface {
   /// Closes all connections.
   Future<void> closeAllConnections() {
     throw UnimplementedError('closeAllConnections() has not been implemented.');
+  }
+
+  /// State of the system HTTP proxy of the running tunnel.
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() {
+    throw UnimplementedError(
+      'getSystemProxyStatus() has not been implemented.',
+    );
+  }
+
+  /// Turns the system HTTP proxy of the running tunnel on or off.
+  Future<void> setSystemProxyEnabled(bool enabled) {
+    throw UnimplementedError(
+      'setSystemProxyEnabled() has not been implemented.',
+    );
   }
 
   /// Clears the log buffer of the core.

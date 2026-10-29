@@ -52,7 +52,8 @@ internal class PlatformInterfaceImpl(
 
     override fun autoDetectInterfaceControl(fd: Int) {
         // The probe core runs beside the VPN: keep its sockets out of the tunnel too.
-        val vpn = service ?: SingBoxVpnService.instance ?: return
+        // Proxy-only mode has no tunnel to keep them out of.
+        val vpn = (service ?: SingBoxVpnService.instance)?.takeUnless { it.proxyMode } ?: return
         if (!vpn.protect(fd)) {
             Log.w(TAG, "protect($fd) failed")
         }

@@ -48,6 +48,8 @@ void main() {
           return 'value';
         case 'hasVpnPermission':
           return true;
+        case 'getSystemProxyStatus':
+          return {'available': true, 'enabled': false};
       }
       return null;
     });
@@ -92,6 +94,13 @@ void main() {
     );
     expect((log.last.arguments as Map)['startOnBoot'], isTrue);
     expect((log.last.arguments as Map)['excludeAPNs'], isTrue);
+    expect(
+      await platform.getSystemProxyStatus(),
+      const SingBoxSystemProxyStatus(available: true, enabled: false),
+    );
+    await platform.setSystemProxyEnabled(true);
+    expect(log.last.method, 'setSystemProxyEnabled');
+    expect(log.last.arguments, {'enabled': true});
   });
 
   test('platform errors become typed exceptions', () async {
@@ -110,6 +119,29 @@ void main() {
       platform.start('{}'),
       throwsA(isA<SingBoxPermissionException>()),
     );
+    expect(log.last.arguments, {
+      'config': '{}',
+      'disableMemoryLimit': false,
+      'oomKiller': 'platformDefault',
+      'memoryLimit': 0,
+    });
+    await expectLater(
+      platform.start(
+        '{}',
+        oomKiller: SingBoxOomKiller.reportOnly,
+        memoryLimit: 1 << 20,
+      ),
+      throwsA(isA<SingBoxPermissionException>()),
+    );
+    expect(log.last.arguments, containsPair('oomKiller', 'reportOnly'));
+    expect(log.last.arguments, containsPair('memoryLimit', 1 << 20));
+    // The pre-1.1.0 flag still turns the monitor off.
+    await expectLater(
+      platform.start('{}', disableMemoryLimit: true),
+      throwsA(isA<SingBoxPermissionException>()),
+    );
+    expect(log.last.arguments, containsPair('oomKiller', 'off'));
+    expect(log.last.arguments, containsPair('disableMemoryLimit', true));
     await expectLater(
       platform.reload(),
       throwsA(isA<SingBoxServiceNotRunningException>()),

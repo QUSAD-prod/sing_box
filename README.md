@@ -588,6 +588,49 @@ SingBox.instance.configOptions = const SingBoxConfigOptions(
 );
 ```
 
+#### Proxy-only mode (Android)
+
+`inboundMode: SingBoxInboundMode.proxyOnly` generates a configuration without
+a TUN: no VPN and no VPN permission, only the local proxy (`localProxy`,
+default `127.0.0.1:2080`) that apps use through their proxy settings. The app
+declares the `specialUse` foreground service for it - see
+[doc/android.md](doc/android.md#proxy-only-mode-no-vpn). iOS cannot run the
+core without the VPN and throws `SingBoxUnsupportedException`.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  inboundMode: SingBoxInboundMode.proxyOnly,
+  localProxy: SingBoxLocalProxy(port: 2080),
+);
+await singBox.connectToActiveServer(); // no VPN permission dialog
+```
+
+#### Local proxy and system proxy
+
+`localProxy` adds a local HTTP + SOCKS5 proxy (sing-box `mixed` inbound) next
+to the TUN; with `systemProxy: true` the VPN also announces it as the system
+HTTP proxy (Android 10+, iOS). Apps that honour the system proxy (browsers,
+most HTTP clients) then reach it directly instead of through the TUN, which
+saves a round of packet processing; all other traffic still uses the TUN.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  localProxy: SingBoxLocalProxy(
+    port: 2080,                   // 127.0.0.1:2080, HTTP and SOCKS5
+    systemProxy: true,            // TUN platform.http_proxy
+    bypassDomains: ['example.com'],
+  ),
+);
+
+// While connected: the "System proxy" switch of the official clients.
+final status = await singBox.getSystemProxyStatus(); // available / enabled
+await singBox.setSystemProxyEnabled(false); // remembered on the device
+```
+
+The proxy has no authentication, so every app on the device can use it while
+the VPN runs. Android applies `setSystemProxyEnabled()` by reloading the
+tunnel; iOS updates the tunnel's network settings in place.
+
 Use `SingBoxConfigBuilder` directly to generate configs without connecting:
 
 ```dart
@@ -622,11 +665,38 @@ await singBox.saveSettings(const SingBoxSettings(
   killSwitch: true,                  // iOS: includeAllNetworks
   startOnBoot: true,                 // Android
   quickSettingsTile: true,           // Android
+  allowBypass: false,                // Android: apps may bind to another network and leave the VPN
 ));
 await singBox.updateSetting(SingBoxSettings.keyKillSwitch, false);
 await singBox.openVpnSettings();     // Android: Always-on VPN / Block connections without VPN
 await singBox.requestAddQuickSettingsTile(); // Android 13+
 ```
+
+#### Memory limit (OOM killer)
+
+sing-box can watch its own memory and reset the network (close connections
+and free memory) before the system kills it. `oomKiller` and `memoryLimitMb`
+are applied when the tunnel starts - reconnect after changing them:
+
+```dart
+await singBox.updateSetting(
+  SingBoxSettings.keyOomKiller,
+  SingBoxOomKiller.reportOnly, // only write out-of-memory reports
+);
+await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 300);
+```
+
+| `SingBoxOomKiller` | Behaviour |
+| --- | --- |
+| `platformDefault` | iOS: `enabled` (the Network Extension is killed above ~50 MB). Android: `off`, like sing-box-for-android |
+| `off` | No monitoring, no Go memory limit |
+| `reportOnly` | Monitors and writes reports (`getCoreReports()`), never closes connections |
+| `enabled` | Monitors, resets the network at the limit and writes reports |
+
+`memoryLimitMb` (`0` = default) sets the limit; the Go garbage collector
+targets 80 % of it. Android without a limit reacts to low available system
+memory. iOS: the monitor of the extension always uses the system limit
+(50 MB), a different value only moves the garbage collector target.
 
 ### Error handling
 
@@ -764,7 +834,7 @@ features.
   *Thin Binary* in the Runner build phases.
 - **iOS: the extension is killed under load** - Network Extensions are limited
   to about 50 MB of memory. The bundled core is built for low memory use;
-  avoid huge rule-sets and keep `disableMemoryLimit` off.
+  avoid huge rule-sets and keep `oomKiller` at `platformDefault` or `enabled`.
 - **The first build is slow** - the native library is downloaded once and
   cached.
 
@@ -776,7 +846,9 @@ features.
   the notices (see [License](#license)).
 - **Google Play**: apps that use `VpnService` must have VPN as their core
   functionality and fill in the VPN declaration and the foreground service
-  declaration (`systemExempted`) in the Play Console.
+  declaration (`systemExempted`) in the Play Console. Apps that declare
+  `SingBoxProxyService` for the proxy-only mode also describe the
+  `specialUse` foreground service there.
 - **App Store**: VPN apps must be published by a developer enrolled as an
   organization (App Review Guideline 5.4) and need the Network Extension
   entitlement for both the app and the extension.

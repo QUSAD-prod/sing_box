@@ -145,12 +145,69 @@ void main() {
     expect(speed.uploadMbps, closeTo(10, 0.001));
   });
 
+  test('memory monitor settings', () {
+    const defaults = SingBoxSettings();
+    expect(defaults.oomKiller, SingBoxOomKiller.platformDefault);
+    expect(defaults.memoryLimitMb, 0);
+    expect(defaults.effectiveOomKiller, SingBoxOomKiller.platformDefault);
+
+    final changed = defaults
+        .withValue(SingBoxSettings.keyOomKiller, SingBoxOomKiller.reportOnly)
+        .withValue(SingBoxSettings.keyMemoryLimitMb, 300);
+    expect(changed.oomKiller, SingBoxOomKiller.reportOnly);
+    expect(changed.memoryLimitMb, 300);
+    expect(changed.toMap()[SingBoxSettings.keyOomKiller], 'reportOnly');
+    expect(SingBoxSettings.fromMap(changed.toMap()), changed);
+    expect(
+      defaults.withValue(SingBoxSettings.keyOomKiller, 'enabled').oomKiller,
+      SingBoxOomKiller.enabled,
+    );
+    expect(
+      changed.copyWith(memoryLimitMb: 0),
+      defaults.copyWith(oomKiller: SingBoxOomKiller.reportOnly),
+    );
+
+    for (final (key, value) in [
+      (SingBoxSettings.keyOomKiller, 'sometimes'),
+      (SingBoxSettings.keyOomKiller, true),
+      (SingBoxSettings.keyMemoryLimitMb, -1),
+      (SingBoxSettings.keyMemoryLimitMb, '300'),
+      (SingBoxSettings.keyKillSwitch, 1),
+    ]) {
+      expect(() => defaults.withValue(key, value), throwsArgumentError);
+    }
+
+    // Stored values of an unknown mode or a wrong type fall back to defaults.
+    expect(
+      SingBoxSettings.fromMap({
+        SingBoxSettings.keyOomKiller: 'later',
+        SingBoxSettings.keyMemoryLimitMb: -5,
+      }),
+      defaults,
+    );
+
+    // The deprecated switch still turns the monitor off.
+    expect(
+      SingBoxSettings.fromMap({
+        SingBoxSettings.keyDisableMemoryLimit: true,
+        SingBoxSettings.keyOomKiller: 'enabled',
+      }).effectiveOomKiller,
+      SingBoxOomKiller.off,
+    );
+  });
+
   test('settings round trip and map to service options', () {
-    const settings = SingBoxSettings(killSwitch: true, startOnBoot: true);
+    const settings = SingBoxSettings(
+      killSwitch: true,
+      startOnBoot: true,
+      allowBypass: true,
+    );
     expect(SingBoxSettings.fromMap(settings.toMap()), settings);
     final options = settings.toServiceOptions();
     expect(options.includeAllNetworks, isTrue);
     expect(options.startOnBoot, isTrue);
+    expect(options.toMap()['allowBypass'], isTrue);
+    expect(const SingBoxServiceOptions().toMap()['allowBypass'], isFalse);
     expect(() => settings.withValue('nope', true), throwsArgumentError);
 
     // The iOS options of sing-box-for-apple reach the native side.

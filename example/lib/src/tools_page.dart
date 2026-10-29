@@ -15,10 +15,13 @@ class ToolsPage extends StatefulWidget {
 }
 
 class _ToolsPageState extends State<ToolsPage> {
+  static const _memoryLimits = [0, 50, 100, 200, 300, 500, 1024];
+
   final _singBox = SingBox.instance;
   SingBoxSettings _settings = const SingBoxSettings();
   bool? _vpnPermission;
   bool? _notificationPermission;
+  SingBoxSystemProxyStatus _systemProxy = SingBoxSystemProxyStatus.unavailable;
   SingBoxStunResult? _stun;
   bool _stunRunning = false;
 
@@ -32,15 +35,17 @@ class _ToolsPageState extends State<ToolsPage> {
     final settings = await _singBox.getSettings();
     final vpn = await _singBox.hasVpnPermission();
     final notifications = await _singBox.hasNotificationPermission();
+    final systemProxy = await _singBox.getSystemProxyStatus();
     if (!mounted) return;
     setState(() {
+      _systemProxy = systemProxy;
       _settings = settings;
       _vpnPermission = vpn;
       _notificationPermission = notifications;
     });
   }
 
-  Future<void> _set(String key, bool value) async {
+  Future<void> _set(String key, Object value) async {
     await _singBox.updateSetting(key, value);
     await _reload();
   }
@@ -123,6 +128,14 @@ class _ToolsPageState extends State<ToolsPage> {
               onChanged: (v) => _set(SingBoxSettings.keyStartOnBoot, v),
             ),
             SwitchListTile(
+              title: const Text('Allow bypass'),
+              subtitle: const Text(
+                'Apps may leave the VPN; applied on connect',
+              ),
+              value: _settings.allowBypass,
+              onChanged: (v) => _set(SingBoxSettings.keyAllowBypass, v),
+            ),
+            SwitchListTile(
               title: const Text('Quick Settings tile'),
               value: _settings.quickSettingsTile,
               onChanged: (v) => _set(SingBoxSettings.keyQuickSettingsTile, v),
@@ -150,6 +163,108 @@ class _ToolsPageState extends State<ToolsPage> {
               if (v && Platform.isAndroid) await _singBox.openVpnSettings();
             },
           ),
+          const SectionHeader('Memory limit (applied on connect)'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SegmentedButton<SingBoxOomKiller>(
+              segments: const [
+                ButtonSegment(
+                  value: SingBoxOomKiller.platformDefault,
+                  label: Text('Default'),
+                ),
+                ButtonSegment(value: SingBoxOomKiller.off, label: Text('Off')),
+                ButtonSegment(
+                  value: SingBoxOomKiller.reportOnly,
+                  label: Text('Report'),
+                ),
+                ButtonSegment(
+                  value: SingBoxOomKiller.enabled,
+                  label: Text('On'),
+                ),
+              ],
+              selected: {_settings.oomKiller},
+              onSelectionChanged: (s) =>
+                  _set(SingBoxSettings.keyOomKiller, s.first),
+            ),
+          ),
+          ListTile(
+            title: const Text('Memory limit'),
+            subtitle: Text(
+              _settings.memoryLimitMb == 0
+                  ? 'Platform default'
+                  : '${_settings.memoryLimitMb} MiB',
+            ),
+            trailing: DropdownButton<int>(
+              value: _memoryLimits.contains(_settings.memoryLimitMb)
+                  ? _settings.memoryLimitMb
+                  : 0,
+              items: [
+                for (final mb in _memoryLimits)
+                  DropdownMenuItem(
+                    value: mb,
+                    child: Text(mb == 0 ? 'Default' : '$mb MiB'),
+                  ),
+              ],
+              onChanged: (mb) {
+                if (mb != null) _set(SingBoxSettings.keyMemoryLimitMb, mb);
+              },
+            ),
+          ),
+          const SectionHeader('Local proxy'),
+          SwitchListTile(
+            title: const Text('HTTP/SOCKS5 proxy on 127.0.0.1:2080'),
+            subtitle: const Text('Set as the system proxy; applied on connect'),
+            value: _singBox.configOptions.localProxy != null,
+            onChanged: (v) => setState(() {
+              // Through the map: copyWith cannot reset localProxy to null.
+              final options = _singBox.configOptions.toMap()
+                ..remove('localProxy');
+              _singBox.configOptions = SingBoxConfigOptions.fromMap({
+                ...options,
+                if (v)
+                  'localProxy': const SingBoxLocalProxy(
+                    systemProxy: true,
+                  ).toMap(),
+              });
+            }),
+          ),
+          if (Platform.isAndroid)
+            SwitchListTile(
+              title: const Text('Proxy-only mode (no VPN)'),
+              subtitle: const Text('Only the local proxy; applied on connect'),
+              value:
+                  _singBox.configOptions.inboundMode ==
+                  SingBoxInboundMode.proxyOnly,
+              onChanged: (v) => setState(() {
+                _singBox.configOptions = _singBox.configOptions.copyWith(
+                  inboundMode: v
+                      ? SingBoxInboundMode.proxyOnly
+                      : SingBoxInboundMode.tun,
+                );
+              }),
+            ),
+          if (connected)
+            SwitchListTile(
+              title: const Text('System proxy'),
+              subtitle: Text(
+                _systemProxy.available
+                    ? 'Toggles the proxy without changing the config'
+                    : 'Not available in this configuration',
+              ),
+              value: _systemProxy.enabled,
+              onChanged: _systemProxy.available
+                  ? (v) async {
+                      try {
+                        await _singBox.setSystemProxyEnabled(v);
+                      } on SingBoxException catch (e) {
+                        if (context.mounted) {
+                          showMessage(context, e.message, error: true);
+                        }
+                      }
+                      await _reload();
+                    }
+                  : null,
+            ),
           const SectionHeader('Permissions'),
           ListTile(
             leading: const Icon(Icons.vpn_key_outlined),

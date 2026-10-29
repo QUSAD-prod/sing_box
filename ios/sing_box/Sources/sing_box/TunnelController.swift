@@ -373,7 +373,7 @@ final class TunnelController {
 
     // MARK: - Control
 
-    func start(config: String, disableMemoryLimit: Bool) async throws {
+    func start(config: String, oomKiller: String, memoryLimit: Int64) async throws {
         do {
             try await runInBackground { try SingBoxLibbox.checkConfig(config) }
         } catch {
@@ -384,7 +384,9 @@ final class TunnelController {
         } catch {
             throw PluginError.internalError("Writing the configuration failed: \(error.localizedDescription)")
         }
-        paths.defaults.set(disableMemoryLimit, forKey: SingBoxKeys.disableMemoryLimit)
+        paths.defaults.set(oomKiller, forKey: SingBoxKeys.oomKiller)
+        paths.defaults.set(NSNumber(value: memoryLimit), forKey: SingBoxKeys.memoryLimit)
+        paths.defaults.removeObject(forKey: SingBoxKeys.disableMemoryLimit)
         if !paths.isAppGroupContainer {
             Self.logger.error("starting without an app group container: the extension will not find the configuration")
         }
@@ -429,7 +431,8 @@ final class TunnelController {
         paths.writeLastError(nil)
         do {
             try manager.connection.startVPNTunnel(options: [
-                SingBoxKeys.startOptionDisableMemoryLimit: NSNumber(value: disableMemoryLimit),
+                SingBoxKeys.startOptionOomKiller: oomKiller as NSString,
+                SingBoxKeys.startOptionMemoryLimit: NSNumber(value: memoryLimit),
             ])
         } catch {
             let nsError = error as NSError

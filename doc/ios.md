@@ -137,11 +137,26 @@ included; Go crashes and memory pressure are reported, see
 Nothing is forced: flutter_vless enabled the kill switch unconditionally,
 which broke local networking for many users.
 
+## Proxy-only mode is not available
+
+On iOS the core can only run inside the Packet Tunnel extension, and the
+system starts that extension only as a VPN; the app itself is suspended in
+the background, so it cannot host a proxy server either. `connect()` with a
+configuration without a TUN inbound
+(`SingBoxInboundMode.proxyOnly`) throws a `SingBoxUnsupportedException`.
+To offer a local proxy, keep the TUN and add `SingBoxConfigOptions.localProxy`
+(with `systemProxy: true` it becomes the tunnel's HTTP proxy through
+`NEProxySettings`).
+
 ## Memory
 
 The extension is limited to about 50 MB. libbox for iOS is built with
 `with_low_memory` and the libbox OOM killer is enabled in the extension
-(`SingBoxSettings.disableMemoryLimit` turns it off - only for debugging).
+(`SingBoxSettings.oomKiller`: `platformDefault` = `enabled`; `reportOnly`
+only records out-of-memory reports, `off` disables it - only for debugging).
+Under a Network Extension the monitor always uses the system limit (50 MB);
+`SingBoxSettings.memoryLimitMb` only moves the Go garbage collector target
+(80 % of it).
 Keep configurations lean: large remote rule-sets, many outbounds or big
 connection counts raise the memory use.
 

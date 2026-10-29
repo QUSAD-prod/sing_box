@@ -105,7 +105,9 @@ Arguments:
 | Key | Type | Description |
 | --- | --- | --- |
 | `config` | String | Complete sing-box JSON configuration (required) |
-| `disableMemoryLimit` | bool | iOS: starts the extension with the libbox OOM killer disabled (`SetupOptions.oomKillerEnabled = false`). Android: accepted and ignored (the OOM killer is always off there, like in sing-box-for-android). Default false |
+| `oomKiller` | String | Memory monitor (libbox OOM killer): `platformDefault` (iOS: `enabled`, Android: `off`), `off` (`SetupOptions.oomKillerEnabled = false`), `reportOnly` (`oomKillerEnabled = true`, `oomKillerDisabled = true`: reports only) or `enabled` (`oomKillerEnabled = true`, `oomKillerDisabled = false`). Persisted for starts without the app (Android boot/tile/always-on: `ServiceSettings`; iOS on-demand: app group defaults `sing_box.oom_killer`). Android applies it with `Libbox.reloadSetupOptions` before creating the command server; iOS passes it to the extension as start option `oomKiller`. Default `platformDefault` |
+| `memoryLimit` | int | `SetupOptions.oomMemoryLimit` in bytes, 0 = default (Android: available system memory; iOS: the 50 MB Network Extension limit). Persisted like `oomKiller` (iOS: `sing_box.memory_limit`, start option `memoryLimit`). Default 0 |
+| `disableMemoryLimit` | bool | Pre-1.1.0 form of `oomKiller: off`, still sent (`true` when `oomKiller` is `off`); used only when `oomKiller` is missing. Default false |
 
 Behaviour:
 
@@ -119,6 +121,15 @@ Behaviour:
 * Android: throws `PERMISSION_DENIED` if `VpnService.prepare` returns an
   intent; otherwise starts the foreground VPN service and resolves as soon as
   the service was asked to start (the status stream reports progress).
+* Android proxy-only mode: when `Libbox.hasTunInbound(config)` is false the
+  config runs in `SingBoxProxyService` (`specialUse` foreground service, a
+  subclass of the VPN service without the VPN steps) and no VPN permission is
+  checked. The service must be declared by the app; otherwise `UNSUPPORTED`.
+  The mode is persisted (`ServiceSettings.proxyMode`) for boot and tile
+  starts. A running service of the other mode is not reloaded: `start` throws
+  `START_FAILED` (the Dart side stops first), `reload` with such a config
+  throws `START_FAILED`. The Dart side rejects configs without a TUN on iOS
+  (`UNSUPPORTED`) before calling `start`.
 * Both platforms: when the tunnel was not running, the `connecting` status
   event must be emitted **before** the method result is delivered, and the
   outcome follows on the status stream: `connected`, or `disconnected` with
@@ -148,6 +159,7 @@ Behaviour:
 | Key | Type | Platform | Description |
 | --- | --- | --- | --- |
 | `startOnBoot` | bool | Android | Start the service with the last config after `BOOT_COMPLETED` / package update (requires granted VPN permission) |
+| `allowBypass` | bool | Android | `VpnService.Builder.allowBypass()` in `openTun`: apps may bind sockets to another network and leave the VPN. Applies on the next start or reload |
 | `onDemand` | bool | iOS | `isOnDemandEnabled` with a connect rule for any interface (auto reconnect / always on) |
 | `includeAllNetworks` | bool | iOS 14+ | `protocolConfiguration.includeAllNetworks` (kill switch) |
 | `excludeLocalNetworks` | bool | iOS 14+ | `protocolConfiguration.excludeLocalNetworks` |
@@ -183,6 +195,8 @@ when libbox returns an error.
 | `setClashMode` | `{mode: String}` | `setClashMode(mode)` |
 | `closeConnection` | `{id: String}` | `closeConnection(id)` |
 | `closeAllConnections` | – | `closeConnections()` |
+| `getSystemProxyStatus` | – | `getSystemProxyStatus()`; returns `{available: bool, enabled: bool}` |
+| `setSystemProxyEnabled` | `{enabled: bool}` | `setSystemProxyEnabled(enabled)`. The handler persists the choice for later sessions (Android: `ServiceSettings.systemProxyEnabled`; iOS: app group defaults `sing_box.system_proxy_enabled`; both default `true`) and applies it: Android reloads the service so `openTun` calls (or skips) `VpnService.Builder.setHttpProxy`; iOS updates `NEProxySettings.httpEnabled/httpsEnabled` with `setTunnelNetworkSettings`. `openTun` applies the TUN `platform.http_proxy` only when the stored value is `true`; the status reports `available` when the TUN options enable the HTTP proxy (Android: and Android 10+) and `enabled` when it was applied |
 | `clearLogs` | – | `clearLogs()` |
 | `setGroupExpand` | `{groupTag: String, expand: bool}` | `setGroupExpand(groupTag, expand)` |
 

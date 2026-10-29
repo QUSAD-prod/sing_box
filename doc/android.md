@@ -41,6 +41,51 @@ The plugin declares everything it needs in its own manifest:
 It does **not** declare location or package visibility permissions; add them
 yourself when you need the features below.
 
+## Proxy-only mode (no VPN)
+
+A configuration **without a TUN inbound** runs without the VPN: no VPN
+permission, no VPN key icon, and the core only serves its local proxy
+inbounds. Generate one with
+`SingBoxConfigOptions(inboundMode: SingBoxInboundMode.proxyOnly)` (a `mixed`
+HTTP + SOCKS5 inbound on `127.0.0.1:2080`, see `localProxy`) or connect with
+a complete configuration without `tun`. Apps then use the proxy through their
+own settings (Wi-Fi proxy, browser or app settings).
+
+It runs in `SingBoxProxyService`, a foreground service of the `specialUse`
+type (like the ProxyService of sing-box-for-android). The plugin does **not**
+declare it, so apps that only use the VPN need no `specialUse` declaration on
+Google Play. To use the mode, declare it in your app's
+`android/app/src/main/AndroidManifest.xml` (compileSdk 34+):
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <application>
+        <service
+            android:name="com.qusadprod.sing_box.service.SingBoxProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="proxy" />
+        </service>
+    </application>
+</manifest>
+```
+
+Without it `connect()` throws a `SingBoxUnsupportedException`. Google Play
+asks for a description of the `specialUse` foreground service.
+
+* The notification, the Quick Settings tile, `startOnBoot`, the streams and
+  the commands work as with the VPN.
+* Not available without the VPN: per-app routing, bypassed subnets
+  (`route_exclude_address`), Always-on VPN, `allowBypass`, the system proxy
+  and the latency probe routes (latency tests use sing-box's URL test, TCP and
+  ICMP pings work as usual).
+* Switching between a VPN and a proxy-only configuration restarts the core
+  (`connect()` does it; a `reload` cannot switch).
+* The proxy has no authentication: every app on the device can use it.
+
 ## Per-app routing and package visibility
 
 `SingBoxRoutingRules.proxyApps`, `bypassApps` and `blockedApps` rely on other

@@ -15,8 +15,10 @@ import 'src/models/connection_status.dart';
 import 'src/models/log_entry.dart';
 import 'src/models/network_quality.dart';
 import 'src/models/outbound_group.dart';
+import 'src/models/settings.dart';
 import 'src/models/sing_box_notification.dart';
 import 'src/models/stun_result.dart';
+import 'src/models/system_proxy_status.dart';
 import 'src/options.dart';
 
 /// An implementation of [SingBoxPlatform] that uses method and event
@@ -231,11 +233,20 @@ class MethodChannelSingBox extends SingBoxPlatform {
   // ---------------------------------------------------------------------------
 
   @override
-  Future<void> start(String config, {bool disableMemoryLimit = false}) =>
-      _invoke<void>('start', {
-        'config': config,
-        'disableMemoryLimit': disableMemoryLimit,
-      });
+  Future<void> start(
+    String config, {
+    bool disableMemoryLimit = false,
+    SingBoxOomKiller oomKiller = SingBoxOomKiller.platformDefault,
+    int memoryLimit = 0,
+  }) {
+    final mode = disableMemoryLimit ? SingBoxOomKiller.off : oomKiller;
+    return _invoke<void>('start', {
+      'config': config,
+      'disableMemoryLimit': mode == SingBoxOomKiller.off,
+      'oomKiller': mode.name,
+      'memoryLimit': memoryLimit,
+    });
+  }
 
   @override
   Future<void> stop() => _invoke<void>('stop');
@@ -312,6 +323,18 @@ class MethodChannelSingBox extends SingBoxPlatform {
 
   @override
   Future<void> closeAllConnections() => _invoke<void>('closeAllConnections');
+
+  @override
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() async {
+    final map = await _invoke<Map<dynamic, dynamic>>('getSystemProxyStatus');
+    return map == null
+        ? SingBoxSystemProxyStatus.unavailable
+        : SingBoxSystemProxyStatus.fromMap(map);
+  }
+
+  @override
+  Future<void> setSystemProxyEnabled(bool enabled) =>
+      _invoke<void>('setSystemProxyEnabled', {'enabled': enabled});
 
   @override
   Future<void> clearLogs() => _invoke<void>('clearLogs');

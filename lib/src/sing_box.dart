@@ -25,6 +25,7 @@ import 'models/sing_box_notification.dart';
 import 'models/speed_test_result.dart';
 import 'models/stun_result.dart';
 import 'models/subscription.dart';
+import 'models/system_proxy_status.dart';
 import 'observer/sing_box_observer.dart';
 import 'options.dart';
 import 'rule_set_manager.dart';
@@ -744,6 +745,17 @@ class SingBox {
     }
   }
 
+  /// Whether [config] has a TUN inbound; `true` when it cannot be decoded
+  /// (sing-box reports the problem).
+  static bool _hasTun(String config) {
+    try {
+      final json = jsonDecode(config);
+      return json is! Map || SingBoxConfigBuilder.hasTunInbound(json);
+    } on FormatException {
+      return true;
+    }
+  }
+
   /// Runs platform start/stop requests one after another.
   Future<T> _serviceOperation<T>(Future<T> Function() action) {
     final result = _serviceQueue.then((_) => action());
@@ -776,7 +788,16 @@ class SingBox {
           }
           _checkGeneration(generation);
         }
-        if (!await _platform.hasVpnPermission()) {
+        final vpn = _hasTun(config);
+        if (!vpn && defaultTargetPlatform == TargetPlatform.iOS) {
+          throw const SingBoxUnsupportedException(
+            'iOS runs sing-box only inside the Packet Tunnel extension, which '
+            'is always a VPN: a configuration without a TUN inbound '
+            '(proxy-only mode) cannot run. Use SingBoxConfigOptions.localProxy '
+            'next to the TUN instead.',
+          );
+        }
+        if (vpn && !await _platform.hasVpnPermission()) {
           final granted =
               requestPermission && await _platform.requestVpnPermission();
           if (!granted) {
@@ -787,6 +808,24 @@ class SingBox {
         }
         final settings = await getSettings();
         _checkGeneration(generation);
+        if (_state.status.isActive) {
+          // Android runs VPN and proxy-only configurations in different
+          // services: switching needs a restart instead of a reload.
+          final running = await _platform.getLastConfig();
+          if (running != null && _hasTun(running) != vpn) {
+            _observer.info('Restarting to switch between VPN and proxy-only');
+            await _platform.stop();
+            try {
+              await waitForStatus(
+                SingBoxConnectionStatus.disconnected,
+                timeout: const Duration(seconds: 10),
+              );
+            } on TimeoutException {
+              _observer.warning('The previous session is still stopping');
+            }
+            _checkGeneration(generation);
+          }
+        }
         final wasConnected = _state.status == SingBoxConnectionStatus.connected;
         if (waitUntilConnected && !wasConnected) {
           waiter = _startWaiter = _StartWaiter(_stateController.stream, _state);
@@ -794,7 +833,8 @@ class SingBox {
         _observer.onConnect(config);
         await _platform.start(
           config,
-          disableMemoryLimit: settings.disableMemoryLimit,
+          oomKiller: settings.effectiveOomKiller,
+          memoryLimit: settings.memoryLimitMb * 1024 * 1024,
         );
         _observer.info(
           wasConnected ? 'Tunnel reloaded' : 'Tunnel start requested',
@@ -1820,6 +1860,33 @@ class SingBox {
   Future<void> closeAllConnections() {
     _ensureInitialized();
     return _platform.closeAllConnections();
+  }
+
+  /// State of the system HTTP proxy that the running tunnel announces
+  /// (`SingBoxLocalProxy.systemProxy`).
+  /// [SingBoxSystemProxyStatus.unavailable] while the tunnel is not
+  /// connected.
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() async {
+    _ensureInitialized();
+    if (!isConnected) return SingBoxSystemProxyStatus.unavailable;
+    try {
+      return await _platform.getSystemProxyStatus();
+    } on SingBoxServiceNotRunningException {
+      return SingBoxSystemProxyStatus.unavailable;
+    }
+  }
+
+  /// Turns the system HTTP proxy of the running tunnel on or off without
+  /// changing the configuration (like the "System proxy" switch of the
+  /// official sing-box clients). The choice is remembered for later
+  /// connections on the device. Android reloads the tunnel to apply it; iOS
+  /// updates the tunnel's network settings.
+  ///
+  /// Does nothing when [getSystemProxyStatus] is not `available`. Throws a
+  /// [SingBoxServiceNotRunningException] when the tunnel is not running.
+  Future<void> setSystemProxyEnabled(bool enabled) {
+    _ensureInitialized();
+    return _platform.setSystemProxyEnabled(enabled);
   }
 
   // ===========================================================================

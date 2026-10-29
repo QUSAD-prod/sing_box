@@ -31,7 +31,7 @@ class BootReceiver : BroadcastReceiver() {
                     Log.i(TAG, "boot start skipped: no last config")
                     return@Thread
                 }
-                if (VpnService.prepare(context) != null) {
+                if (!settings.proxyMode && VpnService.prepare(context) != null) {
                     Log.i(TAG, "boot start skipped: VPN permission not granted")
                     return@Thread
                 }

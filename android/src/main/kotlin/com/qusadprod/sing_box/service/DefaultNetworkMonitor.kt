@@ -141,7 +141,7 @@ internal object DefaultNetworkMonitor {
      * capabilities (metered, transport); `null` falls back to the system default.
      */
     private fun setUnderlyingNetwork(network: Network?) {
-        val service = SingBoxVpnService.instance ?: return
+        val service = SingBoxVpnService.vpnInstance ?: return
         runCatching { service.setUnderlyingNetworks(network?.let { arrayOf(it) }) }
             .onFailure { Log.w(TAG, "set underlying networks", it) }
     }

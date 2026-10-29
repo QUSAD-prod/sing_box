@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/sing_box.dart';
 import 'package:sing_box/sing_box_platform_interface.dart';
@@ -92,6 +93,54 @@ void main() {
       );
       final tags = _outboundsOf(platform.started.single).map((o) => o['tag']);
       expect(tags, containsAll([SingBoxConfigBuilder.proxyTag, 'my-ss']));
+    });
+
+    test('proxy-only configs need no VPN permission', () async {
+      platform
+        ..vpnPermission = false
+        ..grantOnRequest = false;
+      singBox.configOptions = const SingBoxConfigOptions(
+        inboundMode: SingBoxInboundMode.proxyOnly,
+      );
+      addTearDown(() => singBox.configOptions = const SingBoxConfigOptions());
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.calls, isNot(contains('requestVpnPermission')));
+      final inbounds =
+          (_decode(platform.started.single)['inbounds'] as List)
+              .cast<Map<dynamic, dynamic>>();
+      expect(inbounds.map((i) => i['type']), ['mixed']);
+    });
+
+    test('switching between VPN and proxy-only restarts', () async {
+      await singBox.connect(jsonEncode(_ssOutbound));
+      singBox.configOptions = const SingBoxConfigOptions(
+        inboundMode: SingBoxInboundMode.proxyOnly,
+      );
+      addTearDown(() => singBox.configOptions = const SingBoxConfigOptions());
+      platform.calls.clear();
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.calls.where((c) => c == 'stop' || c == 'start'), [
+        'stop',
+        'start',
+      ]);
+      expect(platform.calls, isNot(contains('reload')));
+      expect(singBox.isConnected, isTrue);
+    });
+
+    test('iOS rejects proxy-only configs', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final config = jsonEncode({
+        'inbounds': [
+          {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': 2080},
+        ],
+        'outbounds': [_ssOutbound],
+      });
+      await expectLater(
+        singBox.connect(config, applyRules: false),
+        throwsA(isA<SingBoxUnsupportedException>()),
+      );
+      expect(platform.started, isEmpty);
     });
 
     test('parses share links', () async {
@@ -935,6 +984,52 @@ void main() {
         await singBox.updateSetting(SingBoxSettings.keyKillSwitch, 'yes'),
         isFalse,
       );
+    });
+
+    test('system proxy status and switch', () async {
+      expect(
+        await singBox.getSystemProxyStatus(),
+        SingBoxSystemProxyStatus.unavailable,
+      );
+      // Not connected: the platform is not asked.
+      expect(platform.calls, isNot(contains('getSystemProxyStatus')));
+      await singBox.connect(jsonEncode(_ssOutbound));
+      platform.systemProxyStatus = const SingBoxSystemProxyStatus(
+        available: true,
+        enabled: true,
+      );
+      await singBox.setSystemProxyEnabled(false);
+      expect(platform.calls, contains('setSystemProxyEnabled:false'));
+      expect(
+        await singBox.getSystemProxyStatus(),
+        const SingBoxSystemProxyStatus(available: true, enabled: false),
+      );
+    });
+
+    test('memory monitor settings reach start', () async {
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.platformDefault);
+      expect(platform.startMemoryLimit, 0);
+      await singBox.disconnect();
+
+      expect(
+        await singBox.updateSetting(
+          SingBoxSettings.keyOomKiller,
+          SingBoxOomKiller.enabled,
+        ),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 200),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, -1),
+        isFalse,
+      );
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.enabled);
+      expect(platform.startMemoryLimit, 200 * 1024 * 1024);
     });
 
     test('server profile CRUD and active selection', () async {
