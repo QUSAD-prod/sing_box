@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 6e81f1f4-4e4f-462d-8363-f66a9f5d22e8
-  modified: 2026-10-29T20:30:00.000Z
+  modified: 2026-10-29T20:44:47.893Z
 ---
 
 Rewritten in full on 2026-10-29 (evening) at the user's request as the handoff for the next chat; updated after R7
@@ -29,11 +29,14 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 
 ## 1. Where things are
 - Repo `github.com/QUSAD-prod/sing_box`. `main` = 1.0.0 (published on pub.dev manually, no tag / GitHub release).
-- Work branch **`release-1.1.0`**, checked out in worktree
-  `/Users/qusadprod/projects/sing_box/.claude/worktrees/singbox-flutter-plugin-review-22aa2f` (has the local libbox
-  copies `android/libs/libbox.aar` + `ios/sing_box/Frameworks/Libbox.xcframework`, git-ignored). If a new chat
+- Work branch **`release-1.1.0`**, since 2026-10-29 night checked out in worktree
+  `/Users/qusadprod/projects/sing_box/.claude/worktrees/merge-updates-hadoff-testing-2f4a0e` (has the local libbox
+  copies `android/libs/libbox.aar` + `ios/sing_box/Frameworks/Libbox.xcframework`, git-ignored; the old worktree
+  `singbox-flutter-plugin-review-22aa2f` is on a detached HEAD and still has copies too). If a new chat
   starts in another worktree: that worktree may hold `release-1.1.0` checked out elsewhere - check `git worktree
-  list`; free it with `git -C <other> switch <its claude/... branch>` (only if clean), then `git switch release-1.1.0`.
+  list`; free it with `git -C <other> switch --detach` (only if clean), then `git switch release-1.1.0` and copy the
+  two libbox files. A session hook forbids Edit/Write in another session's worktree - so always move the branch.
+- **Pushed by the user 2026-10-29 23:47: `release-1.1.0` = `42fb96b`** (710ea75 Android watchClashMode fix, 42fb96b R7 e2e tests on top of 4ba144d); nothing unpushed.
 - **Pushed 2026-10-29 (at the user's request, from a cloud session): `release-1.1.0` = `4ba144d` (R7), nothing
   unpushed.** PR #3 "Release 1.1.0" (release-1.1.0 → main) is open; CI runs on its pull_request events (push to
   release-1.1.0 alone does not trigger CI; workflow_dispatch does).
@@ -71,7 +74,7 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
   (registerDefaultNetworkCallback until TRANSPORT_VPN) unless the app itself is excluded.
 - **e2e** (example/integration_test/vpn_e2e_test.dart) deterministic: rule-set test uses `ir` fixtures
   (`server/rules/geoip-ir.json`, `geosite-category-ir.json`); "starts without the rules of unreachable rule-sets".
-  **Android emulator e2e 8/8 in ~30 s** (last run after 2ff067e).
+  **Android emulator e2e 11/11 in ~45 s** (8 + 3 R7 tests; last runs 2026-10-29 night on 42fb96b).
 - **R14 comparison with official clients** (SFA/SFI at their "Bump version 1.14.4" commits, desktop 8aab8ea) and fixes:
   core crash/OOM reports `getCoreReports()/deleteCoreReport()/deleteCoreReports()`, `SingBoxCoreReport`
   (reads `<workingDir>/crash_reports|oom_reports`), `Libbox.promoteOOMDraft()` before the tunnel's command server,
@@ -139,13 +142,18 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - libbox `HasTunInbound(config)`; SFA picks VPNService vs ProxyService by it. SFA 1.14.4 also has OOM settings
   (default off, limit 50 MB options) and `systemProxyEnabled` (default true, toggle = reload).
 - `VpnService.Builder.setHttpProxy` only applies to a new interface → toggling needs a reload (Android).
+- libbox on Android (`sFixAndroidStack`) calls `InitializeClashMode` in a goroutine → `UpdateClashMode` may come first
+  (our handler emitted `modes: []`; fixed in 710ea75). Watch for the same pattern in other libbox callbacks.
+- OOM killer (`service/oomkiller`) logs nothing at start → only observable through reports / killed connections.
+- Check VPN network state from the host: `adb shell dumpsys connectivity | grep -oE "HttpProxy: \[[^]]*\] [0-9]+|bypassable=(true|false)"`.
 
 ## 4. Open / unverified (be honest about these)
-- **R7 runs nowhere yet**: only unit tests + CI builds (Kotlin/Swift compile, `sing-box check`). Not run on a device
-  or emulator: OOM modes (no OOM report triggered), system proxy switch (Android reload, iOS live update), allowBypass,
-  proxy-only mode (SingBoxProxyService start/stop, notification, tile, boot, Android 14 `specialUse` FGS start),
-  mode switching restart. No e2e test covers them yet (good candidates: proxy-only connect + HTTP through
-  127.0.0.1:2080 on the emulator; system proxy status).
+- **R7 on the Android emulator (2026-10-29 night, e2e 11/11 twice, 42fb96b)**: VERIFIED proxy-only connect (no VPN,
+  HTTP through 127.0.0.1:2080, `specialUse` FGS starts on Android 17), VPN↔proxy-only switching restart, local proxy
+  next to the TUN, system proxy status + switch (dumpsys: `HttpProxy: [127.0.0.1] 2080` on the VPN network, gone
+  after switching off), allowBypass (dumpsys `bypassable=true`), connect with oomKiller enabled/reportOnly + 256 MB.
+  NOT verified: the OOM killer actually acting / writing a report, proxy-only notification/tile/boot, any R7 on iOS
+  (system proxy live update, OOM options in the extension) - iOS needs a real device.
 - Nothing with a **running tunnel on a real iPhone** was ever tested (needs the user's paid team): extension ping
   path, iOS route/NE options, crash/OOM reports on iOS, local rule-sets read by the extension.
 - Not verified on a device: rule-set files written to `<workingDir>/rule-sets` and reloaded by a running core.
@@ -158,8 +166,7 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - Still unchecked: `apply()` with `ipVersion` ≠ dual on a config without `dns`.
 
 ## 5. Next (priority queue)
-1. R7 DONE (code + CI); verify on the Android emulator when the user has the Mac (see section 4).
-   Next: **R8 lx core** (API design D1 = option A `SingBoxExtended extends SingBox`, details in [[roadmap]] R8)
+1. R7 DONE (code + CI + Android emulator e2e, see section 4). Next: **R8 lx core** (API design D1 = option A `SingBoxExtended extends SingBox`, details in [[roadmap]] R8)
    → R13 protocol matrix → R15 deps → R9 README/pub.dev (user's README order: protocol table first, platforms,
    features, install/docs, "Buy Me a Coffee" last - ask the link) → R10-R12.
 2. **Release 1.1.0** whenever the user says: PR release-1.1.0 → main (squash merge), `doc/releasing.md`.

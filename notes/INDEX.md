@@ -1,4 +1,4 @@
-- [NAVIGATOR — start here](navigator.md) — full handoff: release-1.1.0 pushed (4ba144d, PR #3), CI green; R0-R7 + SFA/SFI fixes done; open items; next R8; how to test; code map
+- [NAVIGATOR — start here](navigator.md) — full handoff: release-1.1.0 = 42fb96b pushed (PR #3; clash mode fix + R7 e2e); R0-R7 done, R7 verified on Android emulator; next R8; how to test; code map
 - [sing_box plugin rewrite](sing-box-plugin-rewrite.md) — 1.0.0 rewrite on libbox 1.14.4; branch `1.0.0`, docs in CONTRIBUTING/doc/releasing; GPL
 - [libbox build environment](libbox-build-environment.md) — Flutter/JDK/Go paths, emulator & simulator ids, Xcode cache fix, sing-box CLI
 - [No subagents](feedback-no-subagents.md) — do sing_box work inline, sequentially; subagents burned the limit
