@@ -7,12 +7,14 @@
 #   scripts/release_libbox.sh                    # update version/checksums in the repo
 #   scripts/release_libbox.sh --publish          # ... and create the GitHub release
 #   scripts/release_libbox.sh --publish --force  # ... replacing different assets
+#   scripts/release_libbox.sh --core lx [...]    # the sing-box-lx core
 #
 # Expects build/libbox/libbox.aar and build/libbox/Libbox.xcframework.zip
-# (produced by scripts/build_libbox.sh). Updates:
-#   - LIBBOX_VERSION
-#   - android/libbox.properties   (version, sha256)
-#   - ios/sing_box/Package.swift  (libboxVersion, libboxChecksum)
+# (produced by scripts/build_libbox.sh; lx: build/libbox-lx/). Updates:
+#   - LIBBOX_VERSION                (lx: LIBBOX_LX_VERSION)
+#   - android/libbox.properties   (version, sha256; lx: lx.version, lx.sha256)
+#   - ios/sing_box/Package.swift  (libboxVersion, libboxChecksum; lx:
+#                                  libboxLxVersion, libboxLxChecksum)
 # The CocoaPods specs read the values from Package.swift.
 #
 # Publishing requires the GitHub CLI (`gh auth login`) with write access to
@@ -25,21 +27,43 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="$ROOT_DIR/build/libbox"
 REPO="${REPO:-QUSAD-prod/sing_box}"
-VERSION="${SING_BOX_VERSION:-$(tr -d '[:space:]' < "$ROOT_DIR/LIBBOX_VERSION")}"
-VERSION="${VERSION#v}"
-TAG="libbox-v$VERSION"
+CORE="${SING_BOX_CORE:-standard}"
 PUBLISH=0
 FORCE=0
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --publish) PUBLISH=1 ;;
     --force) FORCE=1 ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
-    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+    --core) shift; CORE="${1:-}" ;;
+    --core=*) CORE="${1#--core=}" ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
+  shift
 done
+case "$CORE" in
+  standard)
+    OUT_DIR="$ROOT_DIR/build/libbox"
+    VERSION_FILE="$ROOT_DIR/LIBBOX_VERSION"
+    PROPS_PREFIX=""
+    SWIFT_VERSION_LET="libboxVersion"
+    SWIFT_CHECKSUM_LET="libboxChecksum"
+    SOURCE_URL="https://github.com/SagerNet/sing-box/tree"
+    ;;
+  lx)
+    OUT_DIR="$ROOT_DIR/build/libbox-lx"
+    VERSION_FILE="$ROOT_DIR/LIBBOX_LX_VERSION"
+    PROPS_PREFIX="lx\\."
+    SWIFT_VERSION_LET="libboxLxVersion"
+    SWIFT_CHECKSUM_LET="libboxLxChecksum"
+    SOURCE_URL="https://github.com/Leadaxe/sing-box-lx/tree"
+    ;;
+  *) echo "Unknown core: $CORE (standard or lx)" >&2; exit 2 ;;
+esac
+VERSION="${SING_BOX_VERSION:-$(tr -d '[:space:]' < "$VERSION_FILE")}"
+VERSION="${VERSION#v}"
+TAG="libbox-v$VERSION"
 
 die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 log() { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
@@ -55,21 +79,21 @@ log "libbox $VERSION"
 log "  libbox.aar              $AAR_SHA"
 log "  Libbox.xcframework.zip  $ZIP_SHA"
 
-echo "$VERSION" > "$ROOT_DIR/LIBBOX_VERSION"
+echo "$VERSION" > "$VERSION_FILE"
 
 PROPS="$ROOT_DIR/android/libbox.properties"
-sed -i.bak -E "s/^version=.*/version=$VERSION/; s/^sha256=.*/sha256=$AAR_SHA/" "$PROPS"
+sed -i.bak -E "s/^${PROPS_PREFIX}version=.*/${PROPS_PREFIX//\\/}version=$VERSION/; s/^${PROPS_PREFIX}sha256=.*/${PROPS_PREFIX//\\/}sha256=$AAR_SHA/" "$PROPS"
 rm -f "$PROPS.bak"
 
 PACKAGE="$ROOT_DIR/ios/sing_box/Package.swift"
 sed -i.bak -E \
-  -e "s/(let libboxVersion = \")[^\"]*\"/\1$VERSION\"/" \
-  -e "s/(let libboxChecksum = \")[^\"]*\"/\1$ZIP_SHA\"/" \
+  -e "s/(let $SWIFT_VERSION_LET = \")[^\"]*\"/\1$VERSION\"/" \
+  -e "s/(let $SWIFT_CHECKSUM_LET = \")[^\"]*\"/\1$ZIP_SHA\"/" \
   "$PACKAGE"
 rm -f "$PACKAGE.bak"
-grep -q "let libboxVersion = \"$VERSION\"" "$PACKAGE" || die "could not update libboxVersion in $PACKAGE"
-grep -q "let libboxChecksum = \"$ZIP_SHA\"" "$PACKAGE" || die "could not update libboxChecksum in $PACKAGE"
-log "Updated LIBBOX_VERSION, android/libbox.properties and ios/sing_box/Package.swift"
+grep -q "let $SWIFT_VERSION_LET = \"$VERSION\"" "$PACKAGE" || die "could not update $SWIFT_VERSION_LET in $PACKAGE"
+grep -q "let $SWIFT_CHECKSUM_LET = \"$ZIP_SHA\"" "$PACKAGE" || die "could not update $SWIFT_CHECKSUM_LET in $PACKAGE"
+log "Updated ${VERSION_FILE##*/}, android/libbox.properties and ios/sing_box/Package.swift"
 
 if [[ $PUBLISH -eq 0 ]]; then
   log "Dry run done. Re-run with --publish to upload the assets to $REPO@$TAG."
@@ -84,7 +108,7 @@ NOTES="sing-box $VERSION native libraries for the sing_box Flutter plugin.
 | libbox.aar | \`$AAR_SHA\` |
 | Libbox.xcframework.zip | \`$ZIP_SHA\` |
 
-Built with scripts/build_libbox.sh from https://github.com/SagerNet/sing-box/tree/v$VERSION (GPL-3.0-or-later)."
+Built with scripts/build_libbox.sh from $SOURCE_URL/v$VERSION (GPL-3.0-or-later)."
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   PUBLISHED="$(mktemp -d)"

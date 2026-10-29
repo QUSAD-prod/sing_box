@@ -233,7 +233,7 @@ final class CommandStreamHandler: NSObject, FlutterStreamHandler {
 /// Receives libbox callbacks on Go threads and forwards them to the main
 /// thread. Payloads are converted before hopping threads because libbox
 /// iterators must not be shared.
-private final class ClientHandler: NSObject, LibboxCommandClientHandlerProtocol {
+private final class ClientHandler: CoreCommandClientHandler, LibboxCommandClientHandlerProtocol {
     private weak var owner: CommandStreamHandler?
     private let token: UInt64
 

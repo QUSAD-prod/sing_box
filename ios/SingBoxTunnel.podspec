@@ -33,7 +33,7 @@ sing_box Flutter plugin. Link it into the app's Network Extension target.
   s.resource_bundles = { 'SingBoxTunnel_privacy' => ['sing_box/Sources/SingBoxTunnel/PrivacyInfo.xcprivacy'] }
 
   s.vendored_frameworks = SingBoxLibbox.ensure!(__dir__)
-  s.preserve_paths = 'sing_box/Frameworks/Libbox.xcframework'
+  s.preserve_paths = SingBoxLibbox.framework
   s.frameworks = 'NetworkExtension', 'UserNotifications'
   s.libraries = 'resolv'
 

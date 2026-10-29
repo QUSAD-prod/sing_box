@@ -52,12 +52,14 @@ jobs:
   # release. Check that it is published and matches the pinned checksums
   # first, so a missing release fails here in seconds with a clear message
   # instead of in three platform builds (see doc/releasing.md, step 3).
+  # The builds use the standard core; the publish workflow also checks the
+  # sing-box-lx release.
   libbox:
     name: libbox release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: scripts/verify_libbox_release.sh
+      - run: scripts/verify_libbox_release.sh standard
 
   android:
     name: Build example (Android)

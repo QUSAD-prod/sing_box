@@ -814,15 +814,23 @@ sing_box:
 ```
 
 The environment variable `SING_BOX_CORE` (or the Gradle property
-`singBox.core`) overrides it. At runtime `SingBox.instance.core` tells which
+`singBox.core`) overrides it. iOS with Swift Package Manager (the default
+since Flutter 3.44) cannot read the app's `pubspec.yaml`: build with
+`SING_BOX_CORE=lx flutter build ios` (or start Xcode from a shell with that
+variable); CocoaPods builds read the `pubspec.yaml`. After switching the core
+on iOS run `flutter clean` and delete `~/Library/Developer/Xcode/DerivedData/
+Runner-*`, otherwise Xcode keeps the other core's precompiled module. At runtime `SingBox.instance.core` tells which
 core runs and `supports(SingBoxCoreFeature.xhttp)` checks a feature; members
 that need the lx core live in `SingBoxExtended.instance` (the same object as
 `SingBox.instance`) and throw a `SingBoxUnsupportedException` ("requires the
 sing-box-lx core") on the standard core.
 
-Status: Android only for now (iOS follows); the lx libbox is not published
-yet, build it with `scripts/build_libbox.sh android --core lx --install`. The
-plugin's whole Android end-to-end suite passes on both cores.
+Status: the lx libbox is not published yet, build it with
+`scripts/build_libbox.sh android apple --core lx --install`. The plugin's
+whole Android end-to-end suite passes on both cores; on iOS the simulator
+checks (no tunnel there) pass with both cores, with SwiftPM and CocoaPods. A
+running lx tunnel on an iPhone is not tested yet: the Network Extension has
+a ~50 MB memory limit and the lx core is ~5 % larger.
 
 ## Building libbox yourself
 
@@ -837,7 +845,7 @@ them into the plugin so local builds skip the download. Requirements: Go 1.25+,
 Android SDK + NDK, JDK 17/21, Xcode. Set `LIBBOX_TAGS` to change the compiled
 features. `--core lx` builds the sing-box-lx core (version from
 `LIBBOX_LX_VERSION`) into `build/libbox-lx/`; `--install` then puts it at
-`android/libs/libbox-lx.aar`.
+`android/libs/libbox-lx.aar` and `ios/sing_box/Frameworks/lx/`.
 
 ### Using your own libbox build
 

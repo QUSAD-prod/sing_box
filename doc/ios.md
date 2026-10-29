@@ -160,6 +160,35 @@ Under a Network Extension the monitor always uses the system limit (50 MB);
 Keep configurations lean: large remote rule-sets, many outbounds or big
 connection counts raise the memory use.
 
+## sing-box-lx core
+
+The sing-box-lx core (README "sing-box-lx core") is chosen when the app is
+built:
+
+- Swift Package Manager: `SING_BOX_CORE=lx` in the environment of the build
+  (`flutter build ios`, `xcodebuild`, Xcode started from such a shell).
+  SwiftPM resolves the plugin's symlink in `ios/Flutter/ephemeral/Packages/
+  .packages/`, so `Package.swift` sees the plugin directory and cannot find
+  the app's `pubspec.yaml`.
+- CocoaPods: `SING_BOX_CORE`, else `sing_box: core:` of the `pubspec.yaml`
+  next to the directory of the app's Podfile (`ios/libbox.rb`). Run
+  `pod install` again after changing it.
+
+The lx framework comes from `libboxLxVersion` / `libboxLxChecksum` of
+`Package.swift` (local copy: `ios/sing_box/Frameworks/lx/`). The lx libbox
+adds `writeDNSQuery` to `LibboxCommandClientHandlerProtocol`; the plugin
+target compiles `Sources/sing_box/Core/<core>` with a per-core base class of
+its handler. Switching the core needs a clean build (`flutter clean` and
+`~/Library/Developer/Xcode/DerivedData/Runner-*`): both frameworks are the
+module `Libbox`, and Xcode otherwise reuses the other core's precompiled
+module ("has been modified since the module file ... was built").
+
+The lx framework is ~5 % larger than the standard one (226 MB vs 214 MB
+unpacked, both architectures). On the simulator the app's memory with a
+running probe core is the same for both cores (~105 MB footprint); a
+running lx tunnel in the extension (50 MB limit) has not been measured on a
+device yet.
+
 ## Latency tests
 
 * Connected: the app's request to the probe address (`198.51.100.1`,
