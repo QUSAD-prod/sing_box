@@ -169,15 +169,31 @@ internal class OutboundsStreamHandler(scope: CoroutineScope) : CommandStreamHand
 /** `sing_box/clash_mode`: `CommandClashMode`. */
 internal class ClashModeStreamHandler(scope: CoroutineScope) : CommandStreamHandler(scope) {
     override fun createSession() = object : CommandSession(Libbox.CommandClashMode, reconnectOnReload = true) {
-        @Volatile
-        private var modes: List<String> = emptyList()
+        // libbox calls initializeClashMode from a goroutine on Android (sFixAndroidStack), so an
+        // update can arrive first: hold it back instead of sending an empty mode list. The update
+        // comes from the subscription opened after the status was read, so it is the newer mode.
+        private var modes: List<String>? = null
+        private var pendingMode: String? = null
 
         override fun onInitializeClashMode(modes: List<String>, current: String) {
-            this.modes = modes
-            sink.success(mapOf("modes" to modes, "current" to current))
+            synchronized(this) {
+                this.modes = modes
+                val mode = pendingMode ?: current
+                pendingMode = null
+                sink.success(mapOf("modes" to modes, "current" to mode))
+            }
         }
 
-        override fun onClashMode(mode: String) = sink.success(mapOf("modes" to modes, "current" to mode))
+        override fun onClashMode(mode: String) {
+            synchronized(this) {
+                val modes = modes
+                if (modes == null) {
+                    pendingMode = mode
+                } else {
+                    sink.success(mapOf("modes" to modes, "current" to mode))
+                }
+            }
+        }
     }
 }
 
