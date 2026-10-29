@@ -150,6 +150,7 @@ Behaviour:
 | Key | Type | Platform | Description |
 | --- | --- | --- | --- |
 | `startOnBoot` | bool | Android | Start the service with the last config after `BOOT_COMPLETED` / package update (requires granted VPN permission) |
+| `allowBypass` | bool | Android | `VpnService.Builder.allowBypass()` in `openTun`: apps may bind sockets to another network and leave the VPN. Applies on the next start or reload |
 | `onDemand` | bool | iOS | `isOnDemandEnabled` with a connect rule for any interface (auto reconnect / always on) |
 | `includeAllNetworks` | bool | iOS 14+ | `protocolConfiguration.includeAllNetworks` (kill switch) |
 | `excludeLocalNetworks` | bool | iOS 14+ | `protocolConfiguration.excludeLocalNetworks` |

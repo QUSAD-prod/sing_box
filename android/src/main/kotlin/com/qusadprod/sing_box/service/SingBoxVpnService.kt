@@ -445,6 +445,8 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             .setSession(notificationOptions.sessionName ?: AppInfo.label(this))
             .setMtu(options.mtu)
         AppInfo.launchPendingIntent(this, 1)?.let { builder.setConfigureIntent(it) }
+        // Apps may bind sockets to the underlying network and leave the VPN (SFA "Allow Bypass").
+        if (settings.allowBypass) builder.allowBypass()
         // false = "metered only if the underlying network is" (set below), not "always unmetered".
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)

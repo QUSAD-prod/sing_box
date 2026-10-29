@@ -648,6 +648,7 @@ await singBox.saveSettings(const SingBoxSettings(
   killSwitch: true,                  // iOS: includeAllNetworks
   startOnBoot: true,                 // Android
   quickSettingsTile: true,           // Android
+  allowBypass: false,                // Android: apps may bind to another network and leave the VPN
 ));
 await singBox.updateSetting(SingBoxSettings.keyKillSwitch, false);
 await singBox.openVpnSettings();     // Android: Always-on VPN / Block connections without VPN

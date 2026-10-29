@@ -492,6 +492,7 @@ class SingBoxPlugin :
     private fun setServiceOptions(options: Map<*, *>) {
         val settings = ServiceSettings(context)
         (options["startOnBoot"] as? Boolean)?.let { settings.startOnBoot = it }
+        (options["allowBypass"] as? Boolean)?.let { settings.allowBypass = it }
         (options["quickSettingsTile"] as? Boolean)?.let {
             settings.quickSettingsTile = it
             SingBoxTileService.setEnabled(context, it)

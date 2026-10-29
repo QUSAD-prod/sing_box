@@ -128,6 +128,14 @@ class _ToolsPageState extends State<ToolsPage> {
               onChanged: (v) => _set(SingBoxSettings.keyStartOnBoot, v),
             ),
             SwitchListTile(
+              title: const Text('Allow bypass'),
+              subtitle: const Text(
+                'Apps may leave the VPN; applied on connect',
+              ),
+              value: _settings.allowBypass,
+              onChanged: (v) => _set(SingBoxSettings.keyAllowBypass, v),
+            ),
+            SwitchListTile(
               title: const Text('Quick Settings tile'),
               value: _settings.quickSettingsTile,
               onChanged: (v) => _set(SingBoxSettings.keyQuickSettingsTile, v),

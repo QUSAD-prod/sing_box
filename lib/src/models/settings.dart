@@ -55,6 +55,7 @@ class SingBoxSettings {
     this.excludeApnsRoute = false,
     this.oomKiller = SingBoxOomKiller.platformDefault,
     this.memoryLimitMb = 0,
+    this.allowBypass = false,
   }) : assert(memoryLimitMb >= 0, 'memoryLimitMb must not be negative');
 
   /// Setting key for [autoConnectOnStart], used by `SingBox.updateSetting()`.
@@ -106,6 +107,9 @@ class SingBoxSettings {
   /// Setting key for [memoryLimitMb]; `updateSetting()` takes an `int`.
   static const keyMemoryLimitMb = 'memoryLimitMb';
 
+  /// Setting key for [allowBypass].
+  static const keyAllowBypass = 'allowBypass';
+
   /// All valid setting keys.
   static const keys = [
     keyQuickSettingsTile,
@@ -124,6 +128,7 @@ class SingBoxSettings {
     keyExcludeApnsRoute,
     keyOomKiller,
     keyMemoryLimitMb,
+    keyAllowBypass,
   ];
 
   /// Connect to the active server automatically when
@@ -207,6 +212,12 @@ class SingBoxSettings {
   /// the garbage collector target.
   final int memoryLimitMb;
 
+  /// Android: `VpnService.Builder.allowBypass()` - apps may bind their
+  /// sockets to another network (`Network.bindSocket`) and so leave the VPN
+  /// on purpose (sing-box-for-android's "Allow Bypass"). Applied when the
+  /// tunnel starts. iOS has no such option.
+  final bool allowBypass;
+
   /// The memory monitor mode actually used: [SingBoxOomKiller.off] when the
   /// deprecated [disableMemoryLimit] is set, [oomKiller] otherwise.
   SingBoxOomKiller get effectiveOomKiller =>
@@ -243,6 +254,7 @@ class SingBoxSettings {
         final int value when value >= 0 => value,
         _ => 0,
       },
+      allowBypass: read(keyAllowBypass, false),
     );
   }
 
@@ -264,6 +276,7 @@ class SingBoxSettings {
     keyExcludeApnsRoute: excludeApnsRoute,
     keyOomKiller: oomKiller.name,
     keyMemoryLimitMb: memoryLimitMb,
+    keyAllowBypass: allowBypass,
   };
 
   /// Returns a copy with [key] set to [value].
@@ -326,6 +339,7 @@ class SingBoxSettings {
     excludeDefaultRoute: excludeDefaultRoute,
     noDefaultRoute: noDefaultRoute,
     excludeApnsRoute: excludeApnsRoute,
+    allowBypass: allowBypass,
   );
 
   /// Creates a copy with modified fields.
@@ -346,6 +360,7 @@ class SingBoxSettings {
     bool? excludeApnsRoute,
     SingBoxOomKiller? oomKiller,
     int? memoryLimitMb,
+    bool? allowBypass,
   }) {
     return SingBoxSettings(
       autoConnectOnStart: autoConnectOnStart ?? this.autoConnectOnStart,
@@ -367,6 +382,7 @@ class SingBoxSettings {
       excludeApnsRoute: excludeApnsRoute ?? this.excludeApnsRoute,
       oomKiller: oomKiller ?? this.oomKiller,
       memoryLimitMb: memoryLimitMb ?? this.memoryLimitMb,
+      allowBypass: allowBypass ?? this.allowBypass,
     );
   }
 
@@ -388,7 +404,8 @@ class SingBoxSettings {
       other.noDefaultRoute == noDefaultRoute &&
       other.excludeApnsRoute == excludeApnsRoute &&
       other.oomKiller == oomKiller &&
-      other.memoryLimitMb == memoryLimitMb;
+      other.memoryLimitMb == memoryLimitMb &&
+      other.allowBypass == allowBypass;
 
   @override
   int get hashCode => Object.hash(
@@ -408,6 +425,7 @@ class SingBoxSettings {
     excludeApnsRoute,
     oomKiller,
     memoryLimitMb,
+    allowBypass,
   );
 
   @override

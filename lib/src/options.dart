@@ -150,6 +150,7 @@ class SingBoxServiceOptions {
     this.excludeDefaultRoute = false,
     this.noDefaultRoute = false,
     this.excludeApnsRoute = false,
+    this.allowBypass = false,
   });
 
   /// Android: start the VPN with the last configuration after the device
@@ -207,6 +208,11 @@ class SingBoxServiceOptions {
   /// system HTTP proxy (unlike [excludeApns] it works without [includeAllNetworks]).
   final bool excludeApnsRoute;
 
+  /// Android: `VpnService.Builder.allowBypass()` - apps may bind their
+  /// sockets to another network and leave the VPN. Applied when the tunnel
+  /// starts.
+  final bool allowBypass;
+
   /// Serializes the options for the platform channel.
   Map<String, dynamic> toMap() => {
     'quickSettingsTile': quickSettingsTile,
@@ -221,6 +227,7 @@ class SingBoxServiceOptions {
     'excludeDefaultRoute': excludeDefaultRoute,
     'noDefaultRoute': noDefaultRoute,
     'excludeAPNsRoute': excludeApnsRoute,
+    'allowBypass': allowBypass,
   };
 }
 

@@ -197,11 +197,17 @@ void main() {
   });
 
   test('settings round trip and map to service options', () {
-    const settings = SingBoxSettings(killSwitch: true, startOnBoot: true);
+    const settings = SingBoxSettings(
+      killSwitch: true,
+      startOnBoot: true,
+      allowBypass: true,
+    );
     expect(SingBoxSettings.fromMap(settings.toMap()), settings);
     final options = settings.toServiceOptions();
     expect(options.includeAllNetworks, isTrue);
     expect(options.startOnBoot, isTrue);
+    expect(options.toMap()['allowBypass'], isTrue);
+    expect(const SingBoxServiceOptions().toMap()['allowBypass'], isFalse);
     expect(() => settings.withValue('nope', true), throwsArgumentError);
 
     // The iOS options of sing-box-for-apple reach the native side.

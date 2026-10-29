@@ -72,6 +72,9 @@
   `apply()` adds both to complete configurations. `getSystemProxyStatus()`
   and `setSystemProxyEnabled()` switch the system proxy of the running
   tunnel and remember the choice, like the official clients.
+- Android: `SingBoxSettings.allowBypass` / `SingBoxServiceOptions.allowBypass`
+  (`VpnService.Builder.allowBypass()`, sing-box-for-android's "Allow
+  Bypass").
 - `dart run sing_box:setup_ios` adds the Packet Tunnel extension without
   Ruby gems. With Swift Package Manager (default since Flutter 3.44) the
   extension links `SingBoxTunnel` through Flutter's generated Swift package,
