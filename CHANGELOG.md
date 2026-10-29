@@ -97,6 +97,8 @@
 - Android: a configuration with `wifi_ssid` / `wifi_bssid` rules but without
   the location permission now logs a warning in the core log instead of
   silently never matching.
+- Android: `watchClashMode()` sometimes started with an empty mode list
+  (libbox can deliver the first mode update before the mode list).
 
 ### Changed
 - `SingBoxPingMethod.urlTest` is deprecated (alias of `proxyHead`);
