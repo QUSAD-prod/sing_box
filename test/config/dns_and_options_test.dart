@@ -207,6 +207,25 @@ void main() {
       }
     });
 
+    test('GitHub rule-sets have jsDelivr mirrors', () {
+      expect(SingBoxRuleSets.mirrors(SingBoxRuleSets.url('geoip-ru')), [
+        'https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs',
+        'https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs',
+      ]);
+      expect(
+        SingBoxRuleSets.mirrors(SingBoxRuleSets.url('geoip-ru-blocked')).first,
+        'https://cdn.jsdelivr.net/gh/runetfreedom/russia-v2ray-rules-dat@release/sing-box/rule-set-geoip/geoip-ru-blocked.srs',
+      );
+      expect(
+        SingBoxRuleSets.mirrors('https://example.com/a/b/c/d.srs'),
+        isEmpty,
+      );
+      expect(
+        SingBoxRuleSets.mirrors('https://raw.githubusercontent.com/a/b'),
+        isEmpty,
+      );
+    });
+
     test('remote rule-set objects', () {
       expect(
         SingBoxRuleSets.remote(

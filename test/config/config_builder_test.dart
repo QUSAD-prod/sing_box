@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/src/config/config.dart';
@@ -994,6 +995,145 @@ void main() {
         ).build([vless], rules: all),
       );
     }, skip: singBoxBinary == null ? 'SING_BOX_BIN is not set' : null);
+  });
+
+  group('downloaded rule-sets', () {
+    // A real compiled rule-set, so that `sing-box check` can load it.
+    final srs = File('test/config/support/example.srs').absolute.path;
+    const rules = SingBoxRoutingRules(
+      mode: SingBoxRoutingMode.proxyListed,
+      blockAds: true,
+      bypassCountries: ['ru'],
+      blockedInCountries: ['ru'],
+      customRules: [
+        SingBoxRoutingRule(
+          action: SingBoxRuleAction.proxy,
+          ruleSets: ['https://example.com/x/list.json'],
+        ),
+      ],
+    );
+
+    test('ruleSetUrls lists what build references', () {
+      const mirror = SingBoxConfigBuilder(
+        SingBoxConfigOptions(
+          geositeRuleSetUrl: 'https://m.example/site/{tag}.srs',
+        ),
+      );
+      final urls = mirror.ruleSetUrls(rules);
+      expect(urls.keys, [
+        'geosite-category-ads-all',
+        'custom-list',
+        'geosite-ru-blocked',
+        'geoip-ru-blocked',
+        'geosite-category-ru',
+        'geosite-ru-available-only-inside',
+        'geoip-ru',
+      ]);
+      expect(
+        urls['geosite-category-ads-all'],
+        'https://m.example/site/geosite-category-ads-all.srs',
+      );
+      expect(urls['custom-list'], 'https://example.com/x/list.json');
+      expect(urls['geoip-ru-blocked'], SingBoxRuleSets.url('geoip-ru-blocked'));
+      expect(
+        ruleSetTags(builder.build([vless], rules: rules)),
+        builder.ruleSetUrls(rules).keys,
+      );
+      expect(builder.ruleSetUrls(const SingBoxRoutingRules()), isEmpty);
+    });
+
+    test('local files are used and rules without them are left out', () async {
+      final paths = {
+        for (final tag in builder.ruleSetUrls(rules).keys)
+          if (tag != 'geosite-category-ads-all' && tag != 'geoip-ru')
+            tag: tag == 'custom-list' ? '/data/list.json' : srs,
+      };
+      final config = builder.build([vless], rules: rules, ruleSetPaths: paths);
+      final sets =
+          ((config['route'] as Map)['rule_set'] as List)
+              .cast<Map<String, dynamic>>();
+      expect(sets.map((s) => s['type']).toSet(), {'local'});
+      expect(sets.first, {
+        'type': 'local',
+        'tag': 'custom-list',
+        'format': 'source',
+        'path': '/data/list.json',
+      });
+      expect(config.containsKey('http_clients'), isFalse);
+      // The ads rules are gone from routing and DNS, geoip-ru from its rule.
+      final all = [...routeRules(config), ...dnsRules(config)];
+      expect(
+        all.where(
+          (r) =>
+              (r['rule_set'] as List?)?.contains('geosite-category-ads-all') ??
+              false,
+        ),
+        isEmpty,
+      );
+      expect(
+        routeRules(config),
+        contains(
+          equals({
+            'rule_set': [
+              'geosite-category-ru',
+              'geosite-ru-available-only-inside',
+            ],
+            'action': 'route',
+            'outbound': 'direct',
+          }),
+        ),
+      );
+
+      final checkable = builder.build(
+        [vless],
+        rules: rules.copyWith(customRules: const []),
+        ruleSetPaths: {for (final tag in paths.keys) tag: srs},
+      );
+      await expectSingBoxAccepts(checkable);
+    });
+
+    test('nothing available: every rule-set rule is left out', () async {
+      final config = builder.build(
+        [vless],
+        rules: rules,
+        ruleSetPaths: const {},
+      );
+      expect(ruleSetTags(config), isEmpty);
+      expect(
+        [
+          ...routeRules(config),
+          ...dnsRules(config),
+        ].where((r) => r.containsKey('rule_set')),
+        isEmpty,
+      );
+      await expectSingBoxAccepts(config);
+    });
+
+    test('apply only touches the inserted rules', () async {
+      final user = userConfig();
+      (user['route'] as Map)['rule_set'] = [
+        {'type': 'local', 'tag': 'mine', 'format': 'binary', 'path': srs},
+      ];
+      ((user['route'] as Map)['rules'] as List).add({
+        'rule_set': ['mine'],
+        'action': 'reject',
+      });
+      final result = builder.apply(
+        user,
+        rules: const SingBoxRoutingRules(
+          blockAds: true,
+          bypassCountries: ['de'],
+        ),
+        ruleSetPaths: {'geoip-de': srs},
+      );
+      expect(ruleSetTags(result), ['mine', 'geoip-de']);
+      expect(routeRules(result).last, {
+        'rule_set': ['mine'],
+        'action': 'reject',
+      });
+      expect(result.containsKey('http_clients'), isFalse);
+      await expectSingBoxAccepts(result);
+    });
   });
 
   group('options', () {

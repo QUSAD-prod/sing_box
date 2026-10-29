@@ -16,6 +16,7 @@ import 'models/log_entry.dart';
 import 'models/network_quality.dart';
 import 'models/outbound_group.dart';
 import 'models/ping_result.dart';
+import 'models/rule_set_status.dart';
 import 'models/server_config.dart';
 import 'models/settings.dart';
 import 'models/sing_box_notification.dart';
@@ -24,6 +25,7 @@ import 'models/stun_result.dart';
 import 'models/subscription.dart';
 import 'observer/sing_box_observer.dart';
 import 'options.dart';
+import 'rule_set_manager.dart';
 import 'storage.dart';
 import 'subscription_loader.dart';
 import 'utils/validators.dart';
@@ -112,6 +114,19 @@ class SingBox {
   /// Timeout of one subscription download.
   Duration subscriptionTimeout = const Duration(seconds: 30);
 
+  /// Whether the plugin downloads the rule-sets of the routing rules itself
+  /// (default `true`): into the working directory, with jsDelivr mirrors for
+  /// GitHub, refreshed after [SingBoxConfigOptions.ruleSetUpdateInterval].
+  /// Generated configurations then read local files, and rules whose
+  /// rule-sets could not be downloaded yet are left out instead of making
+  /// the start fail (see [getRuleSets], [updateRuleSets]).
+  ///
+  /// With `false` sing-box downloads remote rule-sets itself and aborts the
+  /// start when the first download of one fails.
+  bool manageRuleSets = true;
+
+  RuleSetManager? _ruleSets;
+
   final _subscriptionChanges =
       StreamController<List<SingBoxSubscription>>.broadcast();
 
@@ -174,6 +189,13 @@ class SingBox {
             (Object e, StackTrace s) =>
                 _observer.error('Notification stream error', e, s),
       );
+      final workingDirectory = _runtimeInfo!.workingDirectory;
+      if (workingDirectory != null && workingDirectory.isNotEmpty) {
+        _ruleSets = RuleSetManager(
+          Directory('$workingDirectory/rule-sets'),
+          onWarning: (message, data) => _observer.warning(message, data),
+        );
+      }
       _isInitialized = true;
       _observer.info('sing_box initialized', {
         'singBoxVersion': _runtimeInfo!.singBoxVersion,
@@ -195,6 +217,15 @@ class SingBox {
       unawaited(_autoConnect());
     }
     unawaited(_autoUpdateSubscriptions());
+    unawaited(_autoUpdateRuleSets());
+  }
+
+  Future<void> _autoUpdateRuleSets() async {
+    try {
+      await updateRuleSets();
+    } on Object catch (e, s) {
+      _observer.error('Automatic rule-set update failed', e, s);
+    }
   }
 
   Future<void> _autoUpdateSubscriptions() async {
@@ -252,6 +283,9 @@ class SingBox {
     _isInitialized = false;
     _initializing = null;
     _runtimeInfo = null;
+    await _ruleSets?.dispose();
+    _ruleSets = null;
+    manageRuleSets = true;
     _state = SingBoxConnectionState.initial;
     _lastStats = null;
     _observer = const SingBoxNoOpObserver();
@@ -322,13 +356,39 @@ class SingBox {
     String? selectedTag,
   }) async {
     final effectiveRules = rules ?? await getRoutingRules();
+    final effectiveOptions = options ?? configOptions;
     return _build(
       input,
       rules: effectiveRules,
-      options: options ?? configOptions,
+      options: effectiveOptions,
       applyRules: applyRules,
       selectedTag: selectedTag,
+      ruleSetPaths: await _prepareRuleSets(effectiveRules, effectiveOptions),
     );
+  }
+
+  /// Downloads the rule-sets of [rules] that are missing and returns tag →
+  /// file for the available ones, or `null` when the core should download
+  /// them itself ([manageRuleSets] is off or no working directory is known).
+  Future<Map<String, String>?> _prepareRuleSets(
+    SingBoxRoutingRules rules,
+    SingBoxConfigOptions options,
+  ) async {
+    final manager = _ruleSets;
+    if (!manageRuleSets || manager == null) return null;
+    final urls = SingBoxConfigBuilder(options).ruleSetUrls(rules);
+    if (urls.isEmpty) return const {};
+    final paths = await manager.prepare(
+      urls,
+      maxAge: options.ruleSetUpdateInterval,
+    );
+    final missing = urls.keys.where((tag) => !paths.containsKey(tag));
+    if (missing.isNotEmpty) {
+      _observer.warning('Rules left out until their rule-sets download', {
+        'ruleSets': missing.join(', '),
+      });
+    }
+    return paths;
   }
 
   String _build(
@@ -337,6 +397,7 @@ class SingBox {
     required SingBoxConfigOptions options,
     required bool applyRules,
     String? selectedTag,
+    Map<String, String>? ruleSetPaths,
   }) {
     final trimmed = input.trim();
     if (trimmed.isEmpty) {
@@ -357,11 +418,18 @@ class SingBox {
             map.containsKey('endpoints');
         if (isFull) {
           return jsonEncode(
-            applyRules ? builder.apply(map, rules: rules) : map,
+            applyRules
+                ? builder.apply(map, rules: rules, ruleSetPaths: ruleSetPaths)
+                : map,
           );
         }
         return jsonEncode(
-          builder.build([map], rules: rules, selectedTag: selectedTag),
+          builder.build(
+            [map],
+            rules: rules,
+            selectedTag: selectedTag,
+            ruleSetPaths: ruleSetPaths,
+          ),
         );
       }
       if (trimmed.startsWith('[')) {
@@ -378,7 +446,12 @@ class SingBox {
           throw const SingBoxConfigException('The outbound list is empty.');
         }
         return jsonEncode(
-          builder.build(outbounds, rules: rules, selectedTag: selectedTag),
+          builder.build(
+            outbounds,
+            rules: rules,
+            selectedTag: selectedTag,
+            ruleSetPaths: ruleSetPaths,
+          ),
         );
       }
       final outbounds = SingBoxShareLink.parseSubscription(trimmed);
@@ -394,6 +467,7 @@ class SingBox {
           outbounds.map((o) => o.json).toList(),
           rules: rules,
           selectedTag: selectedTag,
+          ruleSetPaths: ruleSetPaths,
         ),
       );
     } on SingBoxException {
@@ -1773,6 +1847,60 @@ class SingBox {
     await _synchronized(() => saveRoutingRules(rules));
     return rules;
   }
+
+  /// The rule-sets downloaded (or attempted) for the routing rules, see
+  /// [manageRuleSets]. Empty before [initialize] and when the platform
+  /// reports no working directory.
+  Future<List<SingBoxRuleSetStatus>> getRuleSets() async =>
+      await _ruleSets?.statuses() ?? const [];
+
+  /// Downloads the rule-sets used by the stored routing rules: the missing,
+  /// failed and outdated ones, or all of them with [force]. Returns their
+  /// statuses (check [SingBoxRuleSetStatus.lastError]).
+  ///
+  /// A running tunnel picks up refreshed files by itself. When a rule-set
+  /// becomes available that the tunnel had to leave out, the tunnel is
+  /// reloaded (if [reloadOnRulesChange] is enabled). [initialize] calls this
+  /// in the background.
+  Future<List<SingBoxRuleSetStatus>> updateRuleSets({
+    bool force = false,
+  }) async {
+    final manager = _ruleSets;
+    if (!manageRuleSets || manager == null) return const [];
+    final options = configOptions;
+    final urls = SingBoxConfigBuilder(
+      options,
+    ).ruleSetUrls(await getRoutingRules());
+    if (urls.isEmpty) return const [];
+    final before = {
+      for (final status in await manager.statuses())
+        if (status.isAvailable && urls[status.tag] == status.url) status.tag,
+    };
+    final statuses = await manager.update(
+      urls,
+      maxAge: options.ruleSetUpdateInterval,
+      force: force,
+    );
+    final added = statuses.any(
+      (status) => status.isAvailable && !before.contains(status.tag),
+    );
+    if (added &&
+        reloadOnRulesChange &&
+        _isInitialized &&
+        _state.status.isActive) {
+      try {
+        await reapplyRules();
+      } on SingBoxException catch (e, s) {
+        _observer.error('Failed to apply the downloaded rule-sets', e, s);
+      }
+    }
+    return statuses;
+  }
+
+  /// Emits the statuses of all rule-sets after every download attempt
+  /// (nothing before [initialize]).
+  Stream<List<SingBoxRuleSetStatus>> watchRuleSets() =>
+      _ruleSets?.changes ?? const Stream.empty();
 
   /// The user defined routing rules (see [SingBoxRoutingRule]).
   Future<List<SingBoxRoutingRule>> getCustomRules() async =>

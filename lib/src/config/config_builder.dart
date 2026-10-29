@@ -83,12 +83,21 @@ class SingBoxConfigBuilder {
   /// becomes the default member of the [proxyTag] selector (by default the
   /// [autoTag] group when there are several outbounds).
   ///
+  /// [ruleSetPaths] maps rule-set tags to downloaded files (see
+  /// [ruleSetUrls]). Those rule-sets are referenced as `local` files and the
+  /// rules whose rule-sets are all missing from the map are left out, so the
+  /// core never downloads anything at startup (sing-box aborts the start
+  /// when a remote rule-set cannot be downloaded the first time). With
+  /// `null` (the default) remote rule-sets are referenced and sing-box
+  /// downloads them itself.
+  ///
   /// Throws an [ArgumentError] when [outbounds] is empty or an entry has no
   /// `type`.
   Map<String, dynamic> build(
     List<Map<String, dynamic>> outbounds, {
     SingBoxRoutingRules rules = const SingBoxRoutingRules(),
     String? selectedTag,
+    Map<String, String>? ruleSetPaths,
   }) {
     if (outbounds.isEmpty) {
       throw ArgumentError.value(outbounds, 'outbounds', 'No outbounds given');
@@ -114,7 +123,7 @@ class SingBoxConfigBuilder {
             : selectorMembers.first;
 
     final custom = _CustomRules(rules, sniff: options.sniff);
-    final routeRules = [
+    final routeRules = _withRuleSets([
       ..._leadingRouteRules(),
       ..._routingRules(
         rules,
@@ -125,12 +134,17 @@ class SingBoxConfigBuilder {
         includeClashModes: true,
       ),
       ..._ipVersionRules(rules),
-    ];
+    ], ruleSetPaths);
+    final dns = _dns(rules, custom);
+    dns['rules'] = _withRuleSets(
+      dns['rules'] as List<Map<String, dynamic>>,
+      ruleSetPaths,
+    );
     // DNS rules only use rule-sets that the route rules use as well.
     final ruleSetTags = _referencedRuleSets(routeRules);
     final config = <String, dynamic>{
       'log': _log(),
-      'dns': _dns(rules, custom),
+      'dns': dns,
       'inbounds': [_tunInbound(rules)],
       'outbounds': [
         {
@@ -158,13 +172,15 @@ class SingBoxConfigBuilder {
         'rules': routeRules,
         if (ruleSetTags.isNotEmpty)
           'rule_set': [
-            for (final tag in ruleSetTags) _ruleSet(tag, custom.urls),
+            for (final tag in ruleSetTags)
+              _ruleSet(tag, custom.urls, ruleSetPaths),
           ],
         'final': _isListed(rules) ? directTag : proxyTag,
         'auto_detect_interface': true,
         'default_domain_resolver': dnsDirectTag,
       },
-      if (ruleSetTags.isNotEmpty) 'http_clients': [_ruleSetHttpClient()],
+      if (ruleSetTags.any((tag) => ruleSetPaths?[tag] == null))
+        'http_clients': [_ruleSetHttpClient()],
       'experimental': _experimental(),
     };
     return config;
@@ -228,9 +244,12 @@ class SingBoxConfigBuilder {
   /// * [SingBoxRoutingRules.ipVersion] other than `dual` sets `dns.strategy`
   ///   and, for IPv4 only, appends a route rule rejecting IPv6 connections
   ///   after the user's own rules.
+  /// * [ruleSetPaths] works as in [build] for the inserted rules; the user's
+  ///   own rule-sets are not changed.
   Map<String, dynamic> apply(
     Map<String, dynamic> config, {
     SingBoxRoutingRules rules = const SingBoxRoutingRules(),
+    Map<String, String>? ruleSetPaths,
   }) {
     final result = deepCopyMap(config);
 
@@ -297,13 +316,16 @@ class SingBoxConfigBuilder {
     // Protocol rules only work when the config sniffs.
     final sniff = routeRules.any((r) => r['action'] == 'sniff');
     final custom = _CustomRules(rules, sniff: sniff);
-    final inserted = _routingRules(
-      rules,
-      custom,
-      direct,
-      proxy: proxy,
-      sniff: sniff,
-      includeClashModes: false,
+    final inserted = _withRuleSets(
+      _routingRules(
+        rules,
+        custom,
+        direct,
+        proxy: proxy,
+        sniff: sniff,
+        includeClashModes: false,
+      ),
+      ruleSetPaths,
     );
     routeRules.insertAll(insertAt, inserted);
     routeRules.addAll(_ipVersionRules(rules));
@@ -313,12 +335,18 @@ class SingBoxConfigBuilder {
     if (ruleSetTags.isNotEmpty) {
       final ruleSets = _list(route, 'rule_set');
       final existing = ruleSets.map((r) => r['tag']).toSet();
+      var remote = false;
       for (final tag in ruleSetTags) {
-        if (!existing.contains(tag)) ruleSets.add(_ruleSet(tag, custom.urls));
+        if (existing.contains(tag)) continue;
+        final ruleSet = _ruleSet(tag, custom.urls, ruleSetPaths);
+        remote = remote || ruleSet['type'] == 'remote';
+        ruleSets.add(ruleSet);
       }
-      final clients = _list(result, 'http_clients');
-      if (!clients.any((c) => c['tag'] == ruleSetHttpClientTag)) {
-        clients.add(_ruleSetHttpClient());
+      if (remote) {
+        final clients = _list(result, 'http_clients');
+        if (!clients.any((c) => c['tag'] == ruleSetHttpClientTag)) {
+          clients.add(_ruleSetHttpClient());
+        }
       }
     }
 
@@ -655,9 +683,49 @@ class SingBoxConfigBuilder {
     'clash_api': {if (options.enableClashModes) 'default_mode': 'Rule'},
   };
 
-  /// Remote rule-set [tag]: a catalog entry of [SingBoxRuleSets], or one
-  /// given by URL in a custom rule ([customUrls]).
-  Map<String, dynamic> _ruleSet(String tag, Map<String, String> customUrls) {
+  /// Download URLs of the rule-sets that [build] references for [rules], by
+  /// tag: the catalog lists of [SingBoxRuleSets] (with the URL templates of
+  /// [options]) and the URLs of the custom rules. Download them and pass the
+  /// files as `ruleSetPaths` so the core does not have to.
+  Map<String, String> ruleSetUrls(SingBoxRoutingRules rules) {
+    final custom = _CustomRules(rules, sniff: options.sniff);
+    final routeRules = _routingRules(
+      rules,
+      custom,
+      directTag,
+      proxy: proxyTag,
+      sniff: options.sniff,
+      includeClashModes: false,
+    );
+    return {
+      for (final tag in _referencedRuleSets(routeRules))
+        tag: custom.urls[tag] ?? _catalogUrl(tag),
+    };
+  }
+
+  String _catalogUrl(String tag) => SingBoxRuleSets.url(
+    tag,
+    geoipUrl: options.geoipRuleSetUrl,
+    geositeUrl: options.geositeRuleSetUrl,
+  );
+
+  /// Definition of the rule-set [tag]: a `local` file from [paths], else a
+  /// remote catalog entry of [SingBoxRuleSets] or one given by URL in a
+  /// custom rule ([customUrls]).
+  Map<String, dynamic> _ruleSet(
+    String tag,
+    Map<String, String> customUrls,
+    Map<String, String>? paths,
+  ) {
+    final path = paths?[tag];
+    if (path != null) {
+      return {
+        'type': 'local',
+        'tag': tag,
+        'format': _formatOf(path),
+        'path': path,
+      };
+    }
     final url = customUrls[tag];
     if (url == null) {
       return SingBoxRuleSets.remote(
@@ -668,15 +736,39 @@ class SingBoxConfigBuilder {
         geositeUrl: options.geositeRuleSetUrl,
       );
     }
-    final path = Uri.parse(url).path.toLowerCase();
     return {
       'type': 'remote',
       'tag': tag,
-      'format': path.endsWith('.json') ? 'source' : 'binary',
+      'format': _formatOf(Uri.parse(url).path),
       'url': url,
       'http_client': ruleSetHttpClientTag,
       'update_interval': formatDuration(options.ruleSetUpdateInterval),
     };
+  }
+
+  /// `source` for JSON rule-sets, `binary` (`.srs`) otherwise.
+  static String _formatOf(String path) =>
+      path.toLowerCase().endsWith('.json') ? 'source' : 'binary';
+
+  /// [rules] without the rule-sets missing from [paths] (unchanged when
+  /// [paths] is `null`). A rule left without rule-sets is dropped: without
+  /// them it would match far more than intended.
+  static List<Map<String, dynamic>> _withRuleSets(
+    List<Map<String, dynamic>> rules,
+    Map<String, String>? paths,
+  ) {
+    if (paths == null) return rules;
+    final result = <Map<String, dynamic>>[];
+    for (final rule in rules) {
+      final sets = rule['rule_set'];
+      if (sets is! List) {
+        result.add(rule);
+        continue;
+      }
+      final kept = sets.where(paths.containsKey).toList();
+      if (kept.isNotEmpty) result.add({...rule, 'rule_set': kept});
+    }
+    return result;
   }
 
   Map<String, dynamic> _ruleSetHttpClient() => {

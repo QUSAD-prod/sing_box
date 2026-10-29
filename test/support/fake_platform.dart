@@ -17,6 +17,9 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   SingBoxServiceOptions? serviceOptions;
   SingBoxOptions? initOptions;
   SingBoxConnectionStatus initialStatus = SingBoxConnectionStatus.disconnected;
+
+  /// Reported by [initialize]; enables the plugin's rule-set downloads.
+  String? workingDirectory;
   final List<String> started = [];
   final List<String?> reloaded = [];
 
@@ -69,7 +72,11 @@ class FakeSingBoxPlatform extends SingBoxPlatform
   Future<SingBoxRuntimeInfo> initialize(SingBoxOptions options) async {
     calls.add('initialize');
     initOptions = options;
-    return SingBoxRuntimeInfo(singBoxVersion: '1.14.4', status: initialStatus);
+    return SingBoxRuntimeInfo(
+      singBoxVersion: '1.14.4',
+      status: initialStatus,
+      workingDirectory: workingDirectory,
+    );
   }
 
   @override

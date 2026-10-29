@@ -37,6 +37,7 @@ export 'src/models/log_entry.dart';
 export 'src/models/network_quality.dart';
 export 'src/models/outbound_group.dart';
 export 'src/models/ping_result.dart';
+export 'src/models/rule_set_status.dart';
 export 'src/models/runtime_info.dart';
 export 'src/models/server_config.dart';
 export 'src/models/settings.dart';

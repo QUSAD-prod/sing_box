@@ -146,6 +146,27 @@ abstract final class SingBoxRuleSets {
     return template.replaceAll('{tag}', tag);
   }
 
+  /// Mirror URLs of a rule-set [url] hosted on `raw.githubusercontent.com`
+  /// (jsDelivr CDNs, reachable where GitHub is not); empty for other hosts.
+  ///
+  /// ```dart
+  /// SingBoxRuleSets.mirrors(SingBoxRuleSets.url('geoip-ru')).first;
+  /// // 'https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs'
+  /// ```
+  static List<String> mirrors(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host != 'raw.githubusercontent.com') return const [];
+    final segments = uri.pathSegments;
+    if (segments.length < 4) return const [];
+    final path =
+        '${segments[0]}/${segments[1]}@${segments[2]}/'
+        '${segments.skip(3).join('/')}';
+    return [
+      'https://cdn.jsdelivr.net/gh/$path',
+      'https://testingcf.jsdelivr.net/gh/$path',
+    ];
+  }
+
   /// A remote binary rule-set definition for `route.rule_set`.
   ///
   /// [httpClient] is the tag of an entry of the top-level `http_clients`
