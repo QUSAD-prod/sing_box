@@ -33,6 +33,7 @@ export 'src/models/clash_mode.dart';
 export 'src/models/connection.dart';
 export 'src/models/connection_stats.dart';
 export 'src/models/connection_status.dart';
+export 'src/models/core_report.dart' hide loadCoreReports;
 export 'src/models/log_entry.dart';
 export 'src/models/network_quality.dart';
 export 'src/models/outbound_group.dart';

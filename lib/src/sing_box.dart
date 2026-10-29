@@ -13,6 +13,7 @@ import 'models/clash_mode.dart';
 import 'models/connection.dart';
 import 'models/connection_stats.dart';
 import 'models/connection_status.dart';
+import 'models/core_report.dart';
 import 'models/log_entry.dart';
 import 'models/network_quality.dart';
 import 'models/outbound_group.dart';
@@ -2215,6 +2216,30 @@ class SingBox {
   /// (nothing before [initialize]).
   Stream<List<SingBoxRuleSetStatus>> watchRuleSets() =>
       _ruleSets?.changes ?? const Stream.empty();
+
+  /// Crash and out-of-memory reports of the core, newest first (see
+  /// [SingBoxCoreReport]). The core files a crash report when it starts
+  /// again after the crash (next connect) and an out-of-memory report when
+  /// the tunnel starts after the memory pressure. Empty before [initialize]
+  /// and when the platform reports no working directory.
+  Future<List<SingBoxCoreReport>> getCoreReports() async {
+    final workingDirectory = _runtimeInfo?.workingDirectory;
+    if (workingDirectory == null || workingDirectory.isEmpty) return const [];
+    return loadCoreReports(workingDirectory);
+  }
+
+  /// Deletes [report] (after it was shared, for example).
+  Future<void> deleteCoreReport(SingBoxCoreReport report) async {
+    final directory = Directory(report.directory);
+    if (await directory.exists()) await directory.delete(recursive: true);
+  }
+
+  /// Deletes all reports returned by [getCoreReports].
+  Future<void> deleteCoreReports() async {
+    for (final report in await getCoreReports()) {
+      await deleteCoreReport(report);
+    }
+  }
 
   /// The user defined routing rules (see [SingBoxRoutingRule]).
   Future<List<SingBoxRoutingRule>> getCustomRules() async =>

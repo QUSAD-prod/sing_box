@@ -27,12 +27,14 @@ public enum SingBoxLibbox {
     ///     extension does this for every tunnel session).
     ///   - oomKillerEnabled: enables libbox's memory limit / OOM killer, which
     ///     keeps the extension below the Network Extension memory limit.
+    ///   - platformMetadata: extra JSON fields for crash and OOM reports.
     public static func setup(
         paths: SingBoxPaths,
         logMaxLines: Int,
         debug: Bool,
         crashReportSource: String,
         oomKillerEnabled: Bool,
+        platformMetadata: [String: Any] = [:],
         force: Bool
     ) throws {
         lock.lock()
@@ -49,6 +51,7 @@ public enum SingBoxLibbox {
         options.debug = debug
         options.crashReportSource = crashReportSource
         options.oomKillerEnabled = oomKillerEnabled
+        options.platformMetadata = Self.platformMetadata(platformMetadata)
         let info = Bundle.main.infoDictionary
         if let build = info?["CFBundleVersion"] as? String {
             options.appVersion = build
@@ -62,6 +65,22 @@ public enum SingBoxLibbox {
             throw SingBoxError("libbox setup: \(error.localizedDescription)")
         }
         setupBasePath = paths.baseDirectory.path
+    }
+
+    /// Platform description stored in crash and OOM reports.
+    private static func platformMetadata(_ extra: [String: Any]) -> String {
+        var metadata = extra
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        metadata["os"] = "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        var system = utsname()
+        uname(&system)
+        metadata["model"] = withUnsafeBytes(of: system.machine) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: metadata) else {
+            return ""
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Whether `setup` ran in this process.

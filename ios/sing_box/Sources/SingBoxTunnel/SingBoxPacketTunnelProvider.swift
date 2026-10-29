@@ -189,8 +189,12 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
             debug: debug,
             crashReportSource: "NetworkExtension",
             oomKillerEnabled: !disableMemoryLimit,
+            platformMetadata: networkExtensionMetadata(),
             force: true
         )
+        // Files the memory pressure recorded by the previous session as an
+        // OOM report (`<working>/oom_reports`), like sing-box-for-apple.
+        LibboxPromoteOOMDraft()
 
         var error: NSError?
         let server = LibboxNewCommandServer(platformInterface, platformInterface, &error)
@@ -217,6 +221,23 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
         }
         screenStateObserver = ScreenStateObserver(commandServer: server)
         writeMessage("(packet-tunnel) started", level: 4)
+    }
+
+    private func networkExtensionMetadata() -> [String: Any] {
+        let proto = protocolConfiguration
+        var options: [String: Any] = [
+            "includeAllNetworks": proto.includeAllNetworks,
+            "excludeLocalNetworks": proto.excludeLocalNetworks,
+            "enforceRoutes": proto.enforceRoutes,
+        ]
+        if #available(iOS 16.4, *) {
+            options["excludeAPNs"] = proto.excludeAPNs
+            options["excludeCellularServices"] = proto.excludeCellularServices
+        }
+        if #available(iOS 17.4, *) {
+            options["excludeDeviceCommunication"] = proto.excludeDeviceCommunication
+        }
+        return ["networkExtension": options]
     }
 
     /// Re-reads the configuration file and reloads the running service.

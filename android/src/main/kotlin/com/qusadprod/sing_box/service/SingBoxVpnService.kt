@@ -69,6 +69,17 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
     companion object {
         private const val TAG = "sing_box"
 
+        /** sing-box log level `warn`. */
+        private const val LOG_LEVEL_WARN = 3
+
+        /** Needed to read the Wi-Fi name in the background (WIFI rules), like SFA. */
+        private val LOCATION_PERMISSION =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            } else {
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            }
+
         /** Android 11+ package visibility also hides apps from VpnService.Builder and package_name rules. */
         private const val VISIBILITY_HINT =
             "; on Android 11+ declare QUERY_ALL_PACKAGES or a <queries> entry for it in the app manifest"
@@ -261,6 +272,11 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             if (prepare(this) != null) error("android: missing VPN permission")
             if (!isStarting()) return
             DefaultNetworkMonitor.start(this, DefaultNetworkMonitor.OWNER_VPN)
+            if (commandServer == null) {
+                // Files the memory pressure recorded by the previous session as an OOM report
+                // (`<working>/oom_reports`), like SFA.
+                Libbox.promoteOOMDraft()
+            }
             val server = commandServer ?: Libbox.newCommandServer(this, platform).also {
                 it.start()
                 commandServer = it
@@ -270,8 +286,14 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             if (!isStarting()) return
             if (appInTunnel) awaitRoutedThroughVpn()
             if (!isStarting()) return
-            if (server.needWIFIState()) {
-                Log.w(TAG, "configuration uses WIFI rules: reading the SSID needs location permission")
+            if (server.needWIFIState() && !canReadWifiName()) {
+                // SFA refuses to start here; the plugin starts and makes the problem visible
+                // in the core log instead (the rules never match without the permission).
+                val message = "android: the configuration uses wifi_ssid / wifi_bssid rules, but reading the " +
+                    "Wi-Fi name needs the location permission ($LOCATION_PERMISSION) granted to the app; " +
+                    "these rules will not match"
+                Log.w(TAG, message)
+                server.writeMessage(LOG_LEVEL_WARN, message)
             }
             withContext(Dispatchers.Main) {
                 if (ServiceState.status == ServiceStatus.Starting) {
@@ -495,6 +517,9 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         runCatching { previous?.close() }
         return pfd.fd
     }
+
+    private fun canReadWifiName(): Boolean =
+        ContextCompat.checkSelfPermission(this, LOCATION_PERMISSION) == PackageManager.PERMISSION_GRANTED
 
     /**
      * Waits until Android routes this app through the VPN. `establish()` returns before the

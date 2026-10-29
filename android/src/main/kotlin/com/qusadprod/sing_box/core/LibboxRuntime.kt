@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
+import org.json.JSONObject
 import java.util.Locale
 
 /** Guards the single `Libbox.setup` call of the process. */
@@ -50,7 +51,13 @@ internal object LibboxRuntime {
                 oomKillerDisabled = true
                 oomMemoryLimit = 0
                 powerReportEnabled = false
-                platformMetadata = """{"os":"Android ${Build.VERSION.RELEASE}","sdk":${Build.VERSION.SDK_INT}}"""
+                // Part of crash and OOM reports.
+                platformMetadata = JSONObject().apply {
+                    put("os", "Android " + Build.VERSION.RELEASE)
+                    put("sdk", Build.VERSION.SDK_INT)
+                    put("manufacturer", Build.MANUFACTURER)
+                    put("model", Build.MODEL)
+                }.toString()
             }
             Libbox.setup(options)
             isSetup = true
