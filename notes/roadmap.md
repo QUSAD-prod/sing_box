@@ -145,6 +145,32 @@ system HTTP proxy in VPN mode (tun `platform.http_proxy` → `VpnService.Builder
 Settings + docs; iOS: document what is impossible (proxy-only needs the app alive).
 
 ## R8. Core choice: sing-box or sing-box-lx (large; needs network)
+STARTED 2026-10-30. VERIFIED: GPL-3.0; tags `v<upstream>-lx.<N>`, latest `v1.14.4-lx.25` (upstream.version 1.14.4,
+go.version go1.26.10, go.mod go 1.25.5); clone needs `--recurse-submodules` (forks of sing-tun, gvisor, utls,
+wireguard-go via go.mod replace, ~13 MB). Their release has only AARs (no xcframework) and their AAR DROPS
+with_clash_api - our configs always set `experimental.clash_api` (traffic stats + clash modes) -> we build our own.
+Always in lx (no tag): MASQUE/WARP, REALITY X25519MLKEM768 + key_share, VLESS `encryption`, DNS group, sniffers.
+USER DECISION 2026-10-30: lx tags = our standard set + with_xhttp, with_awg, with_lx_command, with_lx_chain,
+with_lx_idle_suspend, with_trusttunnel; NOT tailscale/openvpn/openconnect/naive. Android first, then iOS.
+DONE e224910 (pushed 2026-10-30): build_libbox.sh --core lx (AAR 88.7 MB vs 84.9, builds in ~5 min here, Go 1.26.5
+ok), Gradle core choice (singBox.core > SING_BOX_CORE > app pubspec `sing_box: core:`; lx.* keys in
+libbox.properties; `src/core-<core>/kotlin` because lx CommandClientHandler has an extra required
+`writeDNSQuery(DnsQuery)` - untagged, always in lx), Dart SingBoxCore/SingBoxCoreFeature/core/supports/
+SingBoxExtended (part file `lib/src/sing_box_extended.dart`, no lx-only members yet). Android e2e 11/11 on BOTH cores.
+DONE 4b990bc (pushed 2026-10-30): iOS. SwiftPM: ONLY env SING_BOX_CORE (Context.environment; SwiftPM resolves the plugin
+symlink -> Context.packageDirectory = real plugin dir, app pubspec unreachable). CocoaPods: env or app pubspec via
+`Pod::Config.instance.installation_root` (podspecs are evaluated with chdir into their own dir - Dir.pwd is the
+plugin!). Swift per-core base `Sources/sing_box/Core/<core>/CoreCommandClientHandler.swift` (`@objc func
+writeDNSQuery`), SPM `exclude`, podspec `exclude_files`. lx xcframework 226 MB vs 214 (zip 80 MB, checksum pinned =
+local build). Switching core on iOS needs DerivedData/Runner-* + flutter clean (same module name Libbox -> stale
+pcm, "ClientHandler does not conform"). Simulator: smoke 5/5 SPM+pods both cores (E2E_CORE define), latency via
+lx probe core OK; app footprint ~105 MB both cores. release_libbox.sh --core lx, verify script checks both (ci.yml
+gate `standard` only, publish.yml both -> lx release must be published before 1.1.0!).
+PUBLISHED 2026-10-30 (user asked): GitHub release libbox-v1.14.4-lx.25 (target main), verify script OK for both cores,
+Gradle download of the lx AAR from it OK. TODO: CI lx job, real iPhone NE memory
+with lx, link parsers for lx formats (vless type=xhttp,
+encryption, AWG, masque, trusttunnel) + "requires the sing-box-lx core" on standard, round-robin strategy,
+observability (lx_command: GetPool/GetRules/DNS queries...). e2e for xhttp needs an Xray server (ask before download).
 sing-box-lx (github.com/Leadaxe/sing-box-lx): thin fork, client extras each behind a build tag: XHTTP transport,
 AmneziaWG 3.x, MASQUE, TrustTunnel, SSL VPN, observability (CommandClient), round-robin balancing; rebased on
 upstream tags. VERIFY first: license (GPL?), tag scheme, build tag names, outbound JSON for each feature, libbox

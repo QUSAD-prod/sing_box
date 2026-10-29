@@ -4,7 +4,7 @@ This branch = `release-1.1.0` + the maintainer's working notes for AI sessions. 
 release: never merge `handoff` into `release-1.1.0` or `main`, and do not commit feature work here.
 
 **Start by reading [`notes/navigator.md`](notes/navigator.md)** - the full state of the 1.1.0 work, rules,
-technical facts, open/unverified items, the next task (R8) and how to test. Task plans: `notes/roadmap.md`.
+technical facts, open/unverified items, the current task (R8, in progress) and how to test. Task plans: `notes/roadmap.md`.
 Index of all notes: `notes/INDEX.md` (`[[name]]` links refer to `notes/<name>.md`).
 
 Rules in short (details in the notes):

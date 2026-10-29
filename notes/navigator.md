@@ -36,7 +36,7 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
   starts in another worktree: that worktree may hold `release-1.1.0` checked out elsewhere - check `git worktree
   list`; free it with `git -C <other> switch --detach` (only if clean), then `git switch release-1.1.0` and copy the
   two libbox files. A session hook forbids Edit/Write in another session's worktree - so always move the branch.
-- **Pushed by the user 2026-10-29 23:47: `release-1.1.0` = `42fb96b`** (710ea75 Android watchClashMode fix, 42fb96b R7 e2e tests on top of 4ba144d); nothing unpushed.
+- **Pushed by the user 2026-10-29 23:47: `release-1.1.0` = `42fb96b`** (then pushed by the user 2026-10-30 01:13: `4b990bc` = e224910 R8 Android + 4b990bc R8 iOS) (710ea75 Android watchClashMode fix, 42fb96b R7 e2e tests on top of 4ba144d).
 - **Pushed 2026-10-29 (at the user's request, from a cloud session): `release-1.1.0` = `4ba144d` (R7), nothing
   unpushed.** PR #3 "Release 1.1.0" (release-1.1.0 → main) is open; CI runs on its pull_request events (push to
   release-1.1.0 alone does not trigger CI; workflow_dispatch does).
@@ -144,6 +144,8 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - `VpnService.Builder.setHttpProxy` only applies to a new interface → toggling needs a reload (Android).
 - libbox on Android (`sFixAndroidStack`) calls `InitializeClashMode` in a goroutine → `UpdateClashMode` may come first
   (our handler emitted `modes: []`; fixed in 710ea75). Watch for the same pattern in other libbox callbacks.
+- Package.swift `hasFlutterFramework` (`Context.packageDirectory/../FlutterFramework`) is FALSE in real apps: SwiftPM
+  resolves the plugin symlink (probe 2026-10-30). Builds work anyway - the R0 VERIFY item is answered: the check is dead.
 - OOM killer (`service/oomkiller`) logs nothing at start → only observable through reports / killed connections.
 - Check VPN network state from the host: `adb shell dumpsys connectivity | grep -oE "HttpProxy: \[[^]]*\] [0-9]+|bypassable=(true|false)"`.
 
@@ -166,7 +168,7 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - Still unchecked: `apply()` with `ipVersion` ≠ dual on a config without `dns`.
 
 ## 5. Next (priority queue)
-1. R7 DONE (code + CI + Android emulator e2e, see section 4). Next: **R8 lx core** (API design D1 = option A `SingBoxExtended extends SingBox`, details in [[roadmap]] R8)
+1. R7 DONE. **R8 IN PROGRESS** (Android e224910 + iOS 4b990bc done, pushed; details + TODO in [[roadmap]] R8). Then: **R8 lx core** (API design D1 = option A `SingBoxExtended extends SingBox`, details in [[roadmap]] R8)
    → R13 protocol matrix → R15 deps → R9 README/pub.dev (user's README order: protocol table first, platforms,
    features, install/docs, "Buy Me a Coffee" last - ask the link) → R10-R12.
 2. **Release 1.1.0** whenever the user says: PR release-1.1.0 → main (squash merge), `doc/releasing.md`.
