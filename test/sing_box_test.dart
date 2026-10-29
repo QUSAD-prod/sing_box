@@ -41,6 +41,24 @@ void main() {
       expect(singBox.isInitialized, isTrue);
       expect(singBox.runtimeInfo?.singBoxVersion, '1.14.4');
       expect(await singBox.getSingBoxVersion(), '1.14.4');
+      expect(singBox.core, SingBoxCore.standard);
+      expect(singBox.supports(SingBoxCoreFeature.xhttp), isFalse);
+    });
+
+    test('reports the sing-box-lx core', () async {
+      expect(singBox.core, SingBoxCore.standard);
+      platform.coreVersion = '1.14.4-lx.25';
+      await singBox.initialize();
+      expect(singBox.core, SingBoxCore.lx);
+      expect(singBox.runtimeInfo?.core, SingBoxCore.lx);
+      for (final feature in SingBoxCoreFeature.values) {
+        expect(singBox.supports(feature), isTrue, reason: feature.name);
+      }
+    });
+
+    test('SingBoxExtended is the same object as SingBox.instance', () {
+      expect(SingBox.instance, isA<SingBoxExtended>());
+      expect(identical(SingBoxExtended.instance, SingBox.instance), isTrue);
     });
 
     test('applies stored service options', () async {

@@ -22,6 +22,9 @@ import 'package:integration_test/integration_test.dart';
 import 'package:sing_box/sing_box.dart';
 
 const host = String.fromEnvironment('E2E_HOST', defaultValue: '10.0.2.2');
+
+/// The core the example app links (`SING_BOX_CORE=lx` when building).
+const core = String.fromEnvironment('E2E_CORE', defaultValue: 'standard');
 const uuid = 'b831381d-6324-4d53-ad4f-8cda48b30811';
 const probeUrl = 'http://203.0.113.80:18080/probe.txt';
 
@@ -100,6 +103,7 @@ void main() {
 
   testWidgets('information and validation', (tester) async {
     expect(await singBox.getSingBoxVersion(), contains('1.14'));
+    expect(singBox.core, SingBoxCore.values.byName(core));
     expect(await singBox.getPlatformVersion(), startsWith('Android'));
     expect(await singBox.hasVpnPermission(), isTrue);
     expect(

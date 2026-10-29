@@ -2,9 +2,14 @@
 // the iOS simulator (where Network Extensions cannot start) and on Android.
 //
 //   flutter test integration_test/smoke_test.dart -d <device>
+//
+// For an app built with the sing-box-lx core add `--dart-define=E2E_CORE=lx`.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sing_box/sing_box.dart';
+
+/// The core the app links (`sing_box: core:` / `SING_BOX_CORE`).
+const core = String.fromEnvironment('E2E_CORE', defaultValue: 'standard');
 
 const link = 'ss://YWVzLTEyOC1nY206cHc@203.0.113.1:8388#Smoke';
 
@@ -17,6 +22,7 @@ void main() {
     expect(singBox.isInitialized, isTrue);
     expect(singBox.runtimeInfo!.singBoxVersion, contains('1.14'));
     expect(await singBox.getSingBoxVersion(), contains('1.14'));
+    expect(singBox.core, SingBoxCore.values.byName(core));
     expect(await singBox.getPlatformVersion(), isNotEmpty);
     expect(singBox.status, SingBoxConnectionStatus.disconnected);
     expect(

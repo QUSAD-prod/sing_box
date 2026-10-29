@@ -3,7 +3,8 @@
 Релиз состоит максимум из двух частей:
 
 1. **Нативное ядро** — GitHub-релиз `libbox-v<LIBBOX_VERSION>` с файлами
-   `libbox.aar` и `Libbox.xcframework.zip`. Каждая версия плагина скачивает их
+   `libbox.aar` и `Libbox.xcframework.zip`, и такой же для ядра sing-box-lx
+   (`libbox-v<LIBBOX_LX_VERSION>`). Каждая версия плагина скачивает их
    при сборке и сверяет SHA-256, поэтому они должны существовать **до**
    публикации плагина. Делается один раз на версию sing-box.
 2. **Плагин** — версия `x.y.z` из `pubspec.yaml`, публикуется на
@@ -127,7 +128,16 @@ git commit -m "libbox <версия>"
 # Создать GitHub-релиз libbox-v<версия> с этими двумя файлами
 scripts/release_libbox.sh --publish
 
-# Скачать их обратно и сверить с закреплёнными суммами
+# Ядро sing-box-lx (LIBBOX_LX_VERSION, ключи lx.*, let libboxLx*), если
+# релиза libbox-v<lx-версия> ещё нет
+scripts/build_libbox.sh android apple --core lx
+scripts/release_libbox.sh --core lx
+git add LIBBOX_LX_VERSION android/libbox.properties ios/sing_box/Package.swift
+git commit -m "libbox <lx-версия>"
+scripts/release_libbox.sh --core lx --publish
+
+# Скачать их обратно и сверить с закреплёнными суммами (оба ядра; workflow
+# публикации запускает то же самое и останавливается без lx-релиза)
 scripts/verify_libbox_release.sh
 ```
 

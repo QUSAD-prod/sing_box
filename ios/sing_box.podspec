@@ -25,11 +25,13 @@ statistics and speed tests.
     'sing_box/Sources/sing_box/**/*.swift',
     'sing_box/Sources/SingBoxShared/**/*.swift',
   ]
+  # Members of libbox protocols that differ between the cores.
+  s.exclude_files = SingBoxLibbox.other_core_sources
   s.resource_bundles = { 'sing_box_privacy' => ['sing_box/Sources/sing_box/PrivacyInfo.xcprivacy'] }
   s.dependency 'Flutter'
 
   s.vendored_frameworks = SingBoxLibbox.ensure!(__dir__)
-  s.preserve_paths = 'sing_box/Frameworks/Libbox.xcframework'
+  s.preserve_paths = SingBoxLibbox.framework
   s.frameworks = 'NetworkExtension', 'UserNotifications'
   # Go's runtime in libbox needs libresolv.
   s.libraries = 'resolv'

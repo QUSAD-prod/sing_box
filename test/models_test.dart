@@ -360,4 +360,23 @@ void main() {
       isA<SingBoxUnsupportedException>(),
     );
   });
+
+  group('SingBoxCore', () {
+    test('is read from the libbox version', () {
+      expect(SingBoxCore.fromVersion('1.14.4'), SingBoxCore.standard);
+      expect(SingBoxCore.fromVersion(''), SingBoxCore.standard);
+      expect(SingBoxCore.fromVersion('1.14.4-lx.25'), SingBoxCore.lx);
+      expect(
+        const SingBoxRuntimeInfo(singBoxVersion: '1.14.4-lx.25').core,
+        SingBoxCore.lx,
+      );
+    });
+
+    test('only lx has the lx features', () {
+      for (final feature in SingBoxCoreFeature.values) {
+        expect(SingBoxCore.standard.supports(feature), isFalse);
+        expect(SingBoxCore.lx.supports(feature), isTrue);
+      }
+    });
+  });
 }

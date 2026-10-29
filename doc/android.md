@@ -248,6 +248,18 @@ android {
 }
 ```
 
+## sing-box-lx core
+
+`sing_box: core: lx` in the app's `pubspec.yaml` (next to the app's
+`android/` directory), the environment variable `SING_BOX_CORE=lx` or the
+Gradle property `singBox.core=lx` link the sing-box-lx libbox (README
+"sing-box-lx core"). Gradle then reads the `lx.*` keys of
+`android/libbox.properties`, uses `android/libs/libbox-lx.aar` as the local
+copy and compiles `src/core-lx/kotlin` instead of `src/core-standard/kotlin`:
+the lx libbox adds members to its interfaces (`CommandClientHandler
+.writeDNSQuery`), so the classes implementing them get a per-core base class
+there. The lx AAR is ~4 MB larger than the standard one.
+
 ## ProGuard / R8
 
 The plugin ships consumer rules that keep the libbox (`go.**`,

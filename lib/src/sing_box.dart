@@ -13,6 +13,7 @@ import 'models/clash_mode.dart';
 import 'models/connection.dart';
 import 'models/connection_stats.dart';
 import 'models/connection_status.dart';
+import 'models/core.dart';
 import 'models/core_report.dart';
 import 'models/log_entry.dart';
 import 'models/network_quality.dart';
@@ -32,6 +33,8 @@ import 'rule_set_manager.dart';
 import 'storage.dart';
 import 'subscription_loader.dart';
 import 'utils/validators.dart';
+
+part 'sing_box_extended.dart';
 
 /// The entry point of the plugin: controls the sing-box VPN tunnel.
 ///
@@ -71,8 +74,10 @@ import 'utils/validators.dart';
 class SingBox {
   SingBox._();
 
-  /// The single instance of the plugin API.
-  static final SingBox instance = SingBox._();
+  /// The single instance of the plugin API. It is always a
+  /// [SingBoxExtended]; use [SingBoxExtended.instance] for the members that
+  /// need the sing-box-lx core.
+  static final SingBox instance = SingBoxExtended._();
 
   SingBoxPlatform get _platform => SingBoxPlatform.instance;
 
@@ -308,6 +313,13 @@ class SingBox {
 
   /// Returns the operating system name and version, e.g. `Android 15`.
   Future<String?> getPlatformVersion() => _platform.getPlatformVersion();
+
+  /// The core linked into the app ([SingBoxCore.standard] until
+  /// [initialize] completes).
+  SingBoxCore get core => _runtimeInfo?.core ?? SingBoxCore.standard;
+
+  /// Whether the linked [core] has [feature].
+  bool supports(SingBoxCoreFeature feature) => core.supports(feature);
 
   /// Returns the version of the bundled sing-box core, e.g. `1.14.4`.
   Future<String> getSingBoxVersion() async {

@@ -797,6 +797,41 @@ are skipped: `ssr`, `snell`, `mieru`, TUIC v4, XHTTP and mKCP transports,
 `shadow-tls` / `restls` plugins, VLESS encryption, AmneziaWG and
 `dialer-proxy` chains.
 
+## sing-box-lx core
+
+Instead of the official core an app can link
+[sing-box-lx](https://github.com/Leadaxe/sing-box-lx), a fork of the same
+sing-box version with client extras for current Xray and AmneziaWG servers:
+the XHTTP transport, AmneziaWG 2.0 / 3.x, MASQUE (Cloudflare WARP),
+TrustTunnel, the post-quantum VLESS `encryption` and REALITY key share,
+`chain` outbounds, round-robin balancing, DNS server groups and idle-suspend
+of WireGuard endpoints. The core is chosen when the app is built, in the
+app's `pubspec.yaml`:
+
+```yaml
+sing_box:
+  core: lx   # standard (default) or lx
+```
+
+The environment variable `SING_BOX_CORE` (or the Gradle property
+`singBox.core`) overrides it. iOS with Swift Package Manager (the default
+since Flutter 3.44) cannot read the app's `pubspec.yaml`: build with
+`SING_BOX_CORE=lx flutter build ios` (or start Xcode from a shell with that
+variable); CocoaPods builds read the `pubspec.yaml`. After switching the core
+on iOS run `flutter clean` and delete `~/Library/Developer/Xcode/DerivedData/
+Runner-*`, otherwise Xcode keeps the other core's precompiled module. At runtime `SingBox.instance.core` tells which
+core runs and `supports(SingBoxCoreFeature.xhttp)` checks a feature; members
+that need the lx core live in `SingBoxExtended.instance` (the same object as
+`SingBox.instance`) and throw a `SingBoxUnsupportedException` ("requires the
+sing-box-lx core") on the standard core.
+
+Status: the lx libbox is not published yet, build it with
+`scripts/build_libbox.sh android apple --core lx --install`. The plugin's
+whole Android end-to-end suite passes on both cores; on iOS the simulator
+checks (no tunnel there) pass with both cores, with SwiftPM and CocoaPods. A
+running lx tunnel on an iPhone is not tested yet: the Network Extension has
+a ~50 MB memory limit and the lx core is ~5 % larger.
+
 ## Building libbox yourself
 
 ```bash
@@ -808,7 +843,9 @@ SagerNet's `gomobile` and builds `build/libbox/libbox.aar` and
 `build/libbox/Libbox.xcframework(.zip)` with SHA-256 files. `--install` copies
 them into the plugin so local builds skip the download. Requirements: Go 1.25+,
 Android SDK + NDK, JDK 17/21, Xcode. Set `LIBBOX_TAGS` to change the compiled
-features.
+features. `--core lx` builds the sing-box-lx core (version from
+`LIBBOX_LX_VERSION`) into `build/libbox-lx/`; `--install` then puts it at
+`android/libs/libbox-lx.aar` and `ios/sing_box/Frameworks/lx/`.
 
 ### Using your own libbox build
 

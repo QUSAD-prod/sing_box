@@ -2,7 +2,6 @@ package com.qusadprod.sing_box.core
 
 import android.util.Log
 import io.nekohasekai.libbox.CommandClient
-import io.nekohasekai.libbox.CommandClientHandler
 import io.nekohasekai.libbox.CommandClientOptions
 import io.nekohasekai.libbox.ConnectionEvents
 import io.nekohasekai.libbox.Libbox
@@ -131,7 +130,10 @@ internal abstract class CommandSession(
 
     private fun isActive(epoch: Long): Boolean = synchronized(lock) { this.epoch == epoch && job != null }
 
-    private inner class Handler(private val epoch: Long, private val disconnected: Channel<Unit>) : CommandClientHandler {
+    private inner class Handler(
+        private val epoch: Long,
+        private val disconnected: Channel<Unit>,
+    ) : CoreCommandClientHandler() {
         private inline fun ifActive(block: () -> Unit) {
             if (isActive(epoch)) runCatching(block).onFailure { Log.w(TAG, "command $command handler", it) }
         }

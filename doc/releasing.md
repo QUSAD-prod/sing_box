@@ -3,7 +3,8 @@
 A release has up to two parts:
 
 1. **The native core** - the GitHub release `libbox-v<LIBBOX_VERSION>` with
-   `libbox.aar` and `Libbox.xcframework.zip`. Every plugin version downloads
+   `libbox.aar` and `Libbox.xcframework.zip`, and the same for the
+   sing-box-lx core (`libbox-v<LIBBOX_LX_VERSION>`). Every plugin version downloads
    these files at build time and checks their SHA-256, so they must exist
    *before* the plugin is published. Needed once per sing-box version.
 2. **The plugin** - version `x.y.z` from `pubspec.yaml`, published to
@@ -112,7 +113,16 @@ git commit -m "libbox <version>"
 # Create the GitHub release libbox-v<version> with these two files
 scripts/release_libbox.sh --publish
 
-# Download them back and compare with the pinned checksums
+# The sing-box-lx core (LIBBOX_LX_VERSION, lx.* keys, libboxLx* lets), when
+# libbox-v<lx version> does not exist yet
+scripts/build_libbox.sh android apple --core lx
+scripts/release_libbox.sh --core lx
+git add LIBBOX_LX_VERSION android/libbox.properties ios/sing_box/Package.swift
+git commit -m "libbox <lx version>"
+scripts/release_libbox.sh --core lx --publish
+
+# Download them back and compare with the pinned checksums (both cores; the
+# publish workflow runs it too and stops when the lx release is missing)
 scripts/verify_libbox_release.sh
 ```
 
