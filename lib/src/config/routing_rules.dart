@@ -36,17 +36,47 @@ enum SingBoxIpVersion {
   }
 }
 
+/// Where traffic goes when no rule matches it ([SingBoxRoutingRules.mode]).
+enum SingBoxRoutingMode {
+  /// Everything goes through the proxy except the bypass lists (the
+  /// default): [SingBoxRoutingRules.bypassDomains],
+  /// [SingBoxRoutingRules.bypassSubnets], [SingBoxRoutingRules.bypassCountries]
+  /// and the LAN.
+  proxyAll,
+
+  /// Only the proxy lists go through the proxy:
+  /// [SingBoxRoutingRules.proxyDomains], [SingBoxRoutingRules.proxySubnets]
+  /// and the resources blocked in [SingBoxRoutingRules.blockedInCountries].
+  /// Everything else is connected directly and resolved with the direct DNS
+  /// server.
+  proxyListed;
+
+  /// Returns the value whose [name] equals [name] (case-insensitive), or
+  /// [proxyAll] when nothing matches.
+  static SingBoxRoutingMode fromName(String? name) {
+    final normalized = name?.trim().toLowerCase();
+    for (final value in values) {
+      if (value.name.toLowerCase() == normalized) return value;
+    }
+    return proxyAll;
+  }
+}
+
 /// User routing preferences applied on top of any server configuration:
-/// per-app split tunneling, bypassed and blocked domains/subnets, custom DNS
-/// servers, country based bypass and ad blocking.
+/// the routing mode, per-app split tunneling, proxied, bypassed and blocked
+/// domains/subnets, country lists, custom DNS servers and ad blocking.
 ///
 /// `SingBoxConfigBuilder` translates the rules into sing-box fields:
 ///
 /// | Rule | sing-box |
 /// |------|----------|
+/// | [mode] | `route.final` (`proxy` or `direct`) and `dns.final` |
 /// | [proxyApps] | TUN `include_package` (only these apps use the VPN) |
 /// | [bypassApps] | TUN `exclude_package` (ignored when [proxyApps] is set) |
 /// | [blockedApps] | route rule `package_name` → `reject` |
+/// | [proxyDomains] | route rule `domain_suffix` → `proxy`, DNS via the remote resolver |
+/// | [proxySubnets] | route rule `ip_cidr` → `proxy` |
+/// | [blockedInCountries] | remote rule-sets of resources blocked in the country (e.g. `geosite-ru-blocked`, `geoip-ru-blocked`) → `proxy` |
 /// | [bypassDomains] | route rule `domain_suffix` → `direct`, DNS via the direct resolver |
 /// | [blockedDomains] | route rule `domain_suffix` → `reject`, DNS answered `NXDOMAIN` |
 /// | [bypassSubnets] | TUN `route_exclude_address` + route rule `ip_cidr` → `direct` |
@@ -56,10 +86,17 @@ enum SingBoxIpVersion {
 /// | [dnsServers] | replace the remote (proxied) DNS server |
 /// | [ipVersion] | `dns.strategy` and, for IPv4 only, a route rule `ip_version: 6` → `reject` |
 ///
+/// Rules are evaluated in this order: blocked apps, domains and ads; the
+/// Clash modes; the proxy lists; the LAN; the bypass lists; then [mode]
+/// decides. A proxied list therefore wins over a bypassed one: a site
+/// blocked in Russia stays proxied even when its IP address is Russian and
+/// `bypassCountries` contains `ru`.
+///
 /// Invalid entries (malformed domains, CIDRs, package names, unknown country
 /// codes) are skipped by the builder instead of producing a broken config.
 ///
 /// ```dart
+/// // Everything through the proxy except Russian sites.
 /// const rules = SingBoxRoutingRules(
 ///   bypassApps: ['com.android.vending'],
 ///   bypassDomains: ['example.com', 'intranet.local'],
@@ -68,14 +105,25 @@ enum SingBoxIpVersion {
 ///   dnsServers: ['tls://1.1.1.1'],
 ///   blockAds: true,
 /// );
+///
+/// // Only sites blocked in Russia (and example.org) through the proxy.
+/// const listed = SingBoxRoutingRules(
+///   mode: SingBoxRoutingMode.proxyListed,
+///   blockedInCountries: ['ru'],
+///   proxyDomains: ['example.org'],
+/// );
 /// ```
 class SingBoxRoutingRules {
-  /// Creates routing rules. Every list defaults to empty, [bypassLan] to
+  /// Creates routing rules. [mode] defaults to
+  /// [SingBoxRoutingMode.proxyAll], every list to empty, [bypassLan] to
   /// `true`, [blockAds] to `false` and [ipVersion] to
   /// [SingBoxIpVersion.dual].
   const SingBoxRoutingRules({
+    this.mode = SingBoxRoutingMode.proxyAll,
     this.bypassApps = const [],
     this.proxyApps = const [],
+    this.proxyDomains = const [],
+    this.proxySubnets = const [],
     this.bypassDomains = const [],
     this.bypassSubnets = const [],
     this.blockedApps = const [],
@@ -83,9 +131,14 @@ class SingBoxRoutingRules {
     this.dnsServers = const [],
     this.bypassLan = true,
     this.bypassCountries = const [],
+    this.blockedInCountries = const [],
     this.blockAds = false,
     this.ipVersion = SingBoxIpVersion.dual,
   });
+
+  /// Where traffic that no rule matches goes: through the proxy (default)
+  /// or directly. See [SingBoxRoutingMode].
+  final SingBoxRoutingMode mode;
 
   /// Android package names whose traffic does not enter the VPN
   /// (TUN `exclude_package`). Ignored when [proxyApps] is not empty.
@@ -96,6 +149,15 @@ class SingBoxRoutingRules {
   /// (TUN `include_package`). When not empty, [bypassApps] is ignored.
   /// Has no effect on iOS.
   final List<String> proxyApps;
+
+  /// Domain suffixes always connected through the proxy and resolved with
+  /// the remote DNS server, in any [mode]. `example.com` also matches
+  /// `www.example.com`.
+  final List<String> proxyDomains;
+
+  /// Subnets (CIDR, or plain IP addresses) always connected through the
+  /// proxy, in any [mode].
+  final List<String> proxySubnets;
 
   /// Domain suffixes connected directly and resolved with the direct DNS
   /// server. `example.com` also matches `www.example.com`.
@@ -127,6 +189,13 @@ class SingBoxRoutingRules {
   /// See `SingBoxRuleSets.countryRuleSets`.
   final List<String> bypassCountries;
 
+  /// Country codes whose lists of blocked resources are connected through
+  /// the proxy, in any [mode]: `ru` (sites and IP ranges blocked in Russia,
+  /// from runetfreedom/russia-v2ray-rules-dat) and `cn` (sites outside
+  /// China). See `SingBoxRuleSets.blockedCountryTags`; other codes are
+  /// skipped. Usually combined with [SingBoxRoutingMode.proxyListed].
+  final List<String> blockedInCountries;
+
   /// Whether connections to known advertising domains are rejected
   /// (`geosite-category-ads-all`).
   final bool blockAds;
@@ -140,8 +209,11 @@ class SingBoxRoutingRules {
 
   /// Converts the rules to a JSON-safe map whose keys are the field names.
   Map<String, dynamic> toMap() => {
+    'mode': mode.name,
     'bypassApps': List<String>.of(bypassApps),
     'proxyApps': List<String>.of(proxyApps),
+    'proxyDomains': List<String>.of(proxyDomains),
+    'proxySubnets': List<String>.of(proxySubnets),
     'bypassDomains': List<String>.of(bypassDomains),
     'bypassSubnets': List<String>.of(bypassSubnets),
     'blockedApps': List<String>.of(blockedApps),
@@ -149,6 +221,7 @@ class SingBoxRoutingRules {
     'dnsServers': List<String>.of(dnsServers),
     'bypassLan': bypassLan,
     'bypassCountries': List<String>.of(bypassCountries),
+    'blockedInCountries': List<String>.of(blockedInCountries),
     'blockAds': blockAds,
     'ipVersion': ipVersion.name,
   };
@@ -159,8 +232,11 @@ class SingBoxRoutingRules {
   /// or malformed values fall back to the defaults.
   factory SingBoxRoutingRules.fromMap(Map<dynamic, dynamic> map) {
     return SingBoxRoutingRules(
+      mode: SingBoxRoutingMode.fromName(readString(map['mode'])),
       bypassApps: readStringList(map['bypassApps']),
       proxyApps: readStringList(map['proxyApps']),
+      proxyDomains: readStringList(map['proxyDomains']),
+      proxySubnets: readStringList(map['proxySubnets']),
       bypassDomains: readStringList(map['bypassDomains']),
       bypassSubnets: readStringList(map['bypassSubnets']),
       blockedApps: readStringList(map['blockedApps']),
@@ -168,6 +244,7 @@ class SingBoxRoutingRules {
       dnsServers: readStringList(map['dnsServers']),
       bypassLan: readBool(map['bypassLan']) ?? true,
       bypassCountries: readStringList(map['bypassCountries']),
+      blockedInCountries: readStringList(map['blockedInCountries']),
       blockAds: readBool(map['blockAds']) ?? false,
       ipVersion: SingBoxIpVersion.fromName(readString(map['ipVersion'])),
     );
@@ -175,8 +252,11 @@ class SingBoxRoutingRules {
 
   /// Returns a copy with the given fields replaced.
   SingBoxRoutingRules copyWith({
+    SingBoxRoutingMode? mode,
     List<String>? bypassApps,
     List<String>? proxyApps,
+    List<String>? proxyDomains,
+    List<String>? proxySubnets,
     List<String>? bypassDomains,
     List<String>? bypassSubnets,
     List<String>? blockedApps,
@@ -184,12 +264,16 @@ class SingBoxRoutingRules {
     List<String>? dnsServers,
     bool? bypassLan,
     List<String>? bypassCountries,
+    List<String>? blockedInCountries,
     bool? blockAds,
     SingBoxIpVersion? ipVersion,
   }) {
     return SingBoxRoutingRules(
+      mode: mode ?? this.mode,
       bypassApps: bypassApps ?? this.bypassApps,
       proxyApps: proxyApps ?? this.proxyApps,
+      proxyDomains: proxyDomains ?? this.proxyDomains,
+      proxySubnets: proxySubnets ?? this.proxySubnets,
       bypassDomains: bypassDomains ?? this.bypassDomains,
       bypassSubnets: bypassSubnets ?? this.bypassSubnets,
       blockedApps: blockedApps ?? this.blockedApps,
@@ -197,6 +281,7 @@ class SingBoxRoutingRules {
       dnsServers: dnsServers ?? this.dnsServers,
       bypassLan: bypassLan ?? this.bypassLan,
       bypassCountries: bypassCountries ?? this.bypassCountries,
+      blockedInCountries: blockedInCountries ?? this.blockedInCountries,
       blockAds: blockAds ?? this.blockAds,
       ipVersion: ipVersion ?? this.ipVersion,
     );
@@ -214,8 +299,11 @@ class SingBoxRoutingRules {
   @override
   bool operator ==(Object other) =>
       other is SingBoxRoutingRules &&
+      other.mode == mode &&
       _listEquals(other.bypassApps, bypassApps) &&
       _listEquals(other.proxyApps, proxyApps) &&
+      _listEquals(other.proxyDomains, proxyDomains) &&
+      _listEquals(other.proxySubnets, proxySubnets) &&
       _listEquals(other.bypassDomains, bypassDomains) &&
       _listEquals(other.bypassSubnets, bypassSubnets) &&
       _listEquals(other.blockedApps, blockedApps) &&
@@ -223,13 +311,17 @@ class SingBoxRoutingRules {
       _listEquals(other.dnsServers, dnsServers) &&
       other.bypassLan == bypassLan &&
       _listEquals(other.bypassCountries, bypassCountries) &&
+      _listEquals(other.blockedInCountries, blockedInCountries) &&
       other.blockAds == blockAds &&
       other.ipVersion == ipVersion;
 
   @override
   int get hashCode => Object.hash(
+    mode,
     Object.hashAll(bypassApps),
     Object.hashAll(proxyApps),
+    Object.hashAll(proxyDomains),
+    Object.hashAll(proxySubnets),
     Object.hashAll(bypassDomains),
     Object.hashAll(bypassSubnets),
     Object.hashAll(blockedApps),
@@ -237,6 +329,7 @@ class SingBoxRoutingRules {
     Object.hashAll(dnsServers),
     bypassLan,
     Object.hashAll(bypassCountries),
+    Object.hashAll(blockedInCountries),
     blockAds,
     ipVersion,
   );

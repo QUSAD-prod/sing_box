@@ -21,8 +21,9 @@ import 'rule_sets.dart';
 /// * outbounds: a `selector` [proxyTag] (when several outbounds are given it
 ///   contains the `urltest` group [autoTag] that picks the fastest one), the
 ///   outbounds themselves and a `direct` outbound [directTag];
-/// * `route` with sniffing, DNS hijacking, the blocking and bypass rules of
-///   [SingBoxRoutingRules], remote rule-sets and `final: proxy`;
+/// * `route` with sniffing, DNS hijacking, the blocking, proxy and bypass
+///   rules of [SingBoxRoutingRules], remote rule-sets and `final: proxy`
+///   (`final: direct` in [SingBoxRoutingMode.proxyListed]);
 /// * `experimental` with the cache file and the Clash API (modes `Rule`,
 ///   `Global`, `Direct`; traffic statistics).
 ///
@@ -111,7 +112,7 @@ class SingBoxConfigBuilder {
             ? selectedTag
             : selectorMembers.first;
 
-    final ruleSetTags = _ruleSetTags(rules);
+    final ruleSetTags = _ruleSetTags(rules, proxyLists: true);
     final config = <String, dynamic>{
       'log': _log(),
       'dns': _dns(rules),
@@ -141,12 +142,17 @@ class SingBoxConfigBuilder {
       'route': {
         'rules': [
           ..._leadingRouteRules(),
-          ..._routingRules(rules, directTag, includeClashModes: true),
+          ..._routingRules(
+            rules,
+            directTag,
+            proxy: proxyTag,
+            includeClashModes: true,
+          ),
           ..._ipVersionRules(rules),
         ],
         if (ruleSetTags.isNotEmpty)
           'rule_set': ruleSetTags.map(_ruleSet).toList(),
-        'final': proxyTag,
+        'final': _isListed(rules) ? directTag : proxyTag,
         'auto_detect_interface': true,
         'default_domain_resolver': dnsDirectTag,
       },
@@ -192,8 +198,13 @@ class SingBoxConfigBuilder {
   /// deep copy; [config] itself is never modified and unknown fields are
   /// preserved.
   ///
-  /// * Blocking and bypass route rules are inserted after the leading
-  ///   `sniff`/`hijack-dns` rules, before the user's own rules.
+  /// * Blocking, proxy and bypass route rules are inserted after the leading
+  ///   `sniff`/`hijack-dns` rules, before the user's own rules. The proxy
+  ///   lists use the config's main outbound (`route.final`, else the first
+  ///   proxy outbound) and are skipped when that is a `direct` or `block`
+  ///   outbound.
+  /// * [SingBoxRoutingMode.proxyListed] sets `route.final` to the `direct`
+  ///   outbound; the DNS section is not changed for it.
   /// * Every `tun` inbound gets the per-app lists and the bypassed subnets
   ///   (`route_exclude_address`); a default TUN inbound is added when the
   ///   config has none (the tunnel cannot work without it).
@@ -267,6 +278,7 @@ class SingBoxConfigBuilder {
     }
 
     // Route.
+    final proxy = _proxyDetourTag(result);
     final route = _map(result, 'route');
     final routeRules = _list(route, 'rules');
     var insertAt = 0;
@@ -276,11 +288,12 @@ class SingBoxConfigBuilder {
     }
     routeRules.insertAll(
       insertAt,
-      _routingRules(rules, direct, includeClashModes: false),
+      _routingRules(rules, direct, proxy: proxy, includeClashModes: false),
     );
     routeRules.addAll(_ipVersionRules(rules));
     route.putIfAbsent('auto_detect_interface', () => true);
-    final ruleSetTags = _ruleSetTags(rules);
+    if (_isListed(rules)) route['final'] = direct;
+    final ruleSetTags = _ruleSetTags(rules, proxyLists: proxy != null);
     if (ruleSetTags.isNotEmpty) {
       final ruleSets = _list(route, 'rule_set');
       final existing = ruleSets.map((r) => r['tag']).toSet();
@@ -311,7 +324,8 @@ class SingBoxConfigBuilder {
         });
       }
       if (dnsServers.isNotEmpty) {
-        final detour = _proxyDetourTag(result);
+        // Taken before proxyListed pointed `route.final` at `direct`.
+        final detour = proxy;
         final taken = servers.map((s) => s['tag']).whereType<String>().toSet();
         // Without `route.default_domain_resolver` sing-box resolves outbound
         // server names with the only DNS server (none: the system resolver)
@@ -447,6 +461,16 @@ class SingBoxConfigBuilder {
     final bypass = _domains(rules.bypassDomains);
     final directGeosites =
         _countryRuleSets(rules).where(SingBoxRuleSets.isGeosite).toList();
+    final listed = _isListed(rules);
+    // Proxied names are resolved remotely (or get fake IPs), even when a
+    // bypass list below also contains them.
+    final proxyDomains = _domains(rules.proxyDomains);
+    final proxyGeosites =
+        _blockedRuleSets(rules).where(SingBoxRuleSets.isGeosite).toList();
+    final proxyMatchers = <Map<String, dynamic>>[
+      if (proxyDomains.isNotEmpty) {'domain_suffix': proxyDomains},
+      if (proxyGeosites.isNotEmpty) {'rule_set': proxyGeosites},
+    ];
     final dnsRules = <Map<String, dynamic>>[
       if (blocked.isNotEmpty)
         {'domain_suffix': blocked, 'action': 'predefined', 'rcode': 'NXDOMAIN'},
@@ -460,11 +484,23 @@ class SingBoxConfigBuilder {
         {'clash_mode': 'Direct', 'action': 'route', 'server': dnsDirectTag},
         {'clash_mode': 'Global', 'action': 'route', 'server': remoteTag},
       ],
+      for (final matcher in proxyMatchers) ...[
+        if (dnsOptions.fakeIp)
+          {
+            ...matcher,
+            'query_type': ['A', if (ipv6) 'AAAA'],
+            'action': 'route',
+            'server': dnsFakeIpTag,
+          },
+        {...matcher, 'action': 'route', 'server': remoteTag},
+      ],
       if (bypass.isNotEmpty)
         {'domain_suffix': bypass, 'action': 'route', 'server': dnsDirectTag},
       if (directGeosites.isNotEmpty)
         {'rule_set': directGeosites, 'action': 'route', 'server': dnsDirectTag},
-      if (dnsOptions.fakeIp)
+      // In proxyListed mode unlisted names are connected directly and keep
+      // their real addresses.
+      if (dnsOptions.fakeIp && !listed)
         {
           'query_type': ['A', if (ipv6) 'AAAA'],
           'action': 'route',
@@ -475,7 +511,7 @@ class SingBoxConfigBuilder {
     return {
       'servers': servers,
       'rules': dnsRules,
-      'final': remoteTag,
+      'final': listed ? dnsDirectTag : remoteTag,
       'strategy': _dnsStrategy(rules),
       if (dnsOptions.reverseMapping) 'reverse_mapping': true,
     };
@@ -518,13 +554,19 @@ class SingBoxConfigBuilder {
     return action == 'sniff' || action == 'hijack-dns';
   }
 
+  /// Route rules of [rules]; the proxy lists are left out when [proxy] is
+  /// `null` (a config without a proxy outbound).
   List<Map<String, dynamic>> _routingRules(
     SingBoxRoutingRules rules,
     String direct, {
+    required String? proxy,
     required bool includeClashModes,
   }) {
     final blockedApps = _validPackages(rules.blockedApps);
     final blockedDomains = _domains(rules.blockedDomains);
+    final proxyDomains = _domains(rules.proxyDomains);
+    final proxySubnets = _cidrs(rules.proxySubnets);
+    final proxySets = _blockedRuleSets(rules);
     final bypassDomains = _domains(rules.bypassDomains);
     final subnets = _subnets(rules);
     final countrySets = _countryRuleSets(rules);
@@ -541,6 +583,14 @@ class SingBoxConfigBuilder {
       if (includeClashModes && options.enableClashModes) ...[
         {'clash_mode': 'Direct', 'action': 'route', 'outbound': direct},
         {'clash_mode': 'Global', 'action': 'route', 'outbound': proxyTag},
+      ],
+      if (proxy != null) ...[
+        if (proxyDomains.isNotEmpty)
+          {'domain_suffix': proxyDomains, 'action': 'route', 'outbound': proxy},
+        if (proxySubnets.isNotEmpty)
+          {'ip_cidr': proxySubnets, 'action': 'route', 'outbound': proxy},
+        if (proxySets.isNotEmpty)
+          {'rule_set': proxySets, 'action': 'route', 'outbound': proxy},
       ],
       if (rules.bypassLan)
         {'ip_is_private': true, 'action': 'route', 'outbound': direct},
@@ -583,24 +633,36 @@ class SingBoxConfigBuilder {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  List<String> _ruleSetTags(SingBoxRoutingRules rules) => dedupe([
+  List<String> _ruleSetTags(
+    SingBoxRoutingRules rules, {
+    required bool proxyLists,
+  }) => dedupe([
     if (rules.blockAds) SingBoxRuleSets.adsTag,
+    if (proxyLists) ..._blockedRuleSets(rules),
     ..._countryRuleSets(rules),
   ]);
+
+  static bool _isListed(SingBoxRoutingRules rules) =>
+      rules.mode == SingBoxRoutingMode.proxyListed;
 
   static List<String> _countryRuleSets(SingBoxRoutingRules rules) => dedupe([
     for (final code in rules.bypassCountries)
       ...SingBoxRuleSets.countryRuleSets(code),
   ]);
 
+  static List<String> _blockedRuleSets(SingBoxRoutingRules rules) => dedupe([
+    for (final code in rules.blockedInCountries)
+      ...SingBoxRuleSets.blockedRuleSets(code),
+  ]);
+
   static List<String> _domains(List<String> values) =>
       dedupe(values.map(SingBoxValidators.normalizeDomain).whereType<String>());
 
-  static List<String> _subnets(SingBoxRoutingRules rules) => dedupe(
-    rules.bypassSubnets
-        .map(SingBoxValidators.normalizeCidr)
-        .whereType<String>(),
-  );
+  static List<String> _cidrs(List<String> values) =>
+      dedupe(values.map(SingBoxValidators.normalizeCidr).whereType<String>());
+
+  static List<String> _subnets(SingBoxRoutingRules rules) =>
+      _cidrs(rules.bypassSubnets);
 
   static List<String> _validPackages(List<String> values) => dedupe(
     values.map((e) => e.trim()).where(SingBoxValidators.isPackageName),

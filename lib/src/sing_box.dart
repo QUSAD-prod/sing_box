@@ -1744,6 +1744,57 @@ class SingBox {
     dnsServer.trim(),
   );
 
+  /// Sets where traffic that no rule matches goes: through the proxy
+  /// (default) or directly (see [SingBoxRoutingMode]). A running tunnel is
+  /// reloaded when [reloadOnRulesChange] is enabled. Returns whether it
+  /// changed.
+  Future<bool> setRoutingMode(SingBoxRoutingMode mode) =>
+      updateRoutingRules((r) => r.copyWith(mode: mode));
+
+  /// The stored routing mode.
+  Future<SingBoxRoutingMode> getRoutingMode() async =>
+      (await getRoutingRules()).mode;
+
+  /// Always routes [domain] and its subdomains through the proxy, in any
+  /// routing mode. Returns whether the list changed (`false` for an invalid
+  /// domain).
+  Future<bool> addProxyDomain(String domain) => _addTo(
+    (r) => r.proxyDomains,
+    (r, v) => r.copyWith(proxyDomains: v),
+    SingBoxValidators.normalizeDomain(domain),
+  );
+
+  /// Removes a domain from the proxy list.
+  Future<bool> removeProxyDomain(String domain) => _removeFrom(
+    (r) => r.proxyDomains,
+    (r, v) => r.copyWith(proxyDomains: v),
+    SingBoxValidators.normalizeDomain(domain) ?? domain.trim(),
+  );
+
+  /// Domains always routed through the proxy.
+  Future<List<String>> getProxyDomains() async =>
+      (await getRoutingRules()).proxyDomains;
+
+  /// Always routes the [subnet] (CIDR or a single IP) through the proxy, in
+  /// any routing mode. Returns whether the list changed (`false` for
+  /// invalid input).
+  Future<bool> addProxySubnet(String subnet) => _addTo(
+    (r) => r.proxySubnets,
+    (r, v) => r.copyWith(proxySubnets: v),
+    SingBoxValidators.normalizeCidr(subnet),
+  );
+
+  /// Removes a subnet from the proxy list.
+  Future<bool> removeProxySubnet(String subnet) => _removeFrom(
+    (r) => r.proxySubnets,
+    (r, v) => r.copyWith(proxySubnets: v),
+    SingBoxValidators.normalizeCidr(subnet) ?? subnet.trim(),
+  );
+
+  /// Subnets always routed through the proxy.
+  Future<List<String>> getProxySubnets() async =>
+      (await getRoutingRules()).proxySubnets;
+
   /// Custom DNS servers (empty = the defaults of [SingBoxDnsOptions]).
   Future<List<String>> getDnsServers() async =>
       (await getRoutingRules()).dnsServers;

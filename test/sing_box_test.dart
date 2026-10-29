@@ -723,6 +723,46 @@ void main() {
               as Map<String, dynamic>;
       expect((config['dns'] as Map)['strategy'], 'ipv4_only');
     });
+
+    test('routing mode and proxy lists reach the generated config', () async {
+      expect(await singBox.getRoutingMode(), SingBoxRoutingMode.proxyAll);
+      expect(
+        await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed),
+        isTrue,
+      );
+      expect(
+        await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed),
+        isFalse,
+      );
+      expect(await singBox.addProxyDomain('https://Example.ORG/x'), isTrue);
+      expect(await singBox.addProxyDomain('example.org'), isFalse);
+      expect(await singBox.addProxyDomain('not a domain'), isFalse);
+      expect(await singBox.getProxyDomains(), ['example.org']);
+      expect(await singBox.addProxySubnet('203.0.113.9'), isTrue);
+      expect(await singBox.addProxySubnet('10.0.0.0/33'), isFalse);
+      expect(await singBox.getProxySubnets(), ['203.0.113.9/32']);
+
+      final config =
+          jsonDecode(await singBox.buildConfig(jsonEncode(_ssOutbound)))
+              as Map<String, dynamic>;
+      final route = config['route'] as Map;
+      expect(route['final'], 'direct');
+      expect(
+        route['rules'],
+        contains(
+          equals({
+            'domain_suffix': ['example.org'],
+            'action': 'route',
+            'outbound': 'proxy',
+          }),
+        ),
+      );
+
+      expect(await singBox.removeProxyDomain('EXAMPLE.org'), isTrue);
+      expect(await singBox.removeProxySubnet('203.0.113.9'), isTrue);
+      expect(await singBox.getProxyDomains(), isEmpty);
+      expect(await singBox.getProxySubnets(), isEmpty);
+    });
   });
 
   group('settings and server profiles', () {

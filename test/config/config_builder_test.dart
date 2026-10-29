@@ -360,6 +360,7 @@ void main() {
       final config = builder.build([vless], rules: fullRules);
       const countrySets = [
         'geosite-category-ru',
+        'geosite-ru-available-only-inside',
         'geoip-ru',
         'geosite-cn',
         'geoip-cn',
@@ -377,7 +378,11 @@ void main() {
         dnsRules(config),
         contains(
           equals({
-            'rule_set': ['geosite-category-ru', 'geosite-cn'],
+            'rule_set': [
+              'geosite-category-ru',
+              'geosite-ru-available-only-inside',
+              'geosite-cn',
+            ],
             'action': 'route',
             'server': 'dns-direct',
           }),
@@ -448,6 +453,224 @@ void main() {
           builder.build([vless, trojan, wireguard], rules: rules),
           reason: '$rules',
         );
+      }
+    }, skip: singBoxBinary == null ? 'SING_BOX_BIN is not set' : null);
+  });
+
+  group('routing mode and proxy lists', () {
+    const listed = SingBoxRoutingRules(
+      mode: SingBoxRoutingMode.proxyListed,
+      proxyDomains: ['Example.ORG', 'bad domain'],
+      proxySubnets: ['203.0.113.0/24', '198.51.100.7', 'nope'],
+      blockedInCountries: ['RU', 'xx'],
+      bypassCountries: ['ru'],
+    );
+
+    test('proxyAll keeps the proxy as the final outbound', () {
+      final config = builder.build([vless]);
+      expect((config['route'] as Map)['final'], 'proxy');
+      expect((config['dns'] as Map)['final'], 'dns-remote');
+    });
+
+    test('proxyListed connects and resolves unlisted traffic directly', () {
+      final config = builder.build([vless], rules: listed);
+      expect((config['route'] as Map)['final'], 'direct');
+      expect((config['dns'] as Map)['final'], 'dns-direct');
+    });
+
+    test('proxy lists come before the LAN and bypass rules', () {
+      final rules = routeRules(builder.build([vless], rules: listed));
+      final proxyRules = [
+        {
+          'domain_suffix': ['example.org'],
+          'action': 'route',
+          'outbound': 'proxy',
+        },
+        {
+          'ip_cidr': ['203.0.113.0/24', '198.51.100.7/32'],
+          'action': 'route',
+          'outbound': 'proxy',
+        },
+        {
+          'rule_set': ['geosite-ru-blocked', 'geoip-ru-blocked'],
+          'action': 'route',
+          'outbound': 'proxy',
+        },
+      ];
+      final first = rules.indexOf(
+        rules.firstWhere((r) => r['domain_suffix'] != null),
+      );
+      expect(rules.sublist(first, first + 3), proxyRules);
+      final lan = rules.indexWhere((r) => r['ip_is_private'] == true);
+      final bypass = rules.indexWhere(
+        (r) => (r['rule_set'] as List?)?.contains('geoip-ru') ?? false,
+      );
+      expect(first, lessThan(lan));
+      expect(lan, lessThan(bypass));
+      // Global and Direct still override everything but the blocked lists.
+      final global = rules.indexWhere((r) => r['clash_mode'] == 'Global');
+      expect(global, lessThan(first));
+    });
+
+    test('blocked lists are downloaded from runetfreedom', () {
+      final config = builder.build([vless], rules: listed);
+      final sets = {
+        for (final s in ((config['route'] as Map)['rule_set'] as List))
+          (s as Map)['tag']: s['url'],
+      };
+      const base =
+          'https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box';
+      expect(
+        sets['geosite-ru-blocked'],
+        '$base/rule-set-geosite/geosite-ru-blocked.srs',
+      );
+      expect(
+        sets['geoip-ru-blocked'],
+        '$base/rule-set-geoip/geoip-ru-blocked.srs',
+      );
+      expect(
+        sets['geoip-ru'],
+        'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs',
+      );
+    });
+
+    test('proxied names are resolved remotely before the bypass lists', () {
+      final rules = dnsRules(builder.build([vless], rules: listed));
+      final domains = rules.indexOf(
+        rules.firstWhere((r) => r['domain_suffix'] != null),
+      );
+      expect(rules.sublist(domains, domains + 3), [
+        {
+          'domain_suffix': ['example.org'],
+          'action': 'route',
+          'server': 'dns-remote',
+        },
+        // geoip rule-sets must not be used by DNS rules.
+        {
+          'rule_set': ['geosite-ru-blocked'],
+          'action': 'route',
+          'server': 'dns-remote',
+        },
+        {
+          'rule_set': [
+            'geosite-category-ru',
+            'geosite-ru-available-only-inside',
+          ],
+          'action': 'route',
+          'server': 'dns-direct',
+        },
+      ]);
+    });
+
+    test('FakeIP is limited to the proxy lists in proxyListed mode', () {
+      const fakeIp = SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      );
+      final listedRules = dnsRules(fakeIp.build([vless], rules: listed));
+      expect(listedRules.where((r) => r['server'] == 'dns-fakeip'), [
+        {
+          'domain_suffix': ['example.org'],
+          'query_type': ['A', 'AAAA'],
+          'action': 'route',
+          'server': 'dns-fakeip',
+        },
+        {
+          'rule_set': ['geosite-ru-blocked'],
+          'query_type': ['A', 'AAAA'],
+          'action': 'route',
+          'server': 'dns-fakeip',
+        },
+      ]);
+      final all = dnsRules(
+        fakeIp.build([
+          vless,
+        ], rules: listed.copyWith(mode: SingBoxRoutingMode.proxyAll)),
+      );
+      expect(all.last, {
+        'query_type': ['A', 'AAAA'],
+        'action': 'route',
+        'server': 'dns-fakeip',
+      });
+    });
+
+    test('countries without a blocked list are skipped', () {
+      final config = builder.build([
+        vless,
+      ], rules: const SingBoxRoutingRules(blockedInCountries: ['de']));
+      expect(ruleSetTags(config), isEmpty);
+      expect(
+        routeRules(config).where((r) => r['outbound'] == 'proxy'),
+        hasLength(1), // the Clash Global rule
+      );
+    });
+
+    test(
+      'apply: proxy lists use the main outbound, final goes direct',
+      () async {
+        const rules = SingBoxRoutingRules(
+          mode: SingBoxRoutingMode.proxyListed,
+          proxyDomains: ['example.org'],
+          blockedInCountries: ['ru'],
+          dnsServers: ['tls://dns.google'],
+        );
+        final result = builder.apply(userConfig(), rules: rules);
+        final route = result['route'] as Map;
+        expect(route['final'], 'bypass');
+        expect(routeRules(result).sublist(2, 4), [
+          {
+            'domain_suffix': ['example.org'],
+            'action': 'route',
+            'outbound': 'my-proxy',
+          },
+          {
+            'rule_set': ['geosite-ru-blocked', 'geoip-ru-blocked'],
+            'action': 'route',
+            'outbound': 'my-proxy',
+          },
+        ]);
+        // Custom DNS servers keep going through the proxy.
+        expect(dnsServers(result).last, containsPair('detour', 'my-proxy'));
+        await expectSingBoxAccepts(result);
+      },
+    );
+
+    test('apply: no proxy lists without a proxy outbound', () {
+      final config = {
+        'outbounds': [
+          {'type': 'direct', 'tag': 'direct'},
+        ],
+        'route': {'final': 'direct'},
+      };
+      final result = builder.apply(config, rules: listed);
+      expect(
+        routeRules(result).where((r) => r['outbound'] != 'direct'),
+        isEmpty,
+      );
+      expect(ruleSetTags(result), isNot(contains('geosite-ru-blocked')));
+    });
+
+    test('every mode is accepted by sing-box', () async {
+      const fakeIp = SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      );
+      final variants = [
+        listed,
+        listed.copyWith(mode: SingBoxRoutingMode.proxyAll),
+        const SingBoxRoutingRules(
+          mode: SingBoxRoutingMode.proxyListed,
+          blockedInCountries: ['cn'],
+          blockAds: true,
+          ipVersion: SingBoxIpVersion.ipv4,
+        ),
+        const SingBoxRoutingRules(mode: SingBoxRoutingMode.proxyListed),
+      ];
+      for (final rules in variants) {
+        for (final b in [builder, fakeIp]) {
+          await expectSingBoxAccepts(
+            b.build([vless, trojan], rules: rules),
+            reason: '$rules',
+          );
+        }
       }
     }, skip: singBoxBinary == null ? 'SING_BOX_BIN is not set' : null);
   });
@@ -655,6 +878,8 @@ void main() {
               .cast<Map<String, dynamic>>();
       expect(sets.map((s) => s['url']), [
         'https://mirror.example.com/geosite/geosite-category-ru.srs',
+        // Not a SagerNet list: its fixed URL is kept.
+        'https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-ru-available-only-inside.srs',
         'https://mirror.example.com/geoip/geoip-ru.srs',
       ]);
       expect(sets.map((s) => s['update_interval']).toSet(), {'12h'});
@@ -786,6 +1011,7 @@ void main() {
       expect(ruleSetTags(once), [
         'geosite-category-ads-all',
         'geosite-category-ru',
+        'geosite-ru-available-only-inside',
         'geoip-ru',
       ]);
       expect(once['http_clients'], [

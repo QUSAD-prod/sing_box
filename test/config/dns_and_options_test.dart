@@ -167,6 +167,7 @@ void main() {
     test('only curated countries get geosite lists', () {
       expect(SingBoxRuleSets.countryRuleSets('ru'), [
         'geosite-category-ru',
+        'geosite-ru-available-only-inside',
         'geoip-ru',
       ]);
       expect(SingBoxRuleSets.countryRuleSets('cn'), ['geosite-cn', 'geoip-cn']);
@@ -176,6 +177,32 @@ void main() {
       ]);
       expect(SingBoxRuleSets.countryRuleSets('de'), ['geoip-de']);
       expect(SingBoxRuleSets.countryRuleSets('nowhere'), isEmpty);
+    });
+
+    test('blocked resource lists per country', () {
+      expect(SingBoxRuleSets.blockedRuleSets(' RU '), [
+        'geosite-ru-blocked',
+        'geoip-ru-blocked',
+      ]);
+      expect(SingBoxRuleSets.blockedRuleSets('cn'), [
+        'geosite-geolocation-!cn',
+      ]);
+      expect(SingBoxRuleSets.blockedRuleSets('de'), isEmpty);
+      expect(SingBoxRuleSets.isSupportedBlockedCountry('ru'), isTrue);
+      expect(SingBoxRuleSets.isSupportedBlockedCountry('ir'), isFalse);
+      // Third-party lists keep their URL whatever the SagerNet templates.
+      expect(
+        SingBoxRuleSets.url(
+          'geoip-ru-blocked',
+          geoipUrl: 'https://m.example/{tag}.srs',
+        ),
+        'https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked.srs',
+      );
+      for (final tags in SingBoxRuleSets.blockedCountryTags.values) {
+        for (final tag in tags) {
+          expect(SingBoxRuleSets.url(tag), endsWith('/$tag.srs'));
+        }
+      }
     });
 
     test('remote rule-set objects', () {
@@ -290,8 +317,11 @@ void main() {
 
     test('SingBoxRoutingRules round trips through maps', () {
       const rules = SingBoxRoutingRules(
+        mode: SingBoxRoutingMode.proxyListed,
         bypassApps: ['a.b'],
         proxyApps: ['c.d'],
+        proxyDomains: ['y.com'],
+        proxySubnets: ['192.0.2.0/24'],
         bypassDomains: ['x.com'],
         bypassSubnets: ['10.0.0.0/8'],
         blockedApps: ['e.f'],
@@ -299,12 +329,24 @@ void main() {
         dnsServers: ['1.1.1.1'],
         bypassLan: false,
         bypassCountries: ['ru'],
+        blockedInCountries: ['ru'],
         blockAds: true,
         ipVersion: SingBoxIpVersion.ipv4,
       );
       expect(SingBoxRoutingRules.fromMap(rules.toMap()), rules);
       expect(rules.toMap()['ipVersion'], 'ipv4');
+      expect(rules.toMap()['mode'], 'proxyListed');
       expect(rules.copyWith(ipVersion: SingBoxIpVersion.dual), isNot(rules));
+      expect(rules.copyWith(mode: SingBoxRoutingMode.proxyAll), isNot(rules));
+      expect(rules.copyWith(proxyDomains: const []), isNot(rules));
+      expect(rules.copyWith(blockedInCountries: const []), isNot(rules));
+      // 1.0 maps without the new keys keep their meaning.
+      expect(
+        SingBoxRoutingRules.fromMap(const {
+          'bypassCountries': ['ru'],
+        }),
+        const SingBoxRoutingRules(bypassCountries: ['ru']),
+      );
       expect(
         SingBoxRoutingRules.fromMap(rules.toMap()).hashCode,
         rules.hashCode,
@@ -316,6 +358,19 @@ void main() {
       (rules.toMap()['bypassApps'] as List).add('mutated');
       expect(rules.bypassApps, ['a.b']);
     });
+  });
+
+  test('SingBoxRoutingMode.fromName', () {
+    expect(
+      SingBoxRoutingMode.fromName('proxylisted'),
+      SingBoxRoutingMode.proxyListed,
+    );
+    expect(
+      SingBoxRoutingMode.fromName('proxyAll'),
+      SingBoxRoutingMode.proxyAll,
+    );
+    expect(SingBoxRoutingMode.fromName(null), SingBoxRoutingMode.proxyAll);
+    expect(SingBoxRoutingMode.fromName('direct'), SingBoxRoutingMode.proxyAll);
   });
 
   test('SingBoxIpVersion.fromName', () {
