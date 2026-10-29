@@ -1,6 +1,6 @@
 ---
 name: roadmap
-description: "Full improvement plan for sing_box after 1.0.0 (R0-R15): R0-R6 + R14 fixes DONE and pushed; next R7; per-task plans and findings"
+description: "Full improvement plan for sing_box after 1.0.0 (R0-R15): R0-R7 + R14 fixes DONE and pushed; next R8; per-task plans and findings"
 metadata:
   node_type: memory
   type: project
@@ -16,8 +16,8 @@ before any download** (SDKs, Gradle/CocoaPods/SwiftPM deps, git clones, release 
 `flutter pub get --offline`; pub cache already has `yaml` 3.1.4, `http` 1.6.0, `pana` 0.23.19.
 Every config change: `sing-box check` tests with `SING_BOX_BIN` (CONTRIBUTING.md). "VERIFY" = check first, unconfirmed.
 
-Status/queue: see [[navigator]] (start there). R0-R6 DONE and R14 audit + main fixes DONE (2026-10-29), all pushed
-(release-1.1.0 = fb4e5b1, CI run 40914059314 green). NEXT: R7.
+Status/queue: see [[navigator]] (start there). R0-R7 DONE and R14 audit + main fixes DONE (2026-10-29), all pushed
+(release-1.1.0 = 4ba144d, CI run 40946347417 green; R7 not run on a device yet). NEXT: R8.
 Order: R0 → D1 (lx API design: DECIDED = option A, see R8) → R4 → R5 → R6 → R7 → R14 (audit vs SFA/SFI/desktop,
 its fixes) → R8 → R13 (protocol matrix, both cores) → R15 (deps) → R9 (README/pub.dev, uses R13 tables) → R10-R12.
 Versions: the user wants R4 (and following tasks) in the 1.1.0 update too, on branch release-1.1.0 (2026-10-29).
@@ -133,7 +133,8 @@ Then replace the Ruby script by `dart run sing_box:setup_ios` (edits pbxproj lik
 the Ruby one for CocoaPods apps. Also VERIFY the Package.swift `Context.packageDirectory` FlutterFramework check
 (R0). Docs: "no Podfile needed on Flutter 3.44+".
 
-## R7. Engine options from competitors (medium, native) — NEXT
+## R7. Engine options from competitors (medium, native) — DONE 2026-10-29 (6fe7513, 0d878aa, 6d5eeaf, 4ba144d)
+Done as planned, details in [[navigator]] section 2; only the device/emulator runs are missing. Original plan:
 Also from the R14 audit: Android `setSystemProxyEnabled` is a no-op and `getSystemProxyStatus` reports enabled =
 available; SFA persists a "system proxy" switch and reloads. OOM options: SetupOptions `oomKillerEnabled`,
 `oomKillerDisabled`, `oomMemoryLimit` (bytes; on iOS 0 = default NE limit) - Android hardcodes off in
@@ -227,7 +228,7 @@ connection owner); ours adds setUnderlyingNetworks on change, routing wait, tile
   `LibboxPromoteOOMDraft()` after setup, `platformMetadata` - we have none on iOS.
 - I2 med: SFI route overrides in openTun: excludeDefaultRoute (0.0.0.0/31, ::/127), autoRouteUseSubRangesByDefault
   (1.0.0.0/8 … 128.0.0.0/1 instead of default), excludeAPNsRoute (17.0.0.0/8 + push.apple.com proxy bypass),
-  systemProxyEnabled toggle - we have none (only NE-level excludeAPNs 16.4+).
+  systemProxyEnabled toggle - we have none (only NE-level excludeAPNs 16.4+). (Toggle done in R7.)
 - I3 low-med: NE options enforceRoutes, excludeCellularServices (16.4+), excludeDeviceCommunication (17.4+); custom
   on-demand rules (SSID/interface) and restoring on-demand after stop ("wasOnDemandEnabled").
 - I4 low: locale in the extension; tailscaleHostname = device name. Diff by design: our serviceStop also cancels the
@@ -235,7 +236,7 @@ connection owner); ours adds setUnderlyingNetworks on change, routing wait, tile
 - FIXED 2026-10-29 (2ff067e, c7fdaaa): A1/I1 core reports (`getCoreReports()`, promoteOOMDraft, platformMetadata;
   NO PLCrashReporter = no native iOS crash reports, no Prepare/ReinstallCrashSignalHandlers), A4 (warning in core log,
   no stop), I2 + I3 NE flags (settings `enforceRoutes`, `excludeCellularServices`, `excludeDeviceCommunication`,
-  `excludeDefaultRoute`, `noDefaultRoute`, `excludeApnsRoute`). OPEN: A2/A3 + system proxy toggle (→ R7), A5,
+  `excludeDefaultRoute`, `noDefaultRoute`, `excludeApnsRoute`). A2/A3 + system proxy toggle DONE in R7. OPEN: A5,
   custom on-demand rules, iOS extension locale; none of the iOS options verified on a device (no tunnel in simulator).
 - Desktop (input for R10): Electron+TS UI; the core runs as a privileged daemon (Windows service, named pipe
   `\\.\pipe\ProtectedPrefix\Administrators\sing-box`; Linux systemd `/run/sing-box.socket`); UI talks gRPC

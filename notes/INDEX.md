@@ -1,9 +1,9 @@
-- [NAVIGATOR — start here](navigator.md) — full handoff: release-1.1.0 pushed (fb4e5b1), CI green; R0-R6 + SFA/SFI fixes done; open items; next R7; how to test; code map
+- [NAVIGATOR — start here](navigator.md) — full handoff: release-1.1.0 pushed (4ba144d, PR #3), CI green; R0-R7 + SFA/SFI fixes done; open items; next R8; how to test; code map
 - [sing_box plugin rewrite](sing-box-plugin-rewrite.md) — 1.0.0 rewrite on libbox 1.14.4; branch `1.0.0`, docs in CONTRIBUTING/doc/releasing; GPL
 - [libbox build environment](libbox-build-environment.md) — Flutter/JDK/Go paths, emulator & simulator ids, Xcode cache fix, sing-box CLI
 - [No subagents](feedback-no-subagents.md) — do sing_box work inline, sequentially; subagents burned the limit
 - [Commits and push](feedback-commits-and-push.md) — no Claude co-author trailer; never push, the user pushes
-- [Roadmap R0-R15](roadmap.md) — all planned improvements (routing, 4 pings, iOS w/o pods, lx core, audit vs SFA/SFI, protocol matrix, deps, README/pub.dev); "начни задачу Rn"
+- [Roadmap R0-R15](roadmap.md) — R0-R7 done; all planned improvements (routing, 4 pings, iOS w/o pods, lx core, audit vs SFA/SFI, protocol matrix, deps, README/pub.dev); "начни задачу Rn"
 - [Lower min Flutter](lower-min-flutter.md) — Flutter 3.29/Dart 3.7 changes and facts; DONE, CI green
 - [One release branch](feedback-one-release-branch.md) — do roadmap tasks in release-1.1.0, never a new branch per task
 - [Verify before saying done](feedback-verify-before-done.md) — check navigator open items + real test results; user got angry at a false "готов"

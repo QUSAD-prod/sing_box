@@ -1,14 +1,15 @@
 ---
 name: navigator
-description: "START HERE in a new sing_box chat: full state of release-1.1.0 (R0-R6 + SFA/SFI fixes done, pushed, CI green), rules, facts, open items, next tasks (R7), how to test, code map"
+description: "START HERE in a new sing_box chat: full state of release-1.1.0 (R0-R7 + SFA/SFI fixes done, pushed, CI green), rules, facts, open items, next tasks (R8), how to test, code map"
 metadata:
   node_type: memory
   type: project
   originSessionId: 6e81f1f4-4e4f-462d-8363-f66a9f5d22e8
-  modified: 2026-10-29T17:05:23.934Z
+  modified: 2026-10-29T20:30:00.000Z
 ---
 
-Rewritten in full on 2026-10-29 (evening) at the user's request as the handoff for the next chat.
+Rewritten in full on 2026-10-29 (evening) at the user's request as the handoff for the next chat; updated after R7
+(cloud session, 2026-10-29 night).
 Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]].
 
 ## 0. Rules (read first)
@@ -33,15 +34,18 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
   copies `android/libs/libbox.aar` + `ios/sing_box/Frameworks/Libbox.xcframework`, git-ignored). If a new chat
   starts in another worktree: that worktree may hold `release-1.1.0` checked out elsewhere - check `git worktree
   list`; free it with `git -C <other> switch <its claude/... branch>` (only if clean), then `git switch release-1.1.0`.
-- **Pushed by the user 2026-10-29: `release-1.1.0` = `fb4e5b1`, nothing local/unpushed, tree clean.**
-- **CI run 40914059314 (workflow_dispatch on fb4e5b1): all 8 jobs green** - Analyze & test (336 tests incl.
-  `sing-box check`), libbox release, example Android, example iOS spm + cocoapods, Minimum Flutter 3.29.3 android /
-  ios-spm / ios-cocoapods (the last two also run `dart run sing_box:setup_ios` and build with the extension).
+- **Pushed 2026-10-29 (at the user's request, from a cloud session): `release-1.1.0` = `4ba144d` (R7), nothing
+  unpushed.** PR #3 "Release 1.1.0" (release-1.1.0 → main) is open; CI runs on its pull_request events (push to
+  release-1.1.0 alone does not trigger CI; workflow_dispatch does).
+- **CI run 40946347417 (PR #3, on 4ba144d): all 8 jobs green** - Analyze & test (341 tests incl. `sing-box check`),
+  libbox release, example Android, example iOS spm + cocoapods, Minimum Flutter 3.29.3 android / ios-spm /
+  ios-cocoapods (the last two also run `dart run sing_box:setup_ios` and build with the extension). This is the first
+  compile of the R7 Kotlin/Swift code (written without a local compiler). Previous green run: 40914059314 (fb4e5b1).
   Run CI: `gh workflow run ci.yml --repo QUSAD-prod/sing_box --ref release-1.1.0`.
 - Commits on top of main (oldest first): 576f207 WIP min Flutter 3.29 (R0) → 7bedc06 R1 → 1f58da7 R2 → 49681b2 R3 →
   2d918b9 docs → 3e020dc version 1.1.0 → 8b0101f CI min Flutter → 7e39ae9, 517aef5, e8a017b, 5ff09e0 (R4) → 3698bea
   (R5 Dart) → 0c769f7 "WIP R5 Android" → 72ae1bd "WIP R5 iOS" → dc21036 → 11521e0 → dcd2fdd → 2ff067e → c7fdaaa →
-  a6c74da → fb4e5b1 (R6). Three commits still titled "WIP" are pushed: fix by **squash-merging** the release PR
+  a6c74da → fb4e5b1 (R6) → 6fe7513, 0d878aa, 6d5eeaf, 4ba144d (R7). Three commits still titled "WIP" are pushed: fix by **squash-merging** the release PR
   (no force push without the user's explicit OK).
 - Version **1.1.0** everywhere (pubspec, podspecs, gradle, README, CHANGELOG). Release tag will be `v1.1.0`
   (publish workflow checks tag = `v` + pubspec version); release steps in `doc/releasing.md` (user pushes/tags).
@@ -83,6 +87,35 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
   `test/tool/fixtures/flutter_3_47.pbxproj`, team id replaced by ABCDE12345 - never commit the user's real team
   <the user's team id>).
 
+- **R7 engine options** (6fe7513 … 4ba144d):
+  - OOM: `SingBoxSettings.oomKiller` (`SingBoxOomKiller.platformDefault|off|reportOnly|enabled`) + `memoryLimitMb`;
+    `start` channel args `oomKiller`/`memoryLimit` (bytes) (+ legacy `disableMemoryLimit`, now @Deprecated in Dart).
+    Android: `ServiceSettings.oomKiller/memoryLimit`, `LibboxRuntime.reloadOptions()` (= `Libbox.reloadSetupOptions`)
+    before `newCommandServer` in `doStart`; platformDefault = off. iOS: app group keys `sing_box.oom_killer` /
+    `sing_box.memory_limit` + start options; `SingBoxLibbox.setup(oomKillerReportOnly:, oomMemoryLimit:)`;
+    platformDefault = enabled. Applied on (re)connect only.
+  - Local/system proxy: `SingBoxConfigOptions.localProxy` (`SingBoxLocalProxy`: `mixed` inbound tag `mixed-in`,
+    default 127.0.0.1:2080, `systemProxy` → TUN `platform.http_proxy`, `bypassDomains`, `matchDomains` iOS only);
+    `apply()` adds both to full configs (keeps an existing listener on that port / an existing http_proxy).
+    `SingBox.getSystemProxyStatus()` (`SingBoxSystemProxyStatus`, unavailable when not connected) /
+    `setSystemProxyEnabled()` → channel methods via command client. Android: persisted
+    `ServiceSettings.systemProxyEnabled` (default true), handler reloads (SFA behaviour); fixed: status reported
+    enabled = available and the switch was a no-op. iOS: persisted `sing_box.system_proxy_enabled`, live
+    NEProxySettings update (existed), openTun honours the stored value.
+  - Android `allowBypass` (`SingBoxSettings`/`SingBoxServiceOptions` → `ServiceSettings.allowBypass` → openTun).
+  - Android proxy-only mode: `SingBoxConfigOptions.inboundMode` (`SingBoxInboundMode.tun|proxyOnly`); proxyOnly =
+    no TUN, only `effectiveLocalProxy` (default local proxy), no probe routes; `apply()` removes TUN inbounds.
+    `SingBoxConfigBuilder.hasTunInbound()`. Native: plugin `start` uses `Libbox.hasTunInbound`; config without TUN
+    runs in `SingBoxProxyService` (subclass of the now `open` `SingBoxVpnService` with `proxyMode = true`: skips
+    prepare/protect/underlying networks/routing wait; `vpnInstance` helper). The service is NOT in the plugin
+    manifest: the app declares it (`specialUse`, subtype `proxy`, `FOREGROUND_SERVICE_SPECIAL_USE`) - snippet in
+    doc/android.md, example app declares it; missing → `UNSUPPORTED`. Mode persisted (`ServiceSettings.proxyMode`)
+    for boot/tile. Dart `connect()` skips the VPN permission without TUN, stops first when switching modes, and
+    throws `SingBoxUnsupportedException` on iOS (doc/ios.md "Proxy-only mode is not available").
+  - Docs: README (Settings → "Memory limit (OOM killer)", Configuration options → "Proxy-only mode (Android)",
+    "Local proxy and system proxy"), CHANGELOG 1.1.0, doc/android.md, doc/ios.md, doc/platform_channel.md;
+    example Tools page (OOM selector, memory limit, allow bypass, local proxy, proxy-only, system proxy switch).
+
 ## 3. Technical facts learned (keep)
 - sing-box 1.14 tun inbound: every TCP connection to the DNS hijack address (TUN address + 1, e.g. 172.19.0.2) is
   handled as DNS over TCP → never use it as a probe/ping address. sing-tun 0.9.7 has a ForwardDispatcher that judges
@@ -99,8 +132,20 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
   FlutterGeneratedPluginSwiftPackage with empty deps. SPM apps have no `ios/.symlinks`.
 - Dart: on iOS a reset during `Socket.connect` can surface as a bare `OSError` (catch it besides SocketException).
 - CocoaPods CLI needs `LANG=en_US.UTF-8` here. New Swift files in the CocoaPods example need `pod install`.
+- libbox 1.14.4 OOM: `oomKillerEnabled` adds an `oom-killer` service and sets GOMEMLIMIT = 80 % of
+  `oomMemoryLimit`; `oomKillerDisabled` = report only (no network reset); `oomMemoryLimit` 0 → iOS 50 MB, Android
+  "available system memory" policy (/proc). Under an iOS NE the killer always uses 50 MB (limit only moves the GC
+  target). Options are read when a CommandServer is created; `Libbox.reloadSetupOptions` changes them later.
+- libbox `HasTunInbound(config)`; SFA picks VPNService vs ProxyService by it. SFA 1.14.4 also has OOM settings
+  (default off, limit 50 MB options) and `systemProxyEnabled` (default true, toggle = reload).
+- `VpnService.Builder.setHttpProxy` only applies to a new interface → toggling needs a reload (Android).
 
 ## 4. Open / unverified (be honest about these)
+- **R7 runs nowhere yet**: only unit tests + CI builds (Kotlin/Swift compile, `sing-box check`). Not run on a device
+  or emulator: OOM modes (no OOM report triggered), system proxy switch (Android reload, iOS live update), allowBypass,
+  proxy-only mode (SingBoxProxyService start/stop, notification, tile, boot, Android 14 `specialUse` FGS start),
+  mode switching restart. No e2e test covers them yet (good candidates: proxy-only connect + HTTP through
+  127.0.0.1:2080 on the emulator; system proxy status).
 - Nothing with a **running tunnel on a real iPhone** was ever tested (needs the user's paid team): extension ping
   path, iOS route/NE options, crash/OOM reports on iOS, local rule-sets read by the extension.
 - Not verified on a device: rule-set files written to `<workingDir>/rule-sets` and reloaded by a running core.
@@ -113,19 +158,21 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - Still unchecked: `apply()` with `ipVersion` ≠ dual on a config without `dns`.
 
 ## 5. Next (priority queue)
-1. **R7 engine options** ([[roadmap]] R7 + leftovers of R14): Android `allowBypass`; Android proxy-only mode
-   (foreground service `specialUse`, no VpnService, mixed inbound); system HTTP proxy option in the Dart builder
-   (tun `platform.http_proxy`; Android already calls setHttpProxy; Android `setSystemProxyEnabled` is a no-op
-   today); configurable OOM killer / memory limit (SetupOptions oomKillerEnabled/oomMemoryLimit/oomKillerDisabled)
-   for both platforms; iOS: document that proxy-only is impossible. Then R8 lx core (API design D1 = option A
-   `SingBoxExtended extends SingBox`, details in [[roadmap]] R8) → R13 protocol matrix → R15 deps → R9 README/pub.dev
-   (user's README order: protocol table first, platforms, features, install/docs, "Buy Me a Coffee" last - ask the
-   link) → R10-R12.
+1. R7 DONE (code + CI); verify on the Android emulator when the user has the Mac (see section 4).
+   Next: **R8 lx core** (API design D1 = option A `SingBoxExtended extends SingBox`, details in [[roadmap]] R8)
+   → R13 protocol matrix → R15 deps → R9 README/pub.dev (user's README order: protocol table first, platforms,
+   features, install/docs, "Buy Me a Coffee" last - ask the link) → R10-R12.
 2. **Release 1.1.0** whenever the user says: PR release-1.1.0 → main (squash merge), `doc/releasing.md`.
 3. Remaining R14 gaps: AppChangeReceiver (per-app lists ignore newly installed apps), custom on-demand rules
    (SSID/interface), extension locale, PLCrashReporter (needs a new dependency - ask).
 
 ## 6. How to test
+- **Cloud session (claude.ai/code container)**: no Android SDK (`dl.google.com` blocked by the environment's network
+  policy, 2026-10-29), no Xcode → Kotlin/Swift only compile in CI. Flutter stable can be cloned from GitHub into
+  `/opt/tools/flutter` (works). Building the sing-box CLI was refused by the auto-mode classifier and the user said
+  not to bother → `sing-box check` runs only in CI. Commit identity in the container defaults to "Claude": set
+  `git config user.name "Дмитрий Островский"`, `user.email qusad.prod@gmail.com` first. A stop hook complains about
+  "Unverified" commits (non-noreply email) - ignore it, the user wants their own identity.
 - `export PATH=$HOME/dev/flutter/bin:$PATH` (Flutter 3.47.6); `JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home`.
 - Unit: `SING_BOX_BIN=<sing-box 1.14.4 CLI> flutter test` (336 tests); `flutter analyze`; `dart format
   --set-exit-if-changed lib test bin example/lib example/integration_test`; `flutter pub publish --dry-run` (warns
@@ -157,6 +204,9 @@ Per-task plans: [[roadmap]]. Environment/toolchain: [[libbox-build-environment]]
 - `lib/src/config/`: `config_builder.dart` (build/apply/buildProbe/probeTargets/_probeRules), `config_options.dart`
   (`probeAddress`), `routing_rules.dart`, `rule_sets.dart`, `share_link.dart`, `config.dart` (explicit exports - add
   new public config types there); `internal/` link parser, subscription, clash, writer.
+- R7 types: `SingBoxOomKiller` + `SingBoxSettings.oomKiller/memoryLimitMb/allowBypass` (`models/settings.dart`),
+  `SingBoxLocalProxy`, `SingBoxInboundMode` (`config/config_options.dart`), `SingBoxSystemProxyStatus`
+  (`models/system_proxy_status.dart`); Android `service/SingBoxProxyService.kt`.
 - `lib/src/latency_probe.dart`, `lib/src/rule_set_manager.dart`, `lib/src/subscription_loader.dart`,
   `lib/src/models/*` (`ping_result.dart`, `core_report.dart`, `settings.dart`, ...), `lib/src/options.dart`
   (`SingBoxServiceOptions`, iOS/Android init options), `lib/src/tool/` (setup_ios, pbxproj; pure Dart).
