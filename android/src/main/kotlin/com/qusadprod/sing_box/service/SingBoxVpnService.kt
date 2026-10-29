@@ -137,7 +137,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         super.onCreate()
         instance = this
         settings = ServiceSettings(this)
-        platform = PlatformInterfaceImpl(this)
+        platform = PlatformInterfaceImpl(this, this)
         notification = ServiceNotification(this, scope)
         registerReceivers()
         scope.launch(Dispatchers.IO) {
@@ -176,7 +176,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             tunFd = null
             scope.launch(Dispatchers.IO) {
                 runCatching { fd?.close() }
-                DefaultNetworkMonitor.stop()
+                DefaultNetworkMonitor.stop(DefaultNetworkMonitor.OWNER_VPN)
                 server?.let {
                     runCatching { it.closeService() }
                     runCatching { it.close() }
@@ -251,7 +251,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
                 ?: error("android: no configuration, start the VPN from the app first")
             if (prepare(this) != null) error("android: missing VPN permission")
             if (!isStarting()) return
-            DefaultNetworkMonitor.start(this)
+            DefaultNetworkMonitor.start(this, DefaultNetworkMonitor.OWNER_VPN)
             val server = commandServer ?: Libbox.newCommandServer(this, platform).also {
                 it.start()
                 commandServer = it
@@ -306,7 +306,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             server?.let { runCatching { it.closeService() } }
             lifecycle.withLock {
                 closeTun()
-                DefaultNetworkMonitor.stop()
+                DefaultNetworkMonitor.stop(DefaultNetworkMonitor.OWNER_VPN)
                 commandServer?.let {
                     runCatching { it.closeService() }.onFailure { e -> Log.w(TAG, "close service", e) }
                     runCatching { it.close() }

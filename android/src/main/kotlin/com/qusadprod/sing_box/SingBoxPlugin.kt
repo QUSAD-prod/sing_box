@@ -33,6 +33,8 @@ import com.qusadprod.sing_box.plugin.OutboundsStreamHandler
 import com.qusadprod.sing_box.plugin.StatsStreamHandler
 import com.qusadprod.sing_box.plugin.StatusStreamHandler
 import com.qusadprod.sing_box.plugin.StunStreamHandler
+import com.qusadprod.sing_box.service.NativePing
+import com.qusadprod.sing_box.service.ProbeCore
 import com.qusadprod.sing_box.service.ServiceNotification
 import com.qusadprod.sing_box.service.SingBoxTileService
 import com.qusadprod.sing_box.service.SingBoxVpnService
@@ -105,6 +107,7 @@ class SingBoxPlugin :
         for (eventChannel in eventChannels) eventChannel.setStreamHandler(null)
         eventChannels.clear()
         scope.cancel()
+        Thread { ProbeCore.stop() }.start()
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -190,6 +193,22 @@ class SingBoxPlugin :
                 it.selectOutbound(call.requireString("groupTag"), call.requireString("outboundTag"))
             }
             "urlTest" -> command(result) { it.urlTest(call.requireString("tag")) }
+            "startProbe" -> respond(result) {
+                val config = call.requireString("config")
+                io { ProbeCore.start(context, config) }
+                null
+            }
+            "stopProbe" -> respond(result) {
+                io { ProbeCore.stop() }
+                null
+            }
+            "pingServer" -> respond(result) {
+                val method = call.requireString("method")
+                val host = call.requireString("host")
+                val port = call.argument<Number>("port")?.toInt()
+                val timeoutMs = call.argument<Number>("timeoutMs")?.toInt() ?: 5000
+                io { NativePing.ping(method, host, port, timeoutMs) }
+            }
             "setClashMode" -> command(result) { it.setClashMode(call.requireString("mode")) }
             "closeConnection" -> command(result) { it.closeConnection(call.requireString("id")) }
             "closeAllConnections" -> command(result) { it.closeConnections() }

@@ -16,6 +16,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sing_box/sing_box.dart';
@@ -90,11 +91,15 @@ void main() {
     );
   });
 
-  testWidgets('TCP ping of profiles without the tunnel', (tester) async {
+  testWidgets('latency of profiles without the tunnel', (tester) async {
     final servers = [
       SingBoxServerConfig.fromOutbound(
         SingBoxShareLink.parse(ssLink).json,
         id: 'ss',
+      ),
+      SingBoxServerConfig.fromOutbound(
+        SingBoxShareLink.parse(vlessLink).json,
+        id: 'vless',
       ),
       SingBoxServerConfig.fromOutbound({
         'type': 'trojan',
@@ -104,13 +109,49 @@ void main() {
         'password': 'x',
       }, id: 'closed'),
     ];
-    final results = {
-      for (final r in await singBox.pingServers(servers).toList())
+    Future<Map<String?, SingBoxPingResult>> measure(
+      SingBoxPingMethod method,
+    ) async => {
+      for (final r
+          in await singBox.pingServers(servers, method: method).toList())
         r.serverId: r,
     };
-    expect(results['ss']!.success, isTrue, reason: '${results['ss']}');
-    expect(results['ss']!.method, SingBoxPingMethod.tcp);
-    expect(results['closed']!.success, isFalse);
+
+    // HTTP through each server, by a probe core in the app: probe.txt is only
+    // reachable through the e2e servers.
+    for (final method in [
+      SingBoxPingMethod.proxyHead,
+      SingBoxPingMethod.proxyGet,
+    ]) {
+      final results = await measure(method);
+      for (final id in ['ss', 'vless']) {
+        expect(results[id]!.success, isTrue, reason: '${results[id]}');
+        expect(results[id]!.method, method);
+        expect(results[id]!.statusCode, 200);
+        expect(results[id]!.url, probeUrl);
+      }
+      expect(results['closed']!.success, isFalse);
+    }
+
+    final tcp = await measure(SingBoxPingMethod.tcp);
+    expect(tcp['ss']!.success, isTrue, reason: '${tcp['ss']}');
+    expect(tcp['ss']!.method, SingBoxPingMethod.tcp);
+    expect(tcp['closed']!.success, isFalse);
+
+    // Unprivileged ICMP sockets work (the emulator network may not forward
+    // ICMP to the host, so only the device's own address is required).
+    final loopback = await singBox.ping(
+      SingBoxServerConfig.fromOutbound({
+        'type': 'socks',
+        'tag': 'local',
+        'server': '127.0.0.1',
+        'server_port': 1,
+      }, id: 'local'),
+      method: SingBoxPingMethod.icmp,
+    );
+    expect(loopback.success, isTrue, reason: '$loopback');
+    final icmp = await measure(SingBoxPingMethod.icmp);
+    debugPrint('ICMP to $host: ${icmp['ss']}');
   });
 
   testWidgets('connects and carries traffic through the proxy', (tester) async {
@@ -154,8 +195,29 @@ void main() {
     );
     expect(proxy.items.map((i) => i.tag), ['auto', 'E2E SS', 'E2E VLESS']);
 
+    // Through the probe route of the running tunnel (no local port).
     final ping = await singBox.pingOutbound('E2E SS');
     expect(ping.success, isTrue, reason: '$ping');
+    expect(ping.statusCode, 200, reason: '$ping');
+    final get = await singBox.pingOutbound(
+      'E2E VLESS',
+      method: SingBoxPingMethod.proxyGet,
+    );
+    expect(get.success, isTrue, reason: '$get');
+    expect(get.method, SingBoxPingMethod.proxyGet);
+    final running = await singBox.pingServers([
+      SingBoxServerConfig.fromOutbound(
+        SingBoxShareLink.parse(ssLink).json,
+        id: 'ss',
+      ),
+    ]).toList();
+    expect(running.single.success, isTrue, reason: '$running');
+    // TCP bypasses the tunnel (protected socket, underlying network).
+    final tcp = await singBox.pingOutbound(
+      'E2E SS',
+      method: SingBoxPingMethod.tcp,
+    );
+    expect(tcp.success, isTrue, reason: '$tcp');
     final group = await singBox.testGroup(SingBoxConfigBuilder.autoTag);
     expect(group, isNotNull);
 

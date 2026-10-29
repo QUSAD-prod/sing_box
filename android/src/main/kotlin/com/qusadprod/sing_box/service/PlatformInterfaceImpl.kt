@@ -35,24 +35,31 @@ import java.net.NetworkInterface
 import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 
 /**
- * libbox `PlatformInterface` for the VPN service. Features that need root or
+ * libbox `PlatformInterface` for the VPN [service], or for the probe core
+ * (latency tests, no TUN) when [service] is `null`. Features that need root or
  * are specific to other platforms (shell, SFTP, bridge, neighbor table) are
  * reported as unsupported.
  */
-internal class PlatformInterfaceImpl(private val service: SingBoxVpnService) : PlatformInterface {
-    private val context: Context = service.applicationContext
-    private val connectivity: ConnectivityManager = context.getSystemService(ConnectivityManager::class.java)
-    private val wifiManager: WifiManager? = context.getSystemService(WifiManager::class.java)
+internal class PlatformInterfaceImpl(
+    context: Context,
+    private val service: SingBoxVpnService?,
+) : PlatformInterface {
+    private val context: Context = context.applicationContext
+    private val connectivity: ConnectivityManager = this.context.getSystemService(ConnectivityManager::class.java)
+    private val wifiManager: WifiManager? = this.context.getSystemService(WifiManager::class.java)
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        if (!service.protect(fd)) {
+        // The probe core runs beside the VPN: keep its sockets out of the tunnel too.
+        val vpn = service ?: SingBoxVpnService.instance ?: return
+        if (!vpn.protect(fd)) {
             Log.w(TAG, "protect($fd) failed")
         }
     }
 
-    override fun openTun(options: TunOptions): Int = service.openTun(options)
+    override fun openTun(options: TunOptions): Int =
+        service?.openTun(options) ?: error("android: the probe core has no TUN")
 
     override fun findConnectionOwner(
         ipProtocol: Int,
@@ -79,11 +86,11 @@ internal class PlatformInterfaceImpl(private val service: SingBoxVpnService) : P
     }
 
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
-        DefaultNetworkMonitor.setListener(listener)
+        DefaultNetworkMonitor.addListener(listener)
     }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
-        DefaultNetworkMonitor.setListener(null)
+        DefaultNetworkMonitor.removeListener(listener)
     }
 
     @Suppress("DEPRECATION")
@@ -158,11 +165,11 @@ internal class PlatformInterfaceImpl(private val service: SingBoxVpnService) : P
     override fun localDNSTransport(): LocalDNSTransport = LocalResolver
 
     override fun sendNotification(notification: Notification) {
-        service.showCoreNotification(notification)
+        service?.showCoreNotification(notification)
     }
 
     override fun cancelNotification(identifier: String, typeID: Int) {
-        service.cancelCoreNotification(identifier, typeID)
+        service?.cancelCoreNotification(identifier, typeID)
     }
 
     override fun startNeighborMonitor(listener: NeighborUpdateListener?) {

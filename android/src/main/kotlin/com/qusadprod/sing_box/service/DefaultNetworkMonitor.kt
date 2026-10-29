@@ -19,6 +19,7 @@ import android.os.HandlerThread
 import android.util.Log
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import java.net.NetworkInterface
+import java.util.concurrent.CopyOnWriteArraySet
 
 /**
  * Tracks the underlying (non-VPN) default network and reports it to libbox
@@ -31,8 +32,14 @@ internal object DefaultNetworkMonitor {
     var defaultNetwork: Network? = null
         private set
 
-    @Volatile
-    private var listener: InterfaceUpdateListener? = null
+    /** Owner of the VPN service ([start] / [stop]). */
+    const val OWNER_VPN = "vpn"
+
+    /** Owner of the probe core for latency tests. */
+    const val OWNER_PROBE = "probe"
+
+    private val listeners = CopyOnWriteArraySet<InterfaceUpdateListener>()
+    private val owners = mutableSetOf<String>()
     private val lock = Any()
     private var connectivity: ConnectivityManager? = null
     private var registered = false
@@ -49,8 +56,10 @@ internal object DefaultNetworkMonitor {
             .build()
     }
 
-    fun start(context: Context) {
+    /** Starts tracking on behalf of [owner] (the VPN service or the probe core). */
+    fun start(context: Context, owner: String) {
         synchronized(lock) {
+            owners += owner
             val manager = context.applicationContext.getSystemService(ConnectivityManager::class.java)
             connectivity = manager
             if (!registered) {
@@ -61,8 +70,11 @@ internal object DefaultNetworkMonitor {
         }
     }
 
-    fun stop() {
+    /** Stops tracking for [owner]; the callback is released once no owner is left. */
+    fun stop(owner: String) {
         synchronized(lock) {
+            owners -= owner
+            if (owners.isNotEmpty()) return
             if (registered) {
                 runCatching { connectivity?.unregisterNetworkCallback(callback) }
                 registered = false
@@ -71,13 +83,17 @@ internal object DefaultNetworkMonitor {
         }
     }
 
-    fun setListener(newListener: InterfaceUpdateListener?) {
-        listener = newListener
+    fun addListener(listener: InterfaceUpdateListener) {
+        listeners += listener
         // Report the current interface before returning (like SFA): the core dials right
         // after starting the monitor (initial rule-set downloads, DNS bootstrap) and fails
         // with "no available network interface" until it knows the default interface.
         // Called on a Go thread, never on the main thread.
-        if (newListener != null) checkDefaultInterfaceUpdate(defaultNetwork)
+        checkDefaultInterfaceUpdate(defaultNetwork, listOf(listener))
+    }
+
+    fun removeListener(listener: InterfaceUpdateListener) {
+        listeners -= listener
     }
 
     private fun register(manager: ConnectivityManager) {
@@ -131,11 +147,14 @@ internal object DefaultNetworkMonitor {
     }
 
     /** Runs on the callback thread: probes the interface with retries (never on the main thread). */
-    private fun checkDefaultInterfaceUpdate(network: Network?) {
-        val current = listener ?: return
+    private fun checkDefaultInterfaceUpdate(
+        network: Network?,
+        targets: Collection<InterfaceUpdateListener> = listeners,
+    ) {
+        if (targets.isEmpty()) return
         val manager = connectivity ?: return
         if (network == null) {
-            runCatching { current.updateDefaultInterface("", -1, false, false) }
+            for (current in targets) runCatching { current.updateDefaultInterface("", -1, false, false) }
             return
         }
         repeat(10) {
@@ -146,8 +165,10 @@ internal object DefaultNetworkMonitor {
                 if (index != null) {
                     val capabilities = manager.getNetworkCapabilities(network)
                     val expensive = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
-                    runCatching { current.updateDefaultInterface(name, index, expensive, false) }
-                        .onFailure { Log.w(TAG, "update default interface", it) }
+                    for (current in targets) {
+                        runCatching { current.updateDefaultInterface(name, index, expensive, false) }
+                            .onFailure { Log.w(TAG, "update default interface", it) }
+                    }
                     return
                 }
             }
