@@ -127,6 +127,22 @@ The extension is limited to about 50 MB. libbox for iOS is built with
 Keep configurations lean: large remote rule-sets, many outbounds or big
 connection counts raise the memory use.
 
+## Latency tests
+
+* Connected: the app's request to the probe address (`198.51.100.1`,
+  `SingBoxConfigOptions.probeAddress`) enters the tunnel and is routed
+  through the measured outbound. The TUN's neighbour address (`172.19.0.2`)
+  cannot be used: sing-box treats every TCP connection to it as DNS.
+* Stopped: the proxy methods start a temporary libbox service in the app
+  process (no TUN, never started command server, inbounds on `127.0.0.1`).
+* `tcp` / `icmp`: measured in the app while the tunnel is down; while it is
+  up the plugin sends them to the extension (`sendProviderMessage`), which
+  resolves the name with `DNSServiceGetAddrInfo` on the physical interface
+  and binds the sockets to it (`IP_BOUND_IF`), so neither the tunnel nor its
+  DNS (FakeIP) is involved. ICMP uses unprivileged `SOCK_DGRAM` sockets.
+  The simulator has no tunnel: only the disconnected paths can be tested
+  there.
+
 ## Speed and NAT tests
 
 `runNetworkQualityTest()` / `testSpeed()` and `runStunTest()` run through the

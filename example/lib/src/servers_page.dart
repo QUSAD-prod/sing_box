@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -21,11 +22,36 @@ class _ServersPageState extends State<ServersPage> {
   List<SingBoxServerConfig> _servers = const [];
   List<SingBoxSubscription> _subscriptions = const [];
   String? _activeId;
+  final _pings = <String, SingBoxPingResult>{};
+  StreamSubscription<SingBoxPingResult>? _pingSub;
 
   @override
   void initState() {
     super.initState();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _pingSub?.cancel();
+    super.dispose();
+  }
+
+  /// Measures every profile with [method]; results appear as they arrive.
+  void _measureAll(SingBoxPingMethod method) {
+    _pingSub?.cancel();
+    setState(_pings.clear);
+    _pingSub = _singBox.pingServers(_servers, method: method).listen((r) {
+      if (mounted) setState(() => _pings[r.serverId!] = r);
+    });
+  }
+
+  String _pingText(String id) {
+    final r = _pings[id];
+    if (r == null) return '';
+    return r.success
+        ? ' · ${r.ping} ms (${r.method.name})'
+        : ' · ${r.errorMessage ?? 'failed'}';
   }
 
   Future<void> _reload() async {
@@ -302,6 +328,30 @@ class _ServersPageState extends State<ServersPage> {
                     icon: const Icon(Icons.add),
                     onPressed: _importManually,
                   ),
+                  PopupMenuButton<SingBoxPingMethod>(
+                    tooltip: 'Measure latency',
+                    icon: const Icon(Icons.network_ping),
+                    enabled: _servers.isNotEmpty,
+                    onSelected: _measureAll,
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.proxyHead,
+                        child: Text('HTTP HEAD through the proxy'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.proxyGet,
+                        child: Text('HTTP GET through the proxy'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.tcp,
+                        child: Text('TCP handshake'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.icmp,
+                        child: Text('ICMP echo'),
+                      ),
+                    ],
+                  ),
                   IconButton(
                     tooltip: 'Connect with all servers (selector + urltest)',
                     icon: const Icon(Icons.hub_outlined),
@@ -333,7 +383,8 @@ class _ServersPageState extends State<ServersPage> {
                       leading: Radio<String>(value: server.id),
                       title: Text(server.name),
                       subtitle: Text(
-                        '${server.protocol} · ${server.server}:${server.port}',
+                        '${server.protocol} · ${server.server}:${server.port}'
+                        '${_pingText(server.id)}',
                       ),
                       onTap: () => _showDetails(server),
                       trailing: PopupMenuButton<String>(

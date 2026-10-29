@@ -44,6 +44,9 @@ Future<({int milliseconds, int statusCode})> measureHttp(
     socket = await Socket.connect(address, port, timeout: timeout);
   } on SocketException catch (e) {
     throw ProbeConnectException(e.osError?.message ?? e.message);
+  } on OSError catch (e) {
+    // Seen on iOS: a reset during connect surfaces as a bare OSError.
+    throw ProbeConnectException(e.message);
   }
   // Write errors (a reset connection) surface through the reads below; the
   // done future must not report them as unhandled errors.

@@ -168,6 +168,24 @@ and mobile data as metered.
 tunnel while it is connected. While it is stopped they test the direct
 connection (the outbound tag is ignored).
 
+## Latency tests and the start
+
+* `connect()` reports `connected` once Android routes the app itself
+  through the VPN (`establish()` returns earlier; a connection opened in
+  between would leave through the underlying network). The service waits at
+  most 3 s and not at all when the app is excluded from the tunnel.
+* While the VPN is stopped, `pingServers()` with a proxy method starts a
+  second libbox service in the app process (no TUN, inbounds on
+  `127.0.0.1`); its sockets are protected from a running VPN.
+* `tcp` / `icmp` use `android.system.Os` sockets: the name is resolved on
+  the underlying network and the sockets are protected while the VPN runs.
+  ICMP uses unprivileged ping sockets (`SOCK_DGRAM`); on the emulator the
+  emulator itself answers, so the numbers are not meaningful there.
+* Rules with `wifi_ssid` / `wifi_bssid` need the location permission
+  (`ACCESS_BACKGROUND_LOCATION` on Android 10+, which the plugin does not
+  declare); without it the core log shows a warning and these rules do not
+  match.
+
 ## App size
 
 libbox adds about 60 MB per ABI (stored uncompressed so it can be memory

@@ -43,7 +43,7 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
 - **Live data streams**: status with error reasons and session start time,
   traffic speed and totals, core logs, outbound groups with latencies,
   active connections (close individually), clash mode.
-- **Tests**: real latency (HTTP through the proxy, not ICMP), speed test
+- **Tests**: latency by HTTP `HEAD`/`GET` through the proxy (also while disconnected and for UDP protocols), TCP handshake or ICMP, speed test
   (download/upload capacity and responsiveness, RFC-style network quality),
   STUN NAT type / UDP test.
 - **Routing rules**: everything through the VPN or **only the listed
@@ -400,29 +400,48 @@ final ping = await singBox.pingCurrentServer();                 // SingBoxPingRe
 final group = await singBox.testGroup(SingBoxConfigBuilder.proxyTag);
 ```
 
-Latency is measured with an HTTP request through the proxy
-(`SingBoxConfigOptions.urlTestUrl`, default
-`https://www.gstatic.com/generate_204`), which reflects real proxy latency.
-`pingOutbound()` tests an outbound through its `urltest` group (the `auto`
-group of generated configs) so that this URL is used; outbounds outside such
-a group are tested by libbox against its built-in default URL.
+#### Latency (ping)
 
-To rank a whole list of profiles (for example before connecting) use
-`pingServers()`. It emits one result per profile as soon as it is known:
+Four ways to measure a server (`SingBoxPingMethod`):
+
+| Method | What is measured | Works for | Tunnel |
+| --- | --- | --- | --- |
+| `proxyHead` (default) | `HEAD` of `SingBoxConfigOptions.urlTestUrl` through the server, until the response headers arrive | every protocol, UDP based ones included | through it, or a temporary core while stopped |
+| `proxyGet` | the same with `GET` | every protocol | same |
+| `tcp` | TCP handshake with the server | TCP based protocols (not Hysteria, TUIC, WireGuard, QUIC transports) | bypasses it |
+| `icmp` | one ICMP echo | servers that answer ping | bypasses it |
 
 ```dart
+final current = await singBox.pingCurrentServer();                    // proxyHead
+final viaGet = await singBox.pingOutbound('Server B', method: SingBoxPingMethod.proxyGet);
 final servers = await singBox.getServerConfigs();
-singBox.pingServers(servers, concurrency: 8).listen((result) {
-  print('${result.serverId}: ${result.success ? '${result.ping} ms' : result.errorMessage}');
+singBox.pingServers(servers, method: SingBoxPingMethod.tcp, concurrency: 8).listen((r) {
+  print('${r.serverId}: ${r.success ? '${r.ping} ms' : r.errorMessage}');
 });
 ```
 
-While the VPN is stopped it measures the TCP handshake with each server
-(`SingBoxPingMethod.tcp`); UDP protocols (Hysteria, Hysteria 2, TUIC,
-WireGuard) cannot be measured that way. While the VPN is running the app's
-own traffic goes through the tunnel, so profiles that are part of the
-running configuration are measured with a URL test through the proxy
-(`SingBoxPingMethod.urlTest`) and the others are reported as failures.
+How it works:
+
+* **Connected**: generated and applied configurations contain probe routes:
+  a connection from the app to `198.51.100.1:20000+i`
+  (`SingBoxConfigOptions.probeAddress`, an unused TEST-NET address) goes
+  through outbound `i` to the host of `urlTestUrl`. The app sends the
+  request itself, so no local port is opened. Without probe routes (a
+  complete config of your own, or the app excluded from the tunnel)
+  sing-box's URL test of the outbound is used. `pingServers()` measures the
+  profiles of the running configuration and fails the others; connect with
+  `connectToServers()` to measure them all.
+* **Stopped**: `pingServers()` starts a temporary core in the app (no TUN,
+  inbounds on `127.0.0.1`, at most 64 profiles at a time), measures and
+  stops it. This also gives real latency for UDP based protocols.
+* **TCP / ICMP** are measured natively outside the tunnel; the server name is
+  resolved by the underlying network, not by the tunnel's DNS (FakeIP).
+  Android protects the sockets from the VPN; iOS measures in the Packet
+  Tunnel extension while the tunnel runs. ICMP numbers on emulators are not
+  meaningful (the emulator answers itself).
+
+Results carry `method`, `url` and the HTTP `statusCode` (proxy methods).
+`SingBoxPingMethod.urlTest` is a deprecated alias of `proxyHead`.
 
 ### Speed and NAT tests
 

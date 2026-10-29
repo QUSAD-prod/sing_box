@@ -1458,6 +1458,8 @@ class SingBox {
       return failure('TLS handshake failed: ${e.message}');
     } on SocketException catch (e) {
       return failure(e.osError?.message ?? e.message);
+    } on OSError catch (e) {
+      return failure(e.message);
     } on FormatException catch (e) {
       return failure(e.message);
     }

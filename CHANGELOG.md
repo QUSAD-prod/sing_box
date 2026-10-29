@@ -39,6 +39,15 @@
   `SingBoxRuleSetStatus`, `SingBox.manageRuleSets`;
   `SingBoxConfigBuilder.ruleSetUrls()` and the `ruleSetPaths` parameter of
   `build()` / `apply()`; `SingBoxRuleSets.mirrors()`.
+- Four latency methods (`SingBoxPingMethod`): `proxyHead` (default) and
+  `proxyGet` time an HTTP request to `urlTestUrl` through the server -
+  through the running tunnel via probe routes
+  (`SingBoxConfigOptions.probeAddress`, default `198.51.100.1`), otherwise
+  through a temporary core started in the app, so UDP based protocols and
+  disconnected profiles are measured too; `tcp` and `icmp` are measured
+  natively outside the tunnel. New `ping()`, `method` on `pingServers()`,
+  `pingOutbound()` and `pingCurrentServer()`; results have `method`, `url`
+  and `statusCode`.
 - Crash and out-of-memory reports of the core: `getCoreReports()`,
   `deleteCoreReport()`, `deleteCoreReports()`, `SingBoxCoreReport`. Memory
   pressure recorded before the core was killed is filed when the tunnel
@@ -60,6 +69,9 @@
   silently never matching.
 
 ### Changed
+- `SingBoxPingMethod.urlTest` is deprecated (alias of `proxyHead`);
+  `pingServers()` measures with `proxyHead` by default instead of a TCP
+  handshake while the VPN is stopped.
 - `bypassCountries: ['ru']` also connects the sites that only work from
   inside Russia directly (`geosite-ru-available-only-inside`).
 - Requires Flutter 3.29+ / Dart 3.7+ (was Flutter 3.44+ / Dart 3.12+).
