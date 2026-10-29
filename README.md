@@ -46,10 +46,17 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
 - **Tests**: real latency (HTTP through the proxy, not ICMP), speed test
   (download/upload capacity and responsiveness, RFC-style network quality),
   STUN NAT type / UDP test.
-- **Routing rules**: bypass or block apps (Android), domains and subnets,
-  "only these apps use the VPN", bypass LAN, bypass whole countries (geoip /
-  geosite rule-sets), ad blocking, custom DNS (UDP, TCP, DoT, DoH, DoQ, DoH3),
-  IP version: IPv4 and IPv6, IPv4 only or IPv6 only.
+- **Routing rules**: everything through the VPN or **only the listed
+  resources** (e.g. sites blocked in Russia); proxy, bypass or block apps
+  (Android), domains and subnets, "only these apps use the VPN", bypass LAN,
+  bypass whole countries (geoip / geosite rule-sets), ordered **custom rules**
+  (domains, keywords, regexes, IPs, ports, apps, rule-sets by tag or URL,
+  protocols), QUIC blocking, BitTorrent directly, ad blocking, custom DNS
+  (UDP, TCP, DoT, DoH, DoQ, DoH3), IP version: IPv4 and IPv6, IPv4 only or
+  IPv6 only; JSON export / import.
+- **Reliable rule-sets**: the plugin downloads rule-sets itself (with
+  jsDelivr mirrors) and the core reads local files, so a blocked or slow
+  rule-set host never stops the VPN from starting.
 - **Persistence**: settings, server profiles and routing rules are stored
   natively and applied automatically.
 - **Platform integration**: Android foreground notification with live speed
@@ -451,9 +458,89 @@ await singBox.updateRoutingRules((r) => r.copyWith(
   bypassLan: true,
   bypassCountries: ['ru'], // geoip-ru + geosite-ru rule-sets go direct
   blockAds: true,          // geosite-category-ads-all
+  blockQuic: true,         // apps fall back to TCP
+  bittorrentDirect: true,  // torrents never use the VPN
 ));
 
 await singBox.setIpVersion(SingBoxIpVersion.ipv4); // IPv4 only
+```
+
+**Routing mode** (`SingBoxRoutingRules.mode`) decides where traffic that no
+rule matches goes. The lists work in both modes:
+
+| Mode | Unmatched traffic | Typical use |
+| --- | --- | --- |
+| `SingBoxRoutingMode.proxyAll` (default) | through the proxy | "everything via VPN", optionally `bypassCountries: ['ru']` for "everything except Russian sites" |
+| `SingBoxRoutingMode.proxyListed` | directly, resolved by the direct DNS server | "only blocked sites via VPN" with `blockedInCountries` / `proxyDomains` / `proxySubnets` |
+
+```dart
+// Only sites blocked in Russia (and example.org) use the VPN.
+await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed);
+await singBox.updateRoutingRules(
+  (r) => r.copyWith(blockedInCountries: ['ru']),
+);
+await singBox.addProxyDomain('example.org');
+await singBox.addProxySubnet('203.0.113.0/24');
+```
+
+`blockedInCountries` supports `ru` (domains and IP ranges blocked in Russia
+from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat))
+and `cn` (sites outside mainland China). `bypassCountries: ['ru']` also
+connects the sites that only work from inside Russia directly.
+
+Rules are evaluated in this order: blocked apps, domains and ads → QUIC /
+BitTorrent → Clash modes → custom rules → proxy lists → LAN → bypass lists →
+the mode. A proxied list wins over a bypassed one: a blocked site on a
+Russian IP address still uses the VPN when Russian sites are bypassed.
+
+**Custom rules** (`SingBoxRoutingRule`) are evaluated in list order before
+the presets. Destination conditions (domains, suffixes, keywords, regexes,
+IP CIDRs, rule-sets) are alternatives; ports, apps, network and protocols
+must match as well. Invalid entries are dropped, and a rule whose condition
+has no valid entry left is skipped rather than matching too much.
+
+```dart
+await singBox.setCustomRules([
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.direct,
+    domainSuffixes: ['corp.example.com'],
+    ipCidrs: ['10.20.0.0/16'],
+  ),
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.proxy,
+    ruleSets: ['geosite-youtube', 'https://example.com/my-list.srs'],
+  ),
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.block,
+    ports: ['25', '6881-6889'],
+    network: SingBoxRuleNetwork.tcp,
+  ),
+]);
+
+final json = await singBox.exportRoutingRules(); // backup / share
+await singBox.importRoutingRules(json);
+```
+
+Rule-sets are SagerNet geosite / geoip tags (`geosite-youtube`, `geoip-us`,
+see `SingBoxRuleSets`) or `https://` URLs of binary (`.srs`) or source
+(`.json`) rule-sets. Protocol conditions (`quic`, `bittorrent`, `stun`, …)
+need sniffing (`SingBoxConfigOptions.sniff`, on by default).
+
+**Rule-set downloads.** sing-box aborts the start when it cannot download a
+remote rule-set the first time. So the plugin downloads the rule-sets
+itself into the working directory (trying jsDelivr mirrors when GitHub is
+unreachable), and generated configs read local files. If a rule-set cannot
+be downloaded, the rules that need it are left out and the VPN still
+starts. Outdated files (`SingBoxConfigOptions.ruleSetUpdateInterval`) are
+refreshed in the background on connect and on app start, and a running
+tunnel picks them up by itself.
+
+```dart
+for (final ruleSet in await singBox.getRuleSets()) {
+  print('${ruleSet.tag}: ${ruleSet.lastError ?? ruleSet.updatedAt}');
+}
+await singBox.updateRuleSets(force: true); // download again now
+singBox.manageRuleSets = false; // let sing-box download remote rule-sets
 ```
 
 **IP version** (`SingBoxRoutingRules.ipVersion`):

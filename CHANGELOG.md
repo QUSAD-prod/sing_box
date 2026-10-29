@@ -19,8 +19,30 @@
   `ipv4`, `ipv6`) and `setIpVersion()` / `getIpVersion()`. IPv4 only
   resolves names to IPv4 and rejects IPv6 connections instead of proxying
   them, without letting IPv6 traffic leave outside the VPN.
+- Routing mode `SingBoxRoutingRules.mode`: `SingBoxRoutingMode.proxyAll`
+  (default) or `proxyListed`, where only the proxy lists use the VPN and the
+  rest goes directly; `setRoutingMode()` / `getRoutingMode()`.
+- Proxy lists that work in every mode and win over the bypass lists:
+  `proxyDomains`, `proxySubnets` (`addProxyDomain()`, `addProxySubnet()`, …)
+  and `blockedInCountries` (`ru`: sites and IP ranges blocked in Russia from
+  runetfreedom/russia-v2ray-rules-dat; `cn`: sites outside China).
+- Custom ordered rules `SingBoxRoutingRules.customRules`
+  (`SingBoxRoutingRule`: proxy, direct or block by domains, suffixes,
+  keywords, regexes, IP CIDRs, ports, Android apps, rule-sets by tag or URL,
+  network and sniffed protocols); `setCustomRules()` / `getCustomRules()`.
+- `blockQuic` and `bittorrentDirect` routing switches.
+- `exportRoutingRules()` / `importRoutingRules()` (JSON).
+- The plugin downloads rule-sets itself (jsDelivr mirrors for GitHub) and
+  generated configs read local files, so a rule-set that cannot be
+  downloaded no longer stops the VPN from starting: the rules that need it
+  are left out. `getRuleSets()`, `updateRuleSets()`, `watchRuleSets()`,
+  `SingBoxRuleSetStatus`, `SingBox.manageRuleSets`;
+  `SingBoxConfigBuilder.ruleSetUrls()` and the `ruleSetPaths` parameter of
+  `build()` / `apply()`; `SingBoxRuleSets.mirrors()`.
 
 ### Changed
+- `bypassCountries: ['ru']` also connects the sites that only work from
+  inside Russia directly (`geosite-ru-available-only-inside`).
 - Requires Flutter 3.29+ / Dart 3.7+ (was Flutter 3.44+ / Dart 3.12+).
 - Android: builds with AGP 9 (built-in Kotlin) and with AGP 8 plus the
   Kotlin Android plugin, as in apps created with Flutter 3.29-3.41; the
