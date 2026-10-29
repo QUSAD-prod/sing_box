@@ -79,6 +79,14 @@ internal class ServiceSettings(context: Context) {
             prefs.edit().putBoolean(KEY_WAS_RUNNING, value).commit()
         }
 
+    /** The last config has no TUN inbound: it runs in `SingBoxProxyService` (no VPN). */
+    var proxyMode: Boolean
+        get() = prefs.getBoolean(KEY_PROXY_MODE, false)
+        set(value) {
+            // commit(): read by the service right after the plugin starts it.
+            prefs.edit().putBoolean(KEY_PROXY_MODE, value).commit()
+        }
+
     /** `VpnService.Builder.allowBypass()` (applied by the next `openTun`). */
     var allowBypass: Boolean
         get() = prefs.getBoolean(KEY_ALLOW_BYPASS, false)
@@ -139,6 +147,7 @@ internal class ServiceSettings(context: Context) {
         private const val KEY_QS_TILE = "quickSettingsTile"
         private const val KEY_TILE_LABEL = "tileLabel"
         private const val KEY_WAS_RUNNING = "wasRunning"
+        private const val KEY_PROXY_MODE = "proxyMode"
         private const val KEY_ALLOW_BYPASS = "allowBypass"
         private const val KEY_SYSTEM_PROXY_ENABLED = "systemProxyEnabled"
         private const val KEY_OOM_KILLER = "oomKiller"

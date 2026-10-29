@@ -745,6 +745,17 @@ class SingBox {
     }
   }
 
+  /// Whether [config] has a TUN inbound; `true` when it cannot be decoded
+  /// (sing-box reports the problem).
+  static bool _hasTun(String config) {
+    try {
+      final json = jsonDecode(config);
+      return json is! Map || SingBoxConfigBuilder.hasTunInbound(json);
+    } on FormatException {
+      return true;
+    }
+  }
+
   /// Runs platform start/stop requests one after another.
   Future<T> _serviceOperation<T>(Future<T> Function() action) {
     final result = _serviceQueue.then((_) => action());
@@ -777,7 +788,16 @@ class SingBox {
           }
           _checkGeneration(generation);
         }
-        if (!await _platform.hasVpnPermission()) {
+        final vpn = _hasTun(config);
+        if (!vpn && defaultTargetPlatform == TargetPlatform.iOS) {
+          throw const SingBoxUnsupportedException(
+            'iOS runs sing-box only inside the Packet Tunnel extension, which '
+            'is always a VPN: a configuration without a TUN inbound '
+            '(proxy-only mode) cannot run. Use SingBoxConfigOptions.localProxy '
+            'next to the TUN instead.',
+          );
+        }
+        if (vpn && !await _platform.hasVpnPermission()) {
           final granted =
               requestPermission && await _platform.requestVpnPermission();
           if (!granted) {
@@ -788,6 +808,24 @@ class SingBox {
         }
         final settings = await getSettings();
         _checkGeneration(generation);
+        if (_state.status.isActive) {
+          // Android runs VPN and proxy-only configurations in different
+          // services: switching needs a restart instead of a reload.
+          final running = await _platform.getLastConfig();
+          if (running != null && _hasTun(running) != vpn) {
+            _observer.info('Restarting to switch between VPN and proxy-only');
+            await _platform.stop();
+            try {
+              await waitForStatus(
+                SingBoxConnectionStatus.disconnected,
+                timeout: const Duration(seconds: 10),
+              );
+            } on TimeoutException {
+              _observer.warning('The previous session is still stopping');
+            }
+            _checkGeneration(generation);
+          }
+        }
         final wasConnected = _state.status == SingBoxConnectionStatus.connected;
         if (waitUntilConnected && !wasConnected) {
           waiter = _startWaiter = _StartWaiter(_stateController.stream, _state);

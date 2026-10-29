@@ -44,7 +44,8 @@ class SingBoxTileService : TileService() {
     private fun toggle() {
         when (ServiceState.status) {
             ServiceStatus.Stopped -> {
-                val permitted = runCatching { VpnService.prepare(this) == null }.getOrDefault(false)
+                val permitted = ServiceSettings(this).proxyMode ||
+                    runCatching { VpnService.prepare(this) == null }.getOrDefault(false)
                 if (!permitted || !Paths.lastConfigFile(this).isFile) {
                     openApp()
                     return

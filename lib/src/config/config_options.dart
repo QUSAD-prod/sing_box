@@ -400,6 +400,28 @@ class SingBoxDnsOptions {
   String toString() => 'SingBoxDnsOptions(${toMap()})';
 }
 
+/// What a generated configuration listens on (`SingBoxConfigOptions.inboundMode`).
+enum SingBoxInboundMode {
+  /// A TUN inbound: the VPN captures the traffic of the device (default).
+  tun,
+
+  /// Proxy-only mode (Android): no TUN and no VPN, only the local proxy
+  /// (`SingBoxConfigOptions.localProxy`, by default `127.0.0.1:2080`). Apps
+  /// use the core through their proxy settings; no VPN permission is needed.
+  /// Android runs it in a `specialUse` foreground service that the app
+  /// declares (see `doc/android.md`); iOS cannot run the core without the
+  /// VPN (Network Extension) and rejects it.
+  proxyOnly;
+
+  /// Returns the mode whose [name] equals [value], or [tun].
+  static SingBoxInboundMode fromValue(String? value) {
+    for (final mode in values) {
+      if (mode.name == value) return mode;
+    }
+    return tun;
+  }
+}
+
 /// A local proxy server (sing-box `mixed` inbound: HTTP and SOCKS5 on one
 /// port) that the generated configuration listens on, optionally announced
 /// as the system HTTP proxy of the VPN.
@@ -554,6 +576,7 @@ class SingBoxConfigOptions {
     this.geositeRuleSetUrl = defaultGeositeRuleSetUrl,
     this.probeAddress = defaultProbeAddress,
     this.localProxy,
+    this.inboundMode = SingBoxInboundMode.tun,
   });
 
   /// Default [probeAddress]: `198.51.100.1` from TEST-NET-2 (RFC 5737), which
@@ -641,6 +664,22 @@ class SingBoxConfigOptions {
   /// `SingBoxConfigBuilder.apply()` adds it to complete configurations too.
   final SingBoxLocalProxy? localProxy;
 
+  /// TUN (VPN, default) or [SingBoxInboundMode.proxyOnly]: no TUN, only
+  /// [localProxy] (default `SingBoxLocalProxy()`), whose `systemProxy` then
+  /// has no effect. In proxy-only mode `SingBoxConfigBuilder.apply()` removes
+  /// the TUN inbounds of complete configurations, and the TUN based features
+  /// do not apply: per-app lists, bypassed subnets (`route_exclude_address`)
+  /// and the latency probe routes (latency tests use sing-box's URL test).
+  final SingBoxInboundMode inboundMode;
+
+  /// The local proxy of the configuration: [localProxy], or the default one
+  /// in [SingBoxInboundMode.proxyOnly] mode.
+  SingBoxLocalProxy? get effectiveLocalProxy =>
+      localProxy ??
+      (inboundMode == SingBoxInboundMode.proxyOnly
+          ? const SingBoxLocalProxy()
+          : null);
+
   /// Converts the options to a JSON-safe map. Durations are stored in
   /// seconds.
   Map<String, dynamic> toMap() => {
@@ -661,6 +700,7 @@ class SingBoxConfigOptions {
     'geositeRuleSetUrl': geositeRuleSetUrl,
     'probeAddress': probeAddress,
     if (localProxy != null) 'localProxy': localProxy!.toMap(),
+    'inboundMode': inboundMode.name,
   };
 
   /// Creates options from a map produced by [toMap].
@@ -706,6 +746,7 @@ class SingBoxConfigOptions {
               : d.probeAddress,
       localProxy:
           localProxy is Map ? SingBoxLocalProxy.fromMap(localProxy) : null,
+      inboundMode: SingBoxInboundMode.fromValue(readString(map['inboundMode'])),
     );
   }
 
@@ -728,6 +769,7 @@ class SingBoxConfigOptions {
     String? geositeRuleSetUrl,
     String? probeAddress,
     SingBoxLocalProxy? localProxy,
+    SingBoxInboundMode? inboundMode,
   }) {
     return SingBoxConfigOptions(
       logLevel: logLevel ?? this.logLevel,
@@ -750,6 +792,7 @@ class SingBoxConfigOptions {
       geositeRuleSetUrl: geositeRuleSetUrl ?? this.geositeRuleSetUrl,
       probeAddress: probeAddress ?? this.probeAddress,
       localProxy: localProxy ?? this.localProxy,
+      inboundMode: inboundMode ?? this.inboundMode,
     );
   }
 
@@ -772,7 +815,8 @@ class SingBoxConfigOptions {
       other.geoipRuleSetUrl == geoipRuleSetUrl &&
       other.geositeRuleSetUrl == geositeRuleSetUrl &&
       other.probeAddress == probeAddress &&
-      other.localProxy == localProxy;
+      other.localProxy == localProxy &&
+      other.inboundMode == inboundMode;
 
   @override
   int get hashCode => Object.hash(
@@ -793,6 +837,7 @@ class SingBoxConfigOptions {
     geositeRuleSetUrl,
     probeAddress,
     localProxy,
+    inboundMode,
   );
 
   @override

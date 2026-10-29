@@ -8,6 +8,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -63,9 +64,10 @@ import java.net.InetAddress
 /**
  * Foreground `VpnService` hosting the libbox command server and the box
  * instance. Runs in the application's main process; its state is published
- * through [ServiceState].
+ * through [ServiceState]. [SingBoxProxyService] reuses it for configurations
+ * without a TUN inbound ([proxyMode]).
  */
-class SingBoxVpnService : VpnService(), CommandServerHandler {
+open class SingBoxVpnService : VpnService(), CommandServerHandler {
     companion object {
         private const val TAG = "sing_box"
 
@@ -88,18 +90,34 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         internal var instance: SingBoxVpnService? = null
             private set
 
+        /** The running service when it is a VPN (not [SingBoxProxyService]). */
+        internal val vpnInstance: SingBoxVpnService?
+            get() = instance?.takeUnless { it.proxyMode }
+
         /** Explicit stop broadcast (notification action), restricted to our package. */
         internal fun actionStop(context: Context) = "${context.packageName}.sing_box.STOP"
 
         /**
-         * Asks the system to start the service; it reads the last config. Throws
-         * when the platform refuses to start a foreground service (e.g. from the
-         * background on Android 12+).
+         * Asks the system to start the service of the last config's mode
+         * (`ServiceSettings.proxyMode`); it reads the last config. Throws when the
+         * platform refuses to start a foreground service (e.g. from the background
+         * on Android 12+).
          */
         internal fun start(context: Context) {
-            val intent = Intent(context, SingBoxVpnService::class.java).setAction(ACTION_START)
+            val serviceClass = if (ServiceSettings(context).proxyMode) {
+                SingBoxProxyService::class.java
+            } else {
+                SingBoxVpnService::class.java
+            }
+            val intent = Intent(context, serviceClass).setAction(ACTION_START)
             ContextCompat.startForegroundService(context.applicationContext, intent)
         }
+
+        /** Whether the app declares [SingBoxProxyService] in its manifest (proxy-only mode). */
+        @Suppress("DEPRECATION")
+        internal fun isProxyServiceDeclared(context: Context): Boolean = runCatching {
+            context.packageManager.getServiceInfo(ComponentName(context, SingBoxProxyService::class.java), 0)
+        }.isSuccess
 
         internal const val ACTION_START = "com.qusadprod.sing_box.action.START"
 
@@ -124,6 +142,13 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
         /** Shared by all service instances so that cleanup survives `onDestroy`. */
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
+
+    /**
+     * Proxy-only mode ([SingBoxProxyService]): the configuration has no TUN inbound,
+     * so there is no VPN interface, no VPN permission and nothing to protect.
+     */
+    internal open val proxyMode: Boolean
+        get() = false
 
     private lateinit var settings: ServiceSettings
     private lateinit var platform: PlatformInterfaceImpl
@@ -156,7 +181,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
 
     /** Always-on VPN with "Block connections without VPN": stopping would cut the device off. */
     internal val isLockdown: Boolean
-        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isLockdownEnabled
+        get() = !proxyMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isLockdownEnabled
 
     override fun onCreate() {
         super.onCreate()
@@ -274,7 +299,17 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             LibboxRuntime.ensureSetup(this)
             val config = Paths.readLastConfig(this)
                 ?: error("android: no configuration, start the VPN from the app first")
-            if (prepare(this) != null) error("android: missing VPN permission")
+            if (Libbox.hasTunInbound(config) == proxyMode) {
+                // The last config changed its mode without a restart in the other service.
+                error(
+                    if (proxyMode) {
+                        "android: the configuration has a TUN inbound, it must run as a VPN"
+                    } else {
+                        "android: the configuration has no TUN inbound, it must run in proxy-only mode"
+                    },
+                )
+            }
+            if (!proxyMode && prepare(this) != null) error("android: missing VPN permission")
             if (!isStarting()) return
             DefaultNetworkMonitor.start(this, DefaultNetworkMonitor.OWNER_VPN)
             if (commandServer == null) {
@@ -291,7 +326,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
             if (!isStarting()) return
             server.startOrReloadService(config, OverrideOptions())
             if (!isStarting()) return
-            if (appInTunnel) awaitRoutedThroughVpn()
+            if (!proxyMode && appInTunnel) awaitRoutedThroughVpn()
             if (!isStarting()) return
             if (server.needWIFIState() && !canReadWifiName()) {
                 // SFA refuses to start here; the plugin starts and makes the problem visible
@@ -439,6 +474,7 @@ class SingBoxVpnService : VpnService(), CommandServerHandler {
     // ---------------------------------------------------------------------------------------
 
     internal fun openTun(options: TunOptions): Int {
+        if (proxyMode) error("android: proxy-only mode has no TUN")
         if (prepare(this) != null) error("android: missing VPN permission")
         val notificationOptions = settings.notificationOptions
         val builder = Builder()

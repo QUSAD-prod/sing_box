@@ -72,6 +72,12 @@
   `apply()` adds both to complete configurations. `getSystemProxyStatus()`
   and `setSystemProxyEnabled()` switch the system proxy of the running
   tunnel and remember the choice, like the official clients.
+- Android proxy-only mode: `SingBoxConfigOptions.inboundMode`
+  (`SingBoxInboundMode.proxyOnly`) builds configurations without a TUN, which
+  run in `SingBoxProxyService` (`specialUse` foreground service declared by
+  the app) without the VPN permission. `SingBoxConfigBuilder.hasTunInbound()`.
+  Switching between VPN and proxy-only restarts the core; iOS rejects such
+  configurations (the Network Extension is always a VPN).
 - Android: `SingBoxSettings.allowBypass` / `SingBoxServiceOptions.allowBypass`
   (`VpnService.Builder.allowBypass()`, sing-box-for-android's "Allow
   Bypass").

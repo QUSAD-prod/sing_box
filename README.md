@@ -588,6 +588,23 @@ SingBox.instance.configOptions = const SingBoxConfigOptions(
 );
 ```
 
+#### Proxy-only mode (Android)
+
+`inboundMode: SingBoxInboundMode.proxyOnly` generates a configuration without
+a TUN: no VPN and no VPN permission, only the local proxy (`localProxy`,
+default `127.0.0.1:2080`) that apps use through their proxy settings. The app
+declares the `specialUse` foreground service for it - see
+[doc/android.md](doc/android.md#proxy-only-mode-no-vpn). iOS cannot run the
+core without the VPN and throws `SingBoxUnsupportedException`.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  inboundMode: SingBoxInboundMode.proxyOnly,
+  localProxy: SingBoxLocalProxy(port: 2080),
+);
+await singBox.connectToActiveServer(); // no VPN permission dialog
+```
+
 #### Local proxy and system proxy
 
 `localProxy` adds a local HTTP + SOCKS5 proxy (sing-box `mixed` inbound) next
@@ -829,7 +846,9 @@ features.
   the notices (see [License](#license)).
 - **Google Play**: apps that use `VpnService` must have VPN as their core
   functionality and fill in the VPN declaration and the foreground service
-  declaration (`systemExempted`) in the Play Console.
+  declaration (`systemExempted`) in the Play Console. Apps that declare
+  `SingBoxProxyService` for the proxy-only mode also describe the
+  `specialUse` foreground service there.
 - **App Store**: VPN apps must be published by a developer enrolled as an
   organization (App Review Guideline 5.4) and need the Network Extension
   entitlement for both the app and the extension.

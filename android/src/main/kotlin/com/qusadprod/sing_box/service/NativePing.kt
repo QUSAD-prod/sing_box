@@ -45,7 +45,7 @@ internal object NativePing {
     }
 
     private fun resolve(host: String): InetAddress {
-        val all = if (SingBoxVpnService.instance != null) {
+        val all = if (SingBoxVpnService.vpnInstance != null) {
             val network = DefaultNetworkMonitor.defaultNetwork
                 ?: throw IOException("no underlying network")
             network.getAllByName(host)
@@ -115,7 +115,7 @@ internal object NativePing {
 
     /** Keeps the socket out of the tunnel while the VPN runs. */
     private fun protect(fd: FileDescriptor) {
-        val vpn = SingBoxVpnService.instance ?: return
+        val vpn = SingBoxVpnService.vpnInstance ?: return
         // protect() takes an int descriptor; a duplicate refers to the same socket.
         ParcelFileDescriptor.dup(fd).use { duplicate ->
             if (!vpn.protect(duplicate.fd)) throw IOException("cannot bypass the VPN")

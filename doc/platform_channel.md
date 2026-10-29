@@ -121,6 +121,15 @@ Behaviour:
 * Android: throws `PERMISSION_DENIED` if `VpnService.prepare` returns an
   intent; otherwise starts the foreground VPN service and resolves as soon as
   the service was asked to start (the status stream reports progress).
+* Android proxy-only mode: when `Libbox.hasTunInbound(config)` is false the
+  config runs in `SingBoxProxyService` (`specialUse` foreground service, a
+  subclass of the VPN service without the VPN steps) and no VPN permission is
+  checked. The service must be declared by the app; otherwise `UNSUPPORTED`.
+  The mode is persisted (`ServiceSettings.proxyMode`) for boot and tile
+  starts. A running service of the other mode is not reloaded: `start` throws
+  `START_FAILED` (the Dart side stops first), `reload` with such a config
+  throws `START_FAILED`. The Dart side rejects configs without a TUN on iOS
+  (`UNSUPPORTED`) before calling `start`.
 * Both platforms: when the tunnel was not running, the `connecting` status
   event must be emitted **before** the method result is delivered, and the
   outcome follows on the status stream: `connected`, or `disconnected` with

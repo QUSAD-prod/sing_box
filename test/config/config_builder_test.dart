@@ -1463,6 +1463,40 @@ void main() {
       await expectSingBoxAccepts(config);
     });
 
+    test('proxy-only mode has no TUN and no probe routes', () async {
+      const proxyOnly = SingBoxConfigBuilder(
+        SingBoxConfigOptions(inboundMode: SingBoxInboundMode.proxyOnly),
+      );
+      final config = proxyOnly.build([vless, trojan]);
+      expect(config['inbounds'], [
+        {
+          'type': 'mixed',
+          'tag': 'mixed-in',
+          'listen': '127.0.0.1',
+          'listen_port': 2080,
+        },
+      ]);
+      expect(SingBoxConfigBuilder.hasTunInbound(config), isFalse);
+      expect(SingBoxConfigBuilder.probeTargets(config), isEmpty);
+      expect(
+        SingBoxConfigBuilder.hasTunInbound(builder.build([vless])),
+        isTrue,
+      );
+      await expectSingBoxAccepts(config);
+
+      // A complete configuration loses its TUN and gets the local proxy.
+      final applied = proxyOnly.apply(userConfig());
+      expect(SingBoxConfigBuilder.hasTunInbound(applied), isFalse);
+      expect(
+        (applied['inbounds'] as List).cast<Map<dynamic, dynamic>>().map(
+          (i) => i['type'],
+        ),
+        contains('mixed'),
+      );
+      expect(SingBoxConfigBuilder.probeTargets(applied), isEmpty);
+      await expectSingBoxAccepts(applied);
+    });
+
     test('a local proxy listens next to the TUN', () async {
       final config = const SingBoxConfigBuilder(
         SingBoxConfigOptions(localProxy: SingBoxLocalProxy()),

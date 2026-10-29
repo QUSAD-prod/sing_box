@@ -130,9 +130,12 @@ class SingBoxConfigBuilder {
             : selectorMembers.first;
 
     final custom = _CustomRules(rules, sniff: options.sniff);
+    final proxyOnly = options.inboundMode == SingBoxInboundMode.proxyOnly;
     final routeRules = _withRuleSets([
       ..._leadingRouteRules(),
-      ..._probeRules([proxyTag, if (useAuto) autoTag, ...memberTags]),
+      // The app's probe connections only reach the core through the TUN.
+      if (!proxyOnly)
+        ..._probeRules([proxyTag, if (useAuto) autoTag, ...memberTags]),
       ..._routingRules(
         rules,
         custom,
@@ -154,8 +157,9 @@ class SingBoxConfigBuilder {
       'log': _log(),
       'dns': dns,
       'inbounds': [
-        _tunInbound(rules),
-        if (options.localProxy case final proxy?) _localProxyInbound(proxy),
+        if (!proxyOnly) _tunInbound(rules),
+        if (options.effectiveLocalProxy case final proxy?)
+          _localProxyInbound(proxy),
       ],
       'outbounds': [
         {
@@ -288,16 +292,18 @@ class SingBoxConfigBuilder {
     final direct = directOutbound['tag'] as String? ?? directTag;
 
     // TUN inbounds.
+    final proxyOnly = options.inboundMode == SingBoxInboundMode.proxyOnly;
     final inbounds = _list(result, 'inbounds');
+    if (proxyOnly) inbounds.removeWhere((i) => i['type'] == 'tun');
     final tuns = inbounds.where((i) => i['type'] == 'tun').toList();
-    if (tuns.isEmpty) {
+    if (tuns.isEmpty && !proxyOnly) {
       final tun = _tunInbound(const SingBoxRoutingRules(bypassLan: false));
       inbounds.insert(0, tun);
       tuns.add(tun);
     }
     final packages = _packages(rules);
     final subnets = _subnets(rules);
-    final localProxy = options.localProxy;
+    final localProxy = options.effectiveLocalProxy;
     if (localProxy != null) {
       final listening = inbounds.any(
         (i) =>
@@ -356,7 +362,7 @@ class SingBoxConfigBuilder {
       ruleSetPaths,
     );
     routeRules.insertAll(insertAt, [
-      ..._probeRules(_proxyTags(result)),
+      if (!proxyOnly) ..._probeRules(_proxyTags(result)),
       ...inserted,
     ]);
     routeRules.addAll(_ipVersionRules(rules));
@@ -472,7 +478,7 @@ class SingBoxConfigBuilder {
       if (packages.include.isNotEmpty) 'include_package': packages.include,
       if (packages.include.isEmpty && packages.exclude.isNotEmpty)
         'exclude_package': packages.exclude,
-      if (options.localProxy case final proxy? when proxy.systemProxy)
+      if (options.effectiveLocalProxy case final proxy? when proxy.systemProxy)
         'platform': {'http_proxy': _httpProxy(proxy)},
     };
   }
@@ -791,6 +797,17 @@ class SingBoxConfigBuilder {
                     SingBoxOutbound.isProxyType(item['type'] as String)))
               tag,
   ]);
+
+  /// Whether [config] has a TUN inbound. Configurations without one run in
+  /// proxy-only mode ([SingBoxInboundMode.proxyOnly]): on Android without a
+  /// VPN, on iOS not at all.
+  static bool hasTunInbound(Map<dynamic, dynamic> config) {
+    final inbounds = config['inbounds'];
+    return inbounds is List &&
+        inbounds.whereType<Map<dynamic, dynamic>>().any(
+          (i) => i['type'] == 'tun',
+        );
+  }
 
   /// The latency probe routes of a running [config], by outbound tag: where
   /// the app connects to measure that outbound and which host:port the

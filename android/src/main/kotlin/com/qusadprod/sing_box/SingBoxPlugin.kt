@@ -307,6 +307,21 @@ class SingBoxPlugin :
 
     private fun hasVpnPermission(): Boolean = runCatching { VpnService.prepare(context) == null }.getOrDefault(false)
 
+    /** A valid [config] without a TUN inbound (call after [checkConfig]). */
+    private suspend fun isProxyOnly(config: String): Boolean = io {
+        try {
+            !Libbox.hasTunInbound(config)
+        } catch (e: Exception) {
+            throw SingBoxError(SingBoxError.INVALID_CONFIG, e.libboxMessage)
+        }
+    }
+
+    private fun proxyServiceMissing() = SingBoxError(
+        SingBoxError.UNSUPPORTED,
+        "android: the configuration has no TUN inbound (proxy-only mode), but the app does not declare " +
+            "com.qusadprod.sing_box.service.SingBoxProxyService in its AndroidManifest.xml (see doc/android.md)",
+    )
+
     private fun requestVpnPermission(result: MethodChannel.Result) {
         val intent = try {
             VpnService.prepare(context)
@@ -434,14 +449,27 @@ class SingBoxPlugin :
 
     private suspend fun start(config: String, oomKiller: String, memoryLimit: Long) {
         checkConfig(config)
-        if (!hasVpnPermission()) throw SingBoxError.permissionDenied()
+        // Without a TUN inbound the config runs in proxy-only mode (SingBoxProxyService).
+        val proxyMode = isProxyOnly(config)
+        if (proxyMode) {
+            if (!SingBoxVpnService.isProxyServiceDeclared(context)) throw proxyServiceMissing()
+        } else if (!hasVpnPermission()) {
+            throw SingBoxError.permissionDenied()
+        }
         val settings = ServiceSettings(context)
+        val service = SingBoxVpnService.instance
+        if (ServiceState.isRunning && service != null && service.proxyMode != proxyMode) {
+            throw SingBoxError(
+                SingBoxError.START_FAILED,
+                "android: stop the service before switching between VPN and proxy-only mode",
+            )
+        }
         io {
             settings.oomKiller = oomKiller
             settings.memoryLimit = memoryLimit
+            settings.proxyMode = proxyMode
             Paths.writeLastConfig(context, config)
         }
-        val service = SingBoxVpnService.instance
         when (ServiceState.status) {
             ServiceStatus.Started, ServiceStatus.Starting -> {
                 // Already running: reload with the new last config. A start that has not
@@ -482,11 +510,18 @@ class SingBoxPlugin :
 
     private suspend fun reload(config: String?) {
         if (!ServiceState.isRunning) throw SingBoxError.notRunning()
+        val service = SingBoxVpnService.instance ?: throw SingBoxError.notRunning()
         if (config != null) {
             checkConfig(config)
+            if (isProxyOnly(config) != service.proxyMode) {
+                throw SingBoxError(
+                    SingBoxError.START_FAILED,
+                    "android: a reload cannot switch between VPN and proxy-only mode, stop and start instead",
+                )
+            }
             io { Paths.writeLastConfig(context, config) }
         }
-        (SingBoxVpnService.instance ?: throw SingBoxError.notRunning()).reload()
+        service.reload()
     }
 
     private fun setServiceOptions(options: Map<*, *>) {

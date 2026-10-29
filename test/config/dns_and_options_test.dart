@@ -320,6 +320,7 @@ void main() {
           bypassDomains: ['example.com'],
           matchDomains: ['example.org'],
         ),
+        inboundMode: SingBoxInboundMode.proxyOnly,
       );
       expect(SingBoxConfigOptions.fromMap(options.toMap()), options);
       expect(

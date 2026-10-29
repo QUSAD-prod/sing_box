@@ -228,6 +228,21 @@ class _ToolsPageState extends State<ToolsPage> {
               });
             }),
           ),
+          if (Platform.isAndroid)
+            SwitchListTile(
+              title: const Text('Proxy-only mode (no VPN)'),
+              subtitle: const Text('Only the local proxy; applied on connect'),
+              value:
+                  _singBox.configOptions.inboundMode ==
+                  SingBoxInboundMode.proxyOnly,
+              onChanged: (v) => setState(() {
+                _singBox.configOptions = _singBox.configOptions.copyWith(
+                  inboundMode: v
+                      ? SingBoxInboundMode.proxyOnly
+                      : SingBoxInboundMode.tun,
+                );
+              }),
+            ),
           if (connected)
             SwitchListTile(
               title: const Text('System proxy'),

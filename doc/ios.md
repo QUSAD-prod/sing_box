@@ -137,6 +137,17 @@ included; Go crashes and memory pressure are reported, see
 Nothing is forced: flutter_vless enabled the kill switch unconditionally,
 which broke local networking for many users.
 
+## Proxy-only mode is not available
+
+On iOS the core can only run inside the Packet Tunnel extension, and the
+system starts that extension only as a VPN; the app itself is suspended in
+the background, so it cannot host a proxy server either. `connect()` with a
+configuration without a TUN inbound
+(`SingBoxInboundMode.proxyOnly`) throws a `SingBoxUnsupportedException`.
+To offer a local proxy, keep the TUN and add `SingBoxConfigOptions.localProxy`
+(with `systemProxy: true` it becomes the tunnel's HTTP proxy through
+`NEProxySettings`).
+
 ## Memory
 
 The extension is limited to about 50 MB. libbox for iOS is built with
