@@ -759,9 +759,40 @@ void main() {
       );
 
       expect(await singBox.removeProxyDomain('EXAMPLE.org'), isTrue);
+      expect(await singBox.removeProxyDomain('example.org'), isFalse);
       expect(await singBox.removeProxySubnet('203.0.113.9'), isTrue);
       expect(await singBox.getProxyDomains(), isEmpty);
       expect(await singBox.getProxySubnets(), isEmpty);
+    });
+
+    test('custom rules, export and import', () async {
+      const rule = SingBoxRoutingRule(
+        action: SingBoxRuleAction.block,
+        domainSuffixes: ['spam.example'],
+      );
+      expect(await singBox.setCustomRules([rule]), isTrue);
+      expect(await singBox.setCustomRules([rule]), isFalse);
+      expect(await singBox.getCustomRules(), [rule]);
+      await singBox.updateRoutingRules((r) => r.copyWith(blockQuic: true));
+
+      final exported = await singBox.exportRoutingRules();
+      expect(jsonDecode(exported), (await singBox.getRoutingRules()).toMap());
+
+      await singBox.saveRoutingRules(const SingBoxRoutingRules());
+      final imported = await singBox.importRoutingRules(exported);
+      expect(imported.customRules, [rule]);
+      expect(imported.blockQuic, isTrue);
+      expect(await singBox.getRoutingRules(), imported);
+
+      await expectLater(
+        singBox.importRoutingRules('[1]'),
+        throwsA(isA<SingBoxConfigException>()),
+      );
+      await expectLater(
+        singBox.importRoutingRules('{'),
+        throwsA(isA<SingBoxConfigException>()),
+      );
+      expect(await singBox.getRoutingRules(), imported);
     });
   });
 

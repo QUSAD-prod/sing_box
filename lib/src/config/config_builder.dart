@@ -5,6 +5,7 @@ import 'config_options.dart';
 import 'dns_server.dart';
 import 'internal/json_utils.dart';
 import 'outbound.dart';
+import 'routing_rule.dart';
 import 'routing_rules.dart';
 import 'rule_sets.dart';
 
@@ -112,10 +113,24 @@ class SingBoxConfigBuilder {
             ? selectedTag
             : selectorMembers.first;
 
-    final ruleSetTags = _ruleSetTags(rules, proxyLists: true);
+    final custom = _CustomRules(rules, sniff: options.sniff);
+    final routeRules = [
+      ..._leadingRouteRules(),
+      ..._routingRules(
+        rules,
+        custom,
+        directTag,
+        proxy: proxyTag,
+        sniff: options.sniff,
+        includeClashModes: true,
+      ),
+      ..._ipVersionRules(rules),
+    ];
+    // DNS rules only use rule-sets that the route rules use as well.
+    final ruleSetTags = _referencedRuleSets(routeRules);
     final config = <String, dynamic>{
       'log': _log(),
-      'dns': _dns(rules),
+      'dns': _dns(rules, custom),
       'inbounds': [_tunInbound(rules)],
       'outbounds': [
         {
@@ -140,18 +155,11 @@ class SingBoxConfigBuilder {
       ],
       if (endpoints.isNotEmpty) 'endpoints': endpoints,
       'route': {
-        'rules': [
-          ..._leadingRouteRules(),
-          ..._routingRules(
-            rules,
-            directTag,
-            proxy: proxyTag,
-            includeClashModes: true,
-          ),
-          ..._ipVersionRules(rules),
-        ],
+        'rules': routeRules,
         if (ruleSetTags.isNotEmpty)
-          'rule_set': ruleSetTags.map(_ruleSet).toList(),
+          'rule_set': [
+            for (final tag in ruleSetTags) _ruleSet(tag, custom.urls),
+          ],
         'final': _isListed(rules) ? directTag : proxyTag,
         'auto_detect_interface': true,
         'default_domain_resolver': dnsDirectTag,
@@ -286,19 +294,27 @@ class SingBoxConfigBuilder {
         _isLeadingRule(routeRules[insertAt])) {
       insertAt++;
     }
-    routeRules.insertAll(
-      insertAt,
-      _routingRules(rules, direct, proxy: proxy, includeClashModes: false),
+    // Protocol rules only work when the config sniffs.
+    final sniff = routeRules.any((r) => r['action'] == 'sniff');
+    final custom = _CustomRules(rules, sniff: sniff);
+    final inserted = _routingRules(
+      rules,
+      custom,
+      direct,
+      proxy: proxy,
+      sniff: sniff,
+      includeClashModes: false,
     );
+    routeRules.insertAll(insertAt, inserted);
     routeRules.addAll(_ipVersionRules(rules));
     route.putIfAbsent('auto_detect_interface', () => true);
     if (_isListed(rules)) route['final'] = direct;
-    final ruleSetTags = _ruleSetTags(rules, proxyLists: proxy != null);
+    final ruleSetTags = _referencedRuleSets(inserted);
     if (ruleSetTags.isNotEmpty) {
       final ruleSets = _list(route, 'rule_set');
       final existing = ruleSets.map((r) => r['tag']).toSet();
       for (final tag in ruleSetTags) {
-        if (!existing.contains(tag)) ruleSets.add(_ruleSet(tag));
+        if (!existing.contains(tag)) ruleSets.add(_ruleSet(tag, custom.urls));
       }
       final clients = _list(result, 'http_clients');
       if (!clients.any((c) => c['tag'] == ruleSetHttpClientTag)) {
@@ -400,7 +416,7 @@ class SingBoxConfigBuilder {
     };
   }
 
-  Map<String, dynamic> _dns(SingBoxRoutingRules rules) {
+  Map<String, dynamic> _dns(SingBoxRoutingRules rules, _CustomRules custom) {
     final dnsOptions = options.dns;
     final servers = <Map<String, dynamic>>[];
     final taken = <String>{};
@@ -471,6 +487,17 @@ class SingBoxConfigBuilder {
       if (proxyDomains.isNotEmpty) {'domain_suffix': proxyDomains},
       if (proxyGeosites.isNotEmpty) {'rule_set': proxyGeosites},
     ];
+    final remote = remoteTag;
+    List<Map<String, dynamic>> proxied(Map<String, dynamic> matcher) => [
+      if (dnsOptions.fakeIp)
+        {
+          ...matcher,
+          'query_type': ['A', if (ipv6) 'AAAA'],
+          'action': 'route',
+          'server': dnsFakeIpTag,
+        },
+      {...matcher, 'action': 'route', 'server': remote},
+    ];
     final dnsRules = <Map<String, dynamic>>[
       if (blocked.isNotEmpty)
         {'domain_suffix': blocked, 'action': 'predefined', 'rcode': 'NXDOMAIN'},
@@ -484,16 +511,18 @@ class SingBoxConfigBuilder {
         {'clash_mode': 'Direct', 'action': 'route', 'server': dnsDirectTag},
         {'clash_mode': 'Global', 'action': 'route', 'server': remoteTag},
       ],
-      for (final matcher in proxyMatchers) ...[
-        if (dnsOptions.fakeIp)
-          {
-            ...matcher,
-            'query_type': ['A', if (ipv6) 'AAAA'],
-            'action': 'route',
-            'server': dnsFakeIpTag,
+      for (final entry in custom.entries)
+        if (entry.dnsMatch case final match?)
+          ...switch (entry.action) {
+            SingBoxRuleAction.block => [
+              {...match, 'action': 'predefined', 'rcode': 'NXDOMAIN'},
+            ],
+            SingBoxRuleAction.direct => [
+              {...match, 'action': 'route', 'server': dnsDirectTag},
+            ],
+            SingBoxRuleAction.proxy => proxied(match),
           },
-        {...matcher, 'action': 'route', 'server': remoteTag},
-      ],
+      for (final matcher in proxyMatchers) ...proxied(matcher),
       if (bypass.isNotEmpty)
         {'domain_suffix': bypass, 'action': 'route', 'server': dnsDirectTag},
       if (directGeosites.isNotEmpty)
@@ -554,12 +583,15 @@ class SingBoxConfigBuilder {
     return action == 'sniff' || action == 'hijack-dns';
   }
 
-  /// Route rules of [rules]; the proxy lists are left out when [proxy] is
-  /// `null` (a config without a proxy outbound).
+  /// Route rules of [rules]; the proxy lists and the custom proxy rules are
+  /// left out when [proxy] is `null` (a config without a proxy outbound),
+  /// BitTorrent detection when the config does not [sniff].
   List<Map<String, dynamic>> _routingRules(
     SingBoxRoutingRules rules,
+    _CustomRules custom,
     String direct, {
     required String? proxy,
+    required bool sniff,
     required bool includeClashModes,
   }) {
     final blockedApps = _validPackages(rules.blockedApps);
@@ -580,10 +612,19 @@ class SingBoxConfigBuilder {
           'rule_set': [SingBoxRuleSets.adsTag],
           'action': 'reject',
         },
+      if (rules.blockQuic)
+        sniff
+            ? {'protocol': 'quic', 'action': 'reject'}
+            : {'network': 'udp', 'port': 443, 'action': 'reject'},
+      if (rules.bittorrentDirect && sniff)
+        {'protocol': 'bittorrent', 'action': 'route', 'outbound': direct},
       if (includeClashModes && options.enableClashModes) ...[
         {'clash_mode': 'Direct', 'action': 'route', 'outbound': direct},
         {'clash_mode': 'Global', 'action': 'route', 'outbound': proxyTag},
       ],
+      for (final entry in custom.entries)
+        if (_routeAction(entry.action, direct, proxy) case final action?)
+          {...entry.match, ...action},
       if (proxy != null) ...[
         if (proxyDomains.isNotEmpty)
           {'domain_suffix': proxyDomains, 'action': 'route', 'outbound': proxy},
@@ -614,13 +655,29 @@ class SingBoxConfigBuilder {
     'clash_api': {if (options.enableClashModes) 'default_mode': 'Rule'},
   };
 
-  Map<String, dynamic> _ruleSet(String tag) => SingBoxRuleSets.remote(
-    tag,
-    httpClient: ruleSetHttpClientTag,
-    updateInterval: options.ruleSetUpdateInterval,
-    geoipUrl: options.geoipRuleSetUrl,
-    geositeUrl: options.geositeRuleSetUrl,
-  );
+  /// Remote rule-set [tag]: a catalog entry of [SingBoxRuleSets], or one
+  /// given by URL in a custom rule ([customUrls]).
+  Map<String, dynamic> _ruleSet(String tag, Map<String, String> customUrls) {
+    final url = customUrls[tag];
+    if (url == null) {
+      return SingBoxRuleSets.remote(
+        tag,
+        httpClient: ruleSetHttpClientTag,
+        updateInterval: options.ruleSetUpdateInterval,
+        geoipUrl: options.geoipRuleSetUrl,
+        geositeUrl: options.geositeRuleSetUrl,
+      );
+    }
+    final path = Uri.parse(url).path.toLowerCase();
+    return {
+      'type': 'remote',
+      'tag': tag,
+      'format': path.endsWith('.json') ? 'source' : 'binary',
+      'url': url,
+      'http_client': ruleSetHttpClientTag,
+      'update_interval': formatDuration(options.ruleSetUpdateInterval),
+    };
+  }
 
   Map<String, dynamic> _ruleSetHttpClient() => {
     'tag': ruleSetHttpClientTag,
@@ -633,14 +690,22 @@ class SingBoxConfigBuilder {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  List<String> _ruleSetTags(
-    SingBoxRoutingRules rules, {
-    required bool proxyLists,
-  }) => dedupe([
-    if (rules.blockAds) SingBoxRuleSets.adsTag,
-    if (proxyLists) ..._blockedRuleSets(rules),
-    ..._countryRuleSets(rules),
-  ]);
+  /// Route rule action of a custom rule, or `null` for a proxy rule in a
+  /// config without a proxy outbound.
+  static Map<String, dynamic>? _routeAction(
+    SingBoxRuleAction action,
+    String direct,
+    String? proxy,
+  ) => switch (action) {
+    SingBoxRuleAction.proxy =>
+      proxy == null ? null : {'action': 'route', 'outbound': proxy},
+    SingBoxRuleAction.direct => {'action': 'route', 'outbound': direct},
+    SingBoxRuleAction.block => {'action': 'reject'},
+  };
+
+  /// Tags of the rule-sets used by [rules], in order of appearance.
+  static List<String> _referencedRuleSets(List<Map<String, dynamic>> rules) =>
+      dedupe([for (final rule in rules) ...readStringList(rule['rule_set'])]);
 
   static bool _isListed(SingBoxRoutingRules rules) =>
       rules.mode == SingBoxRoutingMode.proxyListed;
@@ -753,5 +818,189 @@ class SingBoxConfigBuilder {
     ];
     parent[key] = list;
     return list;
+  }
+}
+
+/// The enabled [SingBoxRoutingRules.customRules] converted to sing-box rule
+/// conditions. Invalid entries are dropped; a rule is skipped when one of its
+/// conditions has no valid entry left (it would match too much otherwise),
+/// or when it matches protocols but the config does not sniff.
+class _CustomRules {
+  _CustomRules(SingBoxRoutingRules rules, {required this.sniff}) {
+    for (final rule in rules.customRules) {
+      if (rule.enabled) _add(rule);
+    }
+  }
+
+  /// Whether the config sniffs protocols.
+  final bool sniff;
+
+  /// The converted rules in order: route conditions ([match]) and, for rules
+  /// that only depend on the domain name, DNS conditions ([dnsMatch]).
+  final entries =
+      <
+        ({
+          SingBoxRuleAction action,
+          Map<String, dynamic> match,
+          Map<String, dynamic>? dnsMatch,
+        })
+      >[];
+
+  /// Download URLs of the rule-sets given as URLs, by generated tag.
+  final urls = <String, String>{};
+
+  static final _catalogTag = RegExp(r'^(geosite|geoip)-[a-z0-9!@._-]+$');
+
+  void _add(SingBoxRoutingRule rule) {
+    var incomplete = false;
+    List<T> valid<T>(List<String> input, Iterable<T> output) {
+      final list = output.toList();
+      if (input.isNotEmpty && list.isEmpty) incomplete = true;
+      return list;
+    }
+
+    final domains = valid(
+      rule.domains,
+      SingBoxConfigBuilder._domains(rule.domains),
+    );
+    final suffixes = valid(
+      rule.domainSuffixes,
+      SingBoxConfigBuilder._domains(rule.domainSuffixes),
+    );
+    final keywords = valid(
+      rule.domainKeywords,
+      dedupe(
+        rule.domainKeywords
+            .map((e) => e.trim().toLowerCase())
+            .where((e) => e.isNotEmpty && !e.contains(RegExp(r'\s'))),
+      ),
+    );
+    final regexes = valid(
+      rule.domainRegexes,
+      dedupe(rule.domainRegexes.map((e) => e.trim()).where(_isRegex)),
+    );
+    final cidrs = valid(
+      rule.ipCidrs,
+      SingBoxConfigBuilder._cidrs(rule.ipCidrs),
+    );
+    final ports = <int>[];
+    final ranges = <String>[];
+    for (final value in rule.ports) {
+      _addPort(value.trim(), ports, ranges);
+    }
+    if (rule.ports.isNotEmpty && ports.isEmpty && ranges.isEmpty) {
+      incomplete = true;
+    }
+    final packages = valid(
+      rule.packages,
+      SingBoxConfigBuilder._validPackages(rule.packages),
+    );
+    final ruleSets = valid(
+      rule.ruleSets,
+      dedupe(rule.ruleSets.map(_ruleSetTag).whereType<String>()),
+    );
+    final protocols = valid(
+      rule.protocols,
+      dedupe(
+        rule.protocols
+            .map((e) => e.trim().toLowerCase())
+            .where(SingBoxRoutingRule.knownProtocols.contains),
+      ),
+    );
+    if (incomplete || (protocols.isNotEmpty && !sniff)) return;
+
+    final match = <String, dynamic>{
+      if (domains.isNotEmpty) 'domain': domains,
+      if (suffixes.isNotEmpty) 'domain_suffix': suffixes,
+      if (keywords.isNotEmpty) 'domain_keyword': keywords,
+      if (regexes.isNotEmpty) 'domain_regex': regexes,
+      if (cidrs.isNotEmpty) 'ip_cidr': cidrs,
+      if (ports.isNotEmpty) 'port': ports,
+      if (ranges.isNotEmpty) 'port_range': ranges,
+      if (packages.isNotEmpty) 'package_name': packages,
+      if (ruleSets.isNotEmpty) 'rule_set': ruleSets,
+      if (rule.network != null) 'network': rule.network!.name,
+      if (protocols.isNotEmpty) 'protocol': protocols,
+    };
+    if (match.isEmpty) return;
+
+    // A DNS query has no port, transport or protocol: such rules only get a
+    // route rule. Destination conditions are alternatives, so the domain
+    // ones alone are enough for DNS (IP rule-sets cannot be used there).
+    final geosites = ruleSets.where(SingBoxRuleSets.isGeosite).toList();
+    final domainMatch = <String, dynamic>{
+      if (domains.isNotEmpty) 'domain': domains,
+      if (suffixes.isNotEmpty) 'domain_suffix': suffixes,
+      if (keywords.isNotEmpty) 'domain_keyword': keywords,
+      if (regexes.isNotEmpty) 'domain_regex': regexes,
+      if (geosites.isNotEmpty) 'rule_set': geosites,
+    };
+    final dnsOnlyByName =
+        ports.isEmpty &&
+        ranges.isEmpty &&
+        rule.network == null &&
+        protocols.isEmpty;
+    entries.add((
+      action: rule.action,
+      match: match,
+      dnsMatch:
+          dnsOnlyByName && domainMatch.isNotEmpty
+              ? {
+                ...domainMatch,
+                if (packages.isNotEmpty) 'package_name': packages,
+              }
+              : null,
+    ));
+  }
+
+  static bool _isRegex(String value) {
+    if (value.isEmpty) return false;
+    try {
+      RegExp(value);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  static void _addPort(String value, List<int> ports, List<String> ranges) {
+    bool isPort(int? port) => port != null && port >= 1 && port <= 65535;
+    final single = int.tryParse(value);
+    if (single != null) {
+      if (isPort(single) && !ports.contains(single)) ports.add(single);
+      return;
+    }
+    final parts = value.split(RegExp('[-:]'));
+    if (parts.length != 2) return;
+    final from = int.tryParse(parts[0].trim());
+    final to = int.tryParse(parts[1].trim());
+    if (isPort(from) && isPort(to) && from! <= to!) {
+      final range = '$from:$to';
+      if (!ranges.contains(range)) ranges.add(range);
+    }
+  }
+
+  /// Tag of a rule-set entry: a catalog tag as is, or a generated
+  /// `custom-<file name>` tag for an `http(s)://` URL (remembered in [urls]).
+  String? _ruleSetTag(String entry) {
+    final value = entry.trim();
+    final uri = Uri.tryParse(value);
+    if (uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty) {
+      for (final known in urls.entries) {
+        if (known.value == value) return known.key;
+      }
+      final file = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+      var name = file
+          .replaceFirst(RegExp(r'\.(srs|json)$', caseSensitive: false), '')
+          .replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '-');
+      if (name.isEmpty) name = 'rule-set';
+      final tag = uniqueTag('custom-$name', urls.keys.toSet());
+      urls[tag] = value;
+      return tag;
+    }
+    final tag = value.toLowerCase();
+    return _catalogTag.hasMatch(tag) ? tag : null;
   }
 }

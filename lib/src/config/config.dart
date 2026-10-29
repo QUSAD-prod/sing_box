@@ -21,6 +21,8 @@ export 'config_options.dart'
         SingBoxTunStack;
 export 'dns_server.dart' show SingBoxDnsServer;
 export 'outbound.dart' show SingBoxOutbound;
+export 'routing_rule.dart'
+    show SingBoxRoutingRule, SingBoxRuleAction, SingBoxRuleNetwork;
 export 'routing_rules.dart'
     show SingBoxIpVersion, SingBoxRoutingMode, SingBoxRoutingRules;
 export 'rule_sets.dart' show SingBoxRuleSets;

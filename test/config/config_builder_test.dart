@@ -79,6 +79,19 @@ Map<String, dynamic> userConfig() => {
   },
 };
 
+/// Two custom rules plus a proxy list, in proxyListed mode.
+const listedWithCustom = SingBoxRoutingRules(
+  mode: SingBoxRoutingMode.proxyListed,
+  proxyDomains: ['example.org'],
+  customRules: [
+    SingBoxRoutingRule(
+      action: SingBoxRuleAction.direct,
+      domains: ['a.example'],
+    ),
+    SingBoxRoutingRule(action: SingBoxRuleAction.proxy, domains: ['b.example']),
+  ],
+);
+
 const fullRules = SingBoxRoutingRules(
   bypassApps: ['com.bank.app', 'not a package'],
   bypassDomains: ['Example.RU', '.gov.ru', 'https://x.com/path', 'bad domain'],
@@ -672,6 +685,314 @@ void main() {
           );
         }
       }
+    }, skip: singBoxBinary == null ? 'SING_BOX_BIN is not set' : null);
+  });
+
+  group('custom rules', () {
+    const work = SingBoxRoutingRule(
+      name: 'Work',
+      action: SingBoxRuleAction.direct,
+      domains: ['VPN.Corp.example'],
+      domainSuffixes: ['corp.example', 'bad domain'],
+      domainKeywords: [' Intranet ', 'two words'],
+      domainRegexes: [r'^git\d+\.example$', '('],
+      ipCidrs: ['10.20.0.0/16', '10.30.0.1'],
+      packages: ['com.corp.mail'],
+    );
+    const streaming = SingBoxRoutingRule(
+      action: SingBoxRuleAction.proxy,
+      ruleSets: [
+        'GEOSITE-YouTube',
+        'geoip-us',
+        'https://example.com/lists/my-list.srs',
+        'https://example.com/other/my-list.srs',
+        'https://example.com/src.json?x=1',
+        'https://example.com/lists/my-list.srs',
+        'not a tag',
+      ],
+    );
+    const mail = SingBoxRoutingRule(
+      action: SingBoxRuleAction.block,
+      domainSuffixes: ['spam.example'],
+      ports: ['25', ' 6881-6889 ', '7000:7001', '0', '70000', '9-1', 'x'],
+      network: SingBoxRuleNetwork.tcp,
+    );
+    const rules = SingBoxRoutingRules(customRules: [work, streaming, mail]);
+
+    Map<String, dynamic> customRule(
+      Map<String, dynamic> config,
+      String key,
+      Object value,
+    ) => routeRules(config).firstWhere((r) {
+      final v = r[key];
+      return v is List ? v.contains(value) : v == value;
+    });
+
+    test('conditions are validated and converted', () {
+      final config = builder.build([vless], rules: rules);
+      expect(customRule(config, 'domain', 'vpn.corp.example'), {
+        'domain': ['vpn.corp.example'],
+        'domain_suffix': ['corp.example'],
+        'domain_keyword': ['intranet'],
+        'domain_regex': [r'^git\d+\.example$'],
+        'ip_cidr': ['10.20.0.0/16', '10.30.0.1/32'],
+        'package_name': ['com.corp.mail'],
+        'action': 'route',
+        'outbound': 'direct',
+      });
+      expect(customRule(config, 'domain_suffix', 'spam.example'), {
+        'domain_suffix': ['spam.example'],
+        'port': [25],
+        'port_range': ['6881:6889', '7000:7001'],
+        'network': 'tcp',
+        'action': 'reject',
+      });
+    });
+
+    test('rule-sets: catalog tags and URLs', () {
+      final config = builder.build([vless], rules: rules);
+      expect(customRule(config, 'rule_set', 'geoip-us'), {
+        'rule_set': [
+          'geosite-youtube',
+          'geoip-us',
+          'custom-my-list',
+          'custom-my-list-2',
+          'custom-src',
+        ],
+        'action': 'route',
+        'outbound': 'proxy',
+      });
+      final sets = {
+        for (final s in ((config['route'] as Map)['rule_set'] as List))
+          (s as Map)['tag']: s,
+      };
+      expect(
+        sets['geosite-youtube']!['url'],
+        'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs',
+      );
+      expect(sets['custom-my-list'], {
+        'type': 'remote',
+        'tag': 'custom-my-list',
+        'format': 'binary',
+        'url': 'https://example.com/lists/my-list.srs',
+        'http_client': 'rule-set-download',
+        'update_interval': '1d',
+      });
+      expect(
+        sets['custom-my-list-2']!['url'],
+        'https://example.com/other/my-list.srs',
+      );
+      expect(sets['custom-src']!['format'], 'source');
+    });
+
+    test('custom rules come after the Clash modes, before the presets', () {
+      final config = builder.build([vless], rules: listedWithCustom);
+      final tags = [
+        for (final r in routeRules(config))
+          r['clash_mode'] ?? r['domain']?.first ?? r['domain_suffix']?.first,
+      ];
+      expect(tags.whereType<String>().toList(), [
+        'Direct',
+        'Global',
+        'a.example',
+        'b.example',
+        'example.org',
+      ]);
+    });
+
+    test('DNS follows rules that only depend on the name', () {
+      const fakeIp = SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      );
+      final dns = dnsRules(fakeIp.build([vless], rules: rules));
+      expect(
+        dns,
+        containsAllInOrder([
+          {
+            'domain': ['vpn.corp.example'],
+            'domain_suffix': ['corp.example'],
+            'domain_keyword': ['intranet'],
+            'domain_regex': [r'^git\d+\.example$'],
+            'package_name': ['com.corp.mail'],
+            'action': 'route',
+            'server': 'dns-direct',
+          },
+          // IP and URL rule-sets are left to the default resolver.
+          {
+            'rule_set': ['geosite-youtube'],
+            'query_type': ['A', 'AAAA'],
+            'action': 'route',
+            'server': 'dns-fakeip',
+          },
+          {
+            'rule_set': ['geosite-youtube'],
+            'action': 'route',
+            'server': 'dns-remote',
+          },
+        ]),
+      );
+      // Port specific blocking must not break name resolution.
+      expect(dns.where((r) => r['rcode'] == 'NXDOMAIN'), isEmpty);
+      final blockAll = builder.build(
+        [vless],
+        rules: const SingBoxRoutingRules(
+          customRules: [
+            SingBoxRoutingRule(
+              action: SingBoxRuleAction.block,
+              domainSuffixes: ['spam.example'],
+            ),
+          ],
+        ),
+      );
+      expect(dnsRules(blockAll), [
+        ...dnsRules(blockAll).take(2),
+        {
+          'domain_suffix': ['spam.example'],
+          'action': 'predefined',
+          'rcode': 'NXDOMAIN',
+        },
+      ]);
+    });
+
+    test('incomplete, disabled and empty rules are skipped', () {
+      final config = builder.build(
+        [vless],
+        rules: const SingBoxRoutingRules(
+          bypassLan: false,
+          customRules: [
+            // Matching every TCP connection on 443 instead would be wrong.
+            SingBoxRoutingRule(
+              action: SingBoxRuleAction.direct,
+              domainSuffixes: ['bad domain'],
+              ports: ['443'],
+            ),
+            SingBoxRoutingRule(
+              action: SingBoxRuleAction.block,
+              ports: ['99999'],
+            ),
+            SingBoxRoutingRule(action: SingBoxRuleAction.block),
+            SingBoxRoutingRule(
+              action: SingBoxRuleAction.block,
+              enabled: false,
+              domains: ['off.example'],
+            ),
+            SingBoxRoutingRule(
+              action: SingBoxRuleAction.block,
+              protocols: ['carrier-pigeon'],
+            ),
+          ],
+        ),
+      );
+      expect(routeRules(config).skip(2).map((r) => r['clash_mode']), [
+        'Direct',
+        'Global',
+      ]);
+    });
+
+    test('protocol rules need sniffing', () {
+      const rule = SingBoxRoutingRules(
+        customRules: [
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.direct,
+            protocols: ['BitTorrent', 'stun'],
+          ),
+        ],
+      );
+      expect(
+        routeRules(builder.build([vless], rules: rule)),
+        contains(
+          equals({
+            'protocol': ['bittorrent', 'stun'],
+            'action': 'route',
+            'outbound': 'direct',
+          }),
+        ),
+      );
+      const noSniff = SingBoxConfigBuilder(SingBoxConfigOptions(sniff: false));
+      expect(
+        routeRules(
+          noSniff.build([vless], rules: rule),
+        ).where((r) => r['protocol'] != null && r['protocol'] != 'dns'),
+        isEmpty,
+      );
+    });
+
+    test('QUIC blocking and BitTorrent direct', () {
+      const toggles = SingBoxRoutingRules(
+        blockQuic: true,
+        bittorrentDirect: true,
+        blockedDomains: ['ads.example'],
+      );
+      final rules = routeRules(builder.build([vless], rules: toggles));
+      expect(rules.sublist(3, 5), [
+        {'protocol': 'quic', 'action': 'reject'},
+        {'protocol': 'bittorrent', 'action': 'route', 'outbound': 'direct'},
+      ]);
+      const noSniff = SingBoxConfigBuilder(SingBoxConfigOptions(sniff: false));
+      final plain = routeRules(noSniff.build([vless], rules: toggles));
+      expect(plain.sublist(2, 3), [
+        {'network': 'udp', 'port': 443, 'action': 'reject'},
+      ]);
+      expect(plain.where((r) => r['protocol'] == 'bittorrent'), isEmpty);
+    });
+
+    test('apply: custom rules use the main outbound', () async {
+      final result = builder.apply(
+        userConfig(),
+        rules: const SingBoxRoutingRules(
+          blockQuic: true,
+          customRules: [streaming, work],
+        ),
+      );
+      final inserted = routeRules(result).sublist(2, 5);
+      expect(inserted[0], {'protocol': 'quic', 'action': 'reject'});
+      expect(inserted[1]['outbound'], 'my-proxy');
+      expect(inserted[2]['outbound'], 'bypass');
+      expect(ruleSetTags(result), contains('custom-my-list'));
+      await expectSingBoxAccepts(result);
+
+      final withoutProxy = builder.apply({
+        'outbounds': [
+          {'type': 'direct', 'tag': 'direct'},
+        ],
+      }, rules: const SingBoxRoutingRules(customRules: [streaming, work]));
+      expect(routeRules(withoutProxy).map((r) => r['outbound']).toSet(), {
+        'direct',
+      });
+      expect(ruleSetTags(withoutProxy), isEmpty);
+    });
+
+    test('every custom rule is accepted by sing-box', () async {
+      const all = SingBoxRoutingRules(
+        blockQuic: true,
+        bittorrentDirect: true,
+        customRules: [
+          work,
+          streaming,
+          mail,
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.direct,
+            protocols: ['bittorrent', 'stun', 'dtls'],
+            network: SingBoxRuleNetwork.udp,
+          ),
+        ],
+      );
+      const fakeIp = SingBoxConfigBuilder(
+        SingBoxConfigOptions(dns: SingBoxDnsOptions(fakeIp: true)),
+      );
+      for (final b in [builder, fakeIp]) {
+        await expectSingBoxAccepts(b.build([vless, trojan], rules: all));
+        await expectSingBoxAccepts(
+          b.build([
+            vless,
+          ], rules: all.copyWith(mode: SingBoxRoutingMode.proxyListed)),
+        );
+      }
+      await expectSingBoxAccepts(
+        const SingBoxConfigBuilder(
+          SingBoxConfigOptions(sniff: false),
+        ).build([vless], rules: all),
+      );
     }, skip: singBoxBinary == null ? 'SING_BOX_BIN is not set' : null);
   });
 

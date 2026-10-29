@@ -1744,6 +1744,46 @@ class SingBox {
     dnsServer.trim(),
   );
 
+  /// Returns the stored routing rules as pretty-printed JSON (the format of
+  /// [SingBoxRoutingRules.toMap]), e.g. for a backup or to share them.
+  Future<String> exportRoutingRules() async => const JsonEncoder.withIndent(
+    '  ',
+  ).convert((await getRoutingRules()).toMap());
+
+  /// Replaces the stored routing rules with [json] produced by
+  /// [exportRoutingRules] and returns them. Missing keys get their default
+  /// values and invalid entries are dropped (see
+  /// [SingBoxRoutingRules.fromMap]). A running tunnel is reloaded when
+  /// [reloadOnRulesChange] is enabled.
+  ///
+  /// Throws a [SingBoxConfigException] when [json] is not a JSON object.
+  Future<SingBoxRoutingRules> importRoutingRules(String json) async {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(json);
+    } on FormatException catch (e) {
+      throw SingBoxConfigException('Invalid routing rules JSON: ${e.message}');
+    }
+    if (decoded is! Map) {
+      throw const SingBoxConfigException(
+        'Routing rules must be a JSON object.',
+      );
+    }
+    final rules = SingBoxRoutingRules.fromMap(decoded);
+    await _synchronized(() => saveRoutingRules(rules));
+    return rules;
+  }
+
+  /// The user defined routing rules (see [SingBoxRoutingRule]).
+  Future<List<SingBoxRoutingRule>> getCustomRules() async =>
+      (await getRoutingRules()).customRules;
+
+  /// Replaces the user defined routing rules; they are evaluated in list
+  /// order before the proxy and bypass lists. A running tunnel is reloaded
+  /// when [reloadOnRulesChange] is enabled. Returns whether they changed.
+  Future<bool> setCustomRules(List<SingBoxRoutingRule> rules) =>
+      updateRoutingRules((r) => r.copyWith(customRules: List.of(rules)));
+
   /// Sets where traffic that no rule matches goes: through the proxy
   /// (default) or directly (see [SingBoxRoutingMode]). A running tunnel is
   /// reloaded when [reloadOnRulesChange] is enabled. Returns whether it

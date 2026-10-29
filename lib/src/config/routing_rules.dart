@@ -1,4 +1,5 @@
 import 'internal/json_utils.dart';
+import 'routing_rule.dart';
 
 /// Which IP versions the VPN uses ([SingBoxRoutingRules.ipVersion]).
 ///
@@ -83,13 +84,17 @@ enum SingBoxRoutingMode {
 /// | [bypassLan] | route rule `ip_is_private` → `direct` |
 /// | [bypassCountries] | remote rule-sets `geoip-<cc>` (+ geosite where available) → `direct` |
 /// | [blockAds] | rule-set `geosite-category-ads-all` → `reject` |
+/// | [blockQuic] | route rule `protocol: quic` (UDP 443 without sniffing) → `reject` |
+/// | [bittorrentDirect] | route rule `protocol: bittorrent` → `direct` |
+/// | [customRules] | one route rule (and DNS rule for domains) per [SingBoxRoutingRule] |
 /// | [dnsServers] | replace the remote (proxied) DNS server |
 /// | [ipVersion] | `dns.strategy` and, for IPv4 only, a route rule `ip_version: 6` → `reject` |
 ///
-/// Rules are evaluated in this order: blocked apps, domains and ads; the
-/// Clash modes; the proxy lists; the LAN; the bypass lists; then [mode]
-/// decides. A proxied list therefore wins over a bypassed one: a site
-/// blocked in Russia stays proxied even when its IP address is Russian and
+/// Rules are evaluated in this order: blocked apps, domains and ads; QUIC
+/// blocking and BitTorrent; the Clash modes; the [customRules] in list
+/// order; the proxy lists; the LAN; the bypass lists; then [mode] decides.
+/// A proxied list therefore wins over a bypassed one: a site blocked in
+/// Russia stays proxied even when its IP address is Russian and
 /// `bypassCountries` contains `ru`.
 ///
 /// Invalid entries (malformed domains, CIDRs, package names, unknown country
@@ -116,8 +121,8 @@ enum SingBoxRoutingMode {
 class SingBoxRoutingRules {
   /// Creates routing rules. [mode] defaults to
   /// [SingBoxRoutingMode.proxyAll], every list to empty, [bypassLan] to
-  /// `true`, [blockAds] to `false` and [ipVersion] to
-  /// [SingBoxIpVersion.dual].
+  /// `true`, [blockAds], [blockQuic] and [bittorrentDirect] to `false` and
+  /// [ipVersion] to [SingBoxIpVersion.dual].
   const SingBoxRoutingRules({
     this.mode = SingBoxRoutingMode.proxyAll,
     this.bypassApps = const [],
@@ -133,6 +138,9 @@ class SingBoxRoutingRules {
     this.bypassCountries = const [],
     this.blockedInCountries = const [],
     this.blockAds = false,
+    this.blockQuic = false,
+    this.bittorrentDirect = false,
+    this.customRules = const [],
     this.ipVersion = SingBoxIpVersion.dual,
   });
 
@@ -200,6 +208,20 @@ class SingBoxRoutingRules {
   /// (`geosite-category-ads-all`).
   final bool blockAds;
 
+  /// Whether QUIC (HTTP/3) is rejected for all connections, so browsers and
+  /// apps fall back to TCP at once. Helps with proxies that carry UDP poorly.
+  /// Matches the sniffed `quic` protocol, or UDP port 443 when
+  /// `SingBoxConfigOptions.sniff` is disabled.
+  final bool blockQuic;
+
+  /// Whether BitTorrent traffic is always connected directly, never through
+  /// the proxy. Needs `SingBoxConfigOptions.sniff` (ignored without it).
+  final bool bittorrentDirect;
+
+  /// User defined rules evaluated in list order before the proxy and bypass
+  /// lists. See [SingBoxRoutingRule].
+  final List<SingBoxRoutingRule> customRules;
+
   /// Which IP versions are used: IPv4 and IPv6 (default), IPv4 only or IPv6
   /// only. See [SingBoxIpVersion].
   final SingBoxIpVersion ipVersion;
@@ -223,14 +245,19 @@ class SingBoxRoutingRules {
     'bypassCountries': List<String>.of(bypassCountries),
     'blockedInCountries': List<String>.of(blockedInCountries),
     'blockAds': blockAds,
+    'blockQuic': blockQuic,
+    'bittorrentDirect': bittorrentDirect,
+    'customRules': [for (final rule in customRules) rule.toMap()],
     'ipVersion': ipVersion.name,
   };
 
   /// Creates rules from a map produced by [toMap].
   ///
-  /// Unknown keys are ignored, non-string list items are dropped and missing
-  /// or malformed values fall back to the defaults.
+  /// Unknown keys are ignored, non-string list items and custom rules without
+  /// a valid action are dropped and missing or malformed values fall back to
+  /// the defaults.
   factory SingBoxRoutingRules.fromMap(Map<dynamic, dynamic> map) {
+    final customRules = map['customRules'];
     return SingBoxRoutingRules(
       mode: SingBoxRoutingMode.fromName(readString(map['mode'])),
       bypassApps: readStringList(map['bypassApps']),
@@ -246,6 +273,13 @@ class SingBoxRoutingRules {
       bypassCountries: readStringList(map['bypassCountries']),
       blockedInCountries: readStringList(map['blockedInCountries']),
       blockAds: readBool(map['blockAds']) ?? false,
+      blockQuic: readBool(map['blockQuic']) ?? false,
+      bittorrentDirect: readBool(map['bittorrentDirect']) ?? false,
+      customRules: [
+        if (customRules is List)
+          for (final rule in customRules.whereType<Map<dynamic, dynamic>>())
+            if (SingBoxRoutingRule.tryFromMap(rule) case final parsed?) parsed,
+      ],
       ipVersion: SingBoxIpVersion.fromName(readString(map['ipVersion'])),
     );
   }
@@ -266,6 +300,9 @@ class SingBoxRoutingRules {
     List<String>? bypassCountries,
     List<String>? blockedInCountries,
     bool? blockAds,
+    bool? blockQuic,
+    bool? bittorrentDirect,
+    List<SingBoxRoutingRule>? customRules,
     SingBoxIpVersion? ipVersion,
   }) {
     return SingBoxRoutingRules(
@@ -283,11 +320,14 @@ class SingBoxRoutingRules {
       bypassCountries: bypassCountries ?? this.bypassCountries,
       blockedInCountries: blockedInCountries ?? this.blockedInCountries,
       blockAds: blockAds ?? this.blockAds,
+      blockQuic: blockQuic ?? this.blockQuic,
+      bittorrentDirect: bittorrentDirect ?? this.bittorrentDirect,
+      customRules: customRules ?? this.customRules,
       ipVersion: ipVersion ?? this.ipVersion,
     );
   }
 
-  static bool _listEquals(List<String> a, List<String> b) {
+  static bool _listEquals<T>(List<T> a, List<T> b) {
     if (identical(a, b)) return true;
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
@@ -313,6 +353,9 @@ class SingBoxRoutingRules {
       _listEquals(other.bypassCountries, bypassCountries) &&
       _listEquals(other.blockedInCountries, blockedInCountries) &&
       other.blockAds == blockAds &&
+      other.blockQuic == blockQuic &&
+      other.bittorrentDirect == bittorrentDirect &&
+      _listEquals(other.customRules, customRules) &&
       other.ipVersion == ipVersion;
 
   @override
@@ -331,6 +374,9 @@ class SingBoxRoutingRules {
     Object.hashAll(bypassCountries),
     Object.hashAll(blockedInCountries),
     blockAds,
+    blockQuic,
+    bittorrentDirect,
+    Object.hashAll(customRules),
     ipVersion,
   );
 

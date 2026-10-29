@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/src/config/config.dart';
 
@@ -331,15 +333,54 @@ void main() {
         bypassCountries: ['ru'],
         blockedInCountries: ['ru'],
         blockAds: true,
+        blockQuic: true,
+        bittorrentDirect: true,
+        customRules: [
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.block,
+            domains: ['z.com'],
+          ),
+        ],
         ipVersion: SingBoxIpVersion.ipv4,
       );
       expect(SingBoxRoutingRules.fromMap(rules.toMap()), rules);
+      expect(
+        SingBoxRoutingRules.fromMap(
+          jsonDecode(jsonEncode(rules.toMap())) as Map,
+        ),
+        rules,
+      );
       expect(rules.toMap()['ipVersion'], 'ipv4');
       expect(rules.toMap()['mode'], 'proxyListed');
       expect(rules.copyWith(ipVersion: SingBoxIpVersion.dual), isNot(rules));
       expect(rules.copyWith(mode: SingBoxRoutingMode.proxyAll), isNot(rules));
       expect(rules.copyWith(proxyDomains: const []), isNot(rules));
       expect(rules.copyWith(blockedInCountries: const []), isNot(rules));
+      expect(rules.copyWith(blockQuic: false), isNot(rules));
+      expect(rules.copyWith(bittorrentDirect: false), isNot(rules));
+      expect(rules.copyWith(customRules: const []), isNot(rules));
+      // Custom rules without a valid action are dropped.
+      expect(
+        SingBoxRoutingRules.fromMap({
+          'customRules': [
+            {
+              'action': 'teleport',
+              'domains': ['x.com'],
+            },
+            'not a map',
+            {
+              'action': 'direct',
+              'domains': ['x.com'],
+            },
+          ],
+        }).customRules,
+        const [
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.direct,
+            domains: ['x.com'],
+          ),
+        ],
+      );
       // 1.0 maps without the new keys keep their meaning.
       expect(
         SingBoxRoutingRules.fromMap(const {
@@ -358,6 +399,55 @@ void main() {
       (rules.toMap()['bypassApps'] as List).add('mutated');
       expect(rules.bypassApps, ['a.b']);
     });
+  });
+
+  test('SingBoxRoutingRule round trips through maps', () {
+    const rule = SingBoxRoutingRule(
+      action: SingBoxRuleAction.proxy,
+      name: 'Streaming',
+      enabled: false,
+      domains: ['a.com'],
+      domainSuffixes: ['b.com'],
+      domainKeywords: ['c'],
+      domainRegexes: [r'^d\.com$'],
+      ipCidrs: ['192.0.2.0/24'],
+      ports: ['443', '1000-2000'],
+      packages: ['e.f'],
+      ruleSets: ['geosite-youtube'],
+      network: SingBoxRuleNetwork.udp,
+      protocols: ['quic'],
+    );
+    expect(SingBoxRoutingRule.tryFromMap(rule.toMap()), rule);
+    expect(
+      SingBoxRoutingRule.tryFromMap(rule.toMap())!.hashCode,
+      rule.hashCode,
+    );
+    expect(rule.toMap()['action'], 'proxy');
+    expect(rule.toMap()['network'], 'udp');
+    // Defaults are not written.
+    expect(const SingBoxRoutingRule(action: SingBoxRuleAction.direct).toMap(), {
+      'action': 'direct',
+    });
+    expect(
+      SingBoxRoutingRule.tryFromMap(const {
+        'domains': ['x'],
+      }),
+      isNull,
+    );
+    expect(
+      SingBoxRoutingRule.tryFromMap(const {
+        'action': 'BLOCK',
+        'ports': [25, '465', true],
+        'network': 'sctp',
+      }),
+      const SingBoxRoutingRule(
+        action: SingBoxRuleAction.block,
+        ports: ['25', '465'],
+      ),
+    );
+    expect(rule.copyWith(clearNetwork: true).network, isNull);
+    expect(rule.copyWith(enabled: true), isNot(rule));
+    expect(rule.copyWith(), rule);
   });
 
   test('SingBoxRoutingMode.fromName', () {
