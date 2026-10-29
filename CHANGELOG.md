@@ -59,6 +59,12 @@
   ("hide VPN icon"), `noDefaultRoute` (routes in ranges instead of a default
   route) and `excludeApnsRoute`.
 
+- `dart run sing_box:setup_ios` adds the Packet Tunnel extension without
+  Ruby gems. With Swift Package Manager (default since Flutter 3.44) the
+  extension links `SingBoxTunnel` through Flutter's generated Swift package,
+  so iOS apps need no CocoaPods at all; with CocoaPods it adds the pod as
+  before. `ios/scripts/add_packet_tunnel.rb` now runs this command.
+
 ### Fixed
 - Android: `connect()` reported `connected` before Android routed the app
   through the VPN, so the app's first connection right after it went around
@@ -79,6 +85,8 @@
   Kotlin Android plugin, as in apps created with Flutter 3.29-3.41; the
   plugin applies the Kotlin plugin itself when needed. `compileSdk` 35,
   `androidx.core` 1.13.1 and `kotlinx-coroutines` 1.7.3 as minimum versions.
+- iOS: the Swift package links UIKit for libbox, which a Network Extension
+  target linked through Swift Package Manager does not do by itself.
 - iOS: the Swift package depends on `FlutterFramework` only when Flutter
   generates that package (3.44+), so Swift Package Manager also works with
   older Flutter versions; CocoaPods is unchanged.

@@ -209,3 +209,17 @@ jobs:
           else
             flutter build ios --simulator --debug
           fi
+      # The Packet Tunnel extension added by the plugin's setup tool (no Ruby
+      # gems): linked through Flutter's Swift package or the Podfile.
+      - name: Add the Packet Tunnel extension and build again
+        if: startsWith(matrix.target, 'ios')
+        working-directory: min_app
+        run: |
+          dart run sing_box:setup_ios | tee setup.log
+          if [ "${{ matrix.target }}" = "ios-spm" ]; then
+            grep -q 'through Swift Package Manager' setup.log
+          else
+            grep -q 'through CocoaPods' setup.log
+          fi
+          flutter build ios --simulator --debug
+          test -d build/ios/iphonesimulator/Runner.app/PlugIns/PacketTunnel.appex

@@ -32,9 +32,11 @@ let libboxTarget: Target = hasLocalLibbox
         checksum: libboxChecksum
     )
 
-// Go's runtime in libbox needs libresolv.
+// Go's runtime in libbox needs libresolv; libbox also uses UIDevice, and a
+// Network Extension target does not link UIKit by itself.
 let libboxLinkerSettings: [LinkerSetting] = [
     .linkedLibrary("resolv"),
+    .linkedFramework("UIKit"),
 ]
 
 // Recent Flutter versions generate a FlutterFramework package next to this

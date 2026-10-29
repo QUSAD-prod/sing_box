@@ -143,22 +143,22 @@ so the host app needs an extra target. This requires a paid Apple Developer
 account (the Network Extension capability is not available to free personal
 teams), and VPN tunnels do not run in the iOS Simulator.
 
-1. **Add the extension target** with the bundled script (run it from your app
-   directory; `flutter build ios --config-only` creates the `.symlinks` it
-   lives in):
+1. **Add the extension target** with the plugin's setup tool (run it in your
+   app directory; no Ruby or CocoaPods needed):
    ```bash
    flutter build ios --config-only
-   ruby ios/.symlinks/plugins/sing_box/ios/scripts/add_packet_tunnel.rb
+   dart run sing_box:setup_ios
    ```
    It creates `ios/PacketTunnel/` (a provider that is just
    `class PacketTunnelProvider: SingBoxPacketTunnelProvider {}`, `Info.plist`,
    entitlements), adds the Network Extension and App Group entitlements to
-   Runner, embeds the extension *before* Flutter's *Thin Binary* phase (no
-   *"Cycle inside Runner"*), and adds the `SingBoxTunnel` pod for the
-   extension to `ios/Podfile` with static linkage - this works whether
-   Flutter links the plugin itself with Swift Package Manager or CocoaPods.
-   Re-running it is safe. Options: `--bundle-id`, `--app-group`, `--team`,
-   `--target`.
+   Runner and embeds the extension *before* Flutter's *Thin Binary* phase (no
+   *"Cycle inside Runner"*). The extension gets the plugin's `SingBoxTunnel`
+   library through Flutter's Swift package when Flutter links plugins with
+   Swift Package Manager (the default since Flutter 3.44: **no Podfile
+   needed**), or through `pod 'SingBoxTunnel'` in `ios/Podfile` with
+   CocoaPods. Re-running it is safe. Options: `--bundle-id`, `--app-group`,
+   `--team`, `--target`, `--project`.
 2. **Capabilities**: in the Apple Developer portal enable *Network
    Extensions* and *App Groups* (`group.<app bundle id>` by default) for both
    `<app bundle id>` and `<app bundle id>.PacketTunnel`, or let Xcode's

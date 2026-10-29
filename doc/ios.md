@@ -35,15 +35,29 @@ of the iOS implementation.
 ## Scripted setup
 
 ```bash
-flutter build ios --config-only     # creates ios/.symlinks
-ruby ios/.symlinks/plugins/sing_box/ios/scripts/add_packet_tunnel.rb \
+flutter build ios --config-only     # lets Flutter generate its Swift package / Podfile
+dart run sing_box:setup_ios \
   [--bundle-id com.example.app.PacketTunnel] [--app-group group.com.example.app] [--team ABCDE12345]
 ```
 
-The script needs the `xcodeproj` gem, which ships with CocoaPods (Homebrew
-installs are found automatically). It is idempotent; re-run it after
-changing the ids. See the [README](../README.md#ios-setup) for what it
-changes.
+Pure Dart, no Ruby gems. It edits `Runner.xcodeproj` the way Xcode would
+and is idempotent; re-run it after changing the ids. The `SingBoxTunnel`
+library is linked to the extension
+
+* with **Swift Package Manager** (Flutter's generated package depends on
+  sing_box): as a product of `FlutterGeneratedPluginSwiftPackage`, which
+  Xcode resolves through the package graph. The reference does not contain
+  the plugin's version or path, so it survives plugin upgrades. No Podfile,
+  no CocoaPods;
+* with **CocoaPods**: `pod 'SingBoxTunnel'` (static) for the extension in
+  `ios/Podfile`. A project that already has this pod keeps it (linking the
+  library twice would duplicate symbols); to switch such a project to Swift
+  Package Manager remove the extension's block from the Podfile and run the
+  tool again.
+
+Before the first `flutter build` neither exists and the tool asks to build
+once and run it again. `ios/scripts/add_packet_tunnel.rb` from 1.0.0 is now
+a wrapper around this command.
 
 ## Manual setup
 
@@ -61,25 +75,29 @@ changes.
    ```
 4. **Info.plist** of the extension: add `SingBoxAppGroup` = your App Group
    (used when iOS starts the tunnel without the app, e.g. On Demand).
-5. **Link the library** to the extension. Add to `ios/Podfile` and run
-   `pod install`:
-   ```ruby
-   target 'PacketTunnel' do
-     use_frameworks! :linkage => :static
-     pod 'SingBoxTunnel', :path => '.symlinks/plugins/sing_box/ios'
-   end
-   ```
-   This works whether the app links the plugin with Swift Package Manager
-   (Flutter's default since 3.44) or CocoaPods. Linking the `SingBoxTunnel`
-   Swift package product directly is not recommended: Flutter references the
-   plugin package under a folder-dependent identity
-   (`ios/Flutter/ephemeral/Packages/.packages/<plugin folder>`), and a second
-   reference to the same package under another path conflicts.
+5. **Link the library** to the extension.
+   * Swift Package Manager: in the extension target's *Frameworks and
+     Libraries* add the `SingBoxTunnel` product. Xcode lists only products of
+     packages referenced by the project, so add it in
+     `project.pbxproj` as an `XCSwiftPackageProductDependency` with
+     `productName = SingBoxTunnel` whose `package` is the existing
+     `FlutterGeneratedPluginSwiftPackage` reference (the setup tool does
+     this). Do not add a second package reference to
+     `ios/Flutter/ephemeral/Packages/.packages/<plugin folder>`: that folder
+     name contains the plugin version from the pub cache and changes on
+     every upgrade.
+   * CocoaPods: add to `ios/Podfile` and run `pod install`:
+     ```ruby
+     target 'PacketTunnel' do
+       use_frameworks! :linkage => :static
+       pod 'SingBoxTunnel', :path => '.symlinks/plugins/sing_box/ios'
+     end
+     ```
 6. **Build phases** of Runner: *Embed Foundation Extensions* must come
    before Flutter's *Thin Binary* script, otherwise Xcode reports
    *"Cycle inside Runner; building could produce unreliable results"*.
 7. **Versions**: keep `CFBundleShortVersionString`/`CFBundleVersion` of the
-   extension equal to the app's (App Store requirement); the script uses
+   extension equal to the app's (App Store requirement); the setup tool uses
    `$(FLUTTER_BUILD_NAME)`/`$(FLUTTER_BUILD_NUMBER)` from
    `Flutter/Generated.xcconfig`.
 
