@@ -57,7 +57,10 @@ flutter pub publish --dry-run
 ```
 
 CI runs the same checks plus Android and iOS (SwiftPM and CocoaPods) builds of
-the example. The builds run only after the *libbox release* job confirmed that
+the example, and builds a fresh app made by the oldest supported Flutter
+(`MIN_FLUTTER` in `.github/workflows/ci.yml`, keep it in sync with
+`environment.flutter` in `pubspec.yaml`) for Android and iOS (CocoaPods and
+SwiftPM). The builds run only after the *libbox release* job confirmed that
 the libbox files of `LIBBOX_VERSION` are published with the pinned checksums
 (`scripts/verify_libbox_release.sh`).
 

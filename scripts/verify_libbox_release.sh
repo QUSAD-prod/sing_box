@@ -4,12 +4,15 @@
 # published and match the pinned SHA-256 checksums:
 #   - libbox.aar              <- android/libbox.properties (baseUrl, fileName, sha256)
 #   - Libbox.xcframework.zip  <- ios/sing_box/Package.swift (libboxBaseURL, libboxVersion, libboxChecksum)
+# and the same pair of the sing-box-lx core (`lx.*` keys, `libboxLx*` lets,
+# LIBBOX_LX_VERSION).
 #
 # Run it before publishing a plugin version: pub.dev users cannot build the
 # plugin when these downloads fail.
 #
 # Usage:
-#   scripts/verify_libbox_release.sh
+#   scripts/verify_libbox_release.sh            # both cores
+#   scripts/verify_libbox_release.sh standard   # one core (standard or lx)
 #
 # Environment variables:
 #   SING_BOX_LIBBOX_BASE_URL  check a mirror instead of the pinned base URLs
@@ -27,29 +30,6 @@ log() { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
 prop() { sed -n -E "s/^$1=(.*)$/\1/p" "$PROPS" | tr -d '[:space:]'; }
 swift_let() { sed -n -E "s/^let $1 = \"([^\"]*)\".*/\1/p" "$PACKAGE"; }
 
-AAR_VERSION="$(prop version)"
-AAR_SHA="$(prop sha256)"
-AAR_FILE="$(prop fileName)"
-AAR_BASE="$(prop baseUrl)"
-IOS_VERSION="$(swift_let libboxVersion)"
-IOS_SHA="$(swift_let libboxChecksum)"
-IOS_BASE="$(swift_let libboxBaseURL)"
-LIBBOX_VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/LIBBOX_VERSION")"
-
-[[ -n "$AAR_VERSION" && -n "$AAR_SHA" && -n "$AAR_BASE" ]] || die "cannot read $PROPS"
-[[ -n "$IOS_VERSION" && -n "$IOS_SHA" && -n "$IOS_BASE" ]] || die "cannot read $PACKAGE"
-[[ "$AAR_VERSION" == "$LIBBOX_VERSION" && "$IOS_VERSION" == "$LIBBOX_VERSION" ]] ||
-  die "version mismatch: LIBBOX_VERSION=$LIBBOX_VERSION, libbox.properties=$AAR_VERSION, Package.swift=$IOS_VERSION"
-
-if [[ -n "${SING_BOX_LIBBOX_BASE_URL:-}" ]]; then
-  base="${SING_BOX_LIBBOX_BASE_URL%/}"
-  AAR_URL="$base/libbox-v$AAR_VERSION/${AAR_FILE:-libbox.aar}"
-  IOS_URL="$base/libbox-v$IOS_VERSION/Libbox.xcframework.zip"
-else
-  AAR_URL="${AAR_BASE//\{version\}/$AAR_VERSION}/${AAR_FILE:-libbox.aar}"
-  IOS_URL="${IOS_BASE%/}/libbox-v$IOS_VERSION/Libbox.xcframework.zip"
-fi
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -62,7 +42,7 @@ check() {
   log "$name: $url"
   curl -fsSL --retry 3 --connect-timeout 30 -o "$TMP/$name" "$url" ||
     die "$name is not downloadable from $url
-Publish the libbox release first: scripts/release_libbox.sh --publish (doc/releasing.md, step 3)."
+Publish the libbox release first: scripts/release_libbox.sh [--core lx] --publish (doc/releasing.md, step 3)."
   local actual
   actual="$(sha256 "$TMP/$name")"
   [[ "$actual" == "$expected" ]] || die "$name sha256 mismatch
@@ -71,6 +51,43 @@ Publish the libbox release first: scripts/release_libbox.sh --publish (doc/relea
   log "$name OK ($(du -h "$TMP/$name" | cut -f1), sha256 $actual)"
 }
 
-check libbox.aar "$AAR_URL" "$AAR_SHA"
-check Libbox.xcframework.zip "$IOS_URL" "$IOS_SHA"
-log "libbox $LIBBOX_VERSION release assets match the pinned checksums"
+# verify_core <name> <properties key prefix> <Swift let suffix> <version file>
+verify_core() {
+  local core="$1" prefix="$2" suffix="$3" version_file="$4"
+  local aar_version aar_sha aar_file aar_base ios_version ios_sha ios_base version aar_url ios_url
+  aar_version="$(prop "${prefix}version")"
+  aar_sha="$(prop "${prefix}sha256")"
+  aar_file="$(prop "${prefix}fileName")"
+  aar_base="$(prop "${prefix}baseUrl")"
+  ios_version="$(swift_let "libbox${suffix}Version")"
+  ios_sha="$(swift_let "libbox${suffix}Checksum")"
+  ios_base="$(swift_let libboxBaseURL)"
+  version="$(tr -d '[:space:]' < "$ROOT_DIR/$version_file")"
+
+  [[ -n "$aar_version" && -n "$aar_sha" && -n "$aar_base" ]] || die "$core: cannot read $PROPS"
+  [[ -n "$ios_version" && -n "$ios_sha" && -n "$ios_base" ]] || die "$core: cannot read $PACKAGE"
+  [[ "$aar_version" == "$version" && "$ios_version" == "$version" ]] ||
+    die "$core: version mismatch: $version_file=$version, libbox.properties=$aar_version, Package.swift=$ios_version"
+
+  if [[ -n "${SING_BOX_LIBBOX_BASE_URL:-}" ]]; then
+    local base="${SING_BOX_LIBBOX_BASE_URL%/}"
+    aar_url="$base/libbox-v$aar_version/${aar_file:-libbox.aar}"
+    ios_url="$base/libbox-v$ios_version/Libbox.xcframework.zip"
+  else
+    aar_url="${aar_base//\{version\}/$aar_version}/${aar_file:-libbox.aar}"
+    ios_url="${ios_base%/}/libbox-v$ios_version/Libbox.xcframework.zip"
+  fi
+
+  check "$core-libbox.aar" "$aar_url" "$aar_sha"
+  check "$core-Libbox.xcframework.zip" "$ios_url" "$ios_sha"
+  log "$core libbox $version release assets match the pinned checksums"
+}
+
+CORES=("${@:-standard lx}")
+for core in ${CORES[*]}; do
+  case "$core" in
+    standard) verify_core standard "" "" LIBBOX_VERSION ;;
+    lx) verify_core lx "lx\\." "Lx" LIBBOX_LX_VERSION ;;
+    *) die "unknown core: $core (standard or lx)" ;;
+  esac
+done

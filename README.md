@@ -29,8 +29,12 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
   HTTPUpgrade and QUIC transports, uTLS fingerprints and multiplexing.
 - **Share links and subscriptions**: import `vless://`, `vmess://`, `trojan://`,
   `ss://`, `hysteria2://`, `hysteria://`, `tuic://`, `anytls://`,
-  `wireguard://`, `socks://`, `http://` links and base64, plain, JSON and
-  SIP008 subscriptions; export profiles back to links.
+  `wireguard://`, `socks://`, `http://` links and base64, plain, sing-box
+  JSON, SIP008 and **Clash / mihomo YAML** subscriptions; export profiles
+  back to links.
+- **Subscriptions by URL**: download and refresh subscriptions with traffic
+  used, limit and expiry (`subscription-userinfo`), provider name, update
+  interval and links; automatic updates of stale subscriptions.
 - **Config generation**: a complete, validated sing-box 1.14 configuration
   (TUN, DNS, routing, URL test groups, cache, clash API) is generated from a
   link or outbound - or bring your own full config.
@@ -39,12 +43,20 @@ SingBox.instance.watchConnectionStats().listen((s) => print('↓ ${s.downloadSpe
 - **Live data streams**: status with error reasons and session start time,
   traffic speed and totals, core logs, outbound groups with latencies,
   active connections (close individually), clash mode.
-- **Tests**: real latency (HTTP through the proxy, not ICMP), speed test
+- **Tests**: latency by HTTP `HEAD`/`GET` through the proxy (also while disconnected and for UDP protocols), TCP handshake or ICMP, speed test
   (download/upload capacity and responsiveness, RFC-style network quality),
   STUN NAT type / UDP test.
-- **Routing rules**: bypass or block apps (Android), domains and subnets,
-  "only these apps use the VPN", bypass LAN, bypass whole countries (geoip /
-  geosite rule-sets), ad blocking, custom DNS (UDP, TCP, DoT, DoH, DoQ, DoH3).
+- **Routing rules**: everything through the VPN or **only the listed
+  resources** (e.g. sites blocked in Russia); proxy, bypass or block apps
+  (Android), domains and subnets, "only these apps use the VPN", bypass LAN,
+  bypass whole countries (geoip / geosite rule-sets), ordered **custom rules**
+  (domains, keywords, regexes, IPs, ports, apps, rule-sets by tag or URL,
+  protocols), QUIC blocking, BitTorrent directly, ad blocking, custom DNS
+  (UDP, TCP, DoT, DoH, DoQ, DoH3), IP version: IPv4 and IPv6, IPv4 only or
+  IPv6 only; JSON export / import.
+- **Reliable rule-sets**: the plugin downloads rule-sets itself (with
+  jsDelivr mirrors) and the core reads local files, so a blocked or slow
+  rule-set host never stops the VPN from starting.
 - **Persistence**: settings, server profiles and routing rules are stored
   natively and applied automatically.
 - **Platform integration**: Android foreground notification with live speed
@@ -75,8 +87,10 @@ included; see [Building libbox](#building-libbox-yourself).
 
 ```yaml
 dependencies:
-  sing_box: ^1.0.0
+  sing_box: ^1.1.0
 ```
+
+Requires Flutter 3.29 or newer (Dart 3.7+).
 
 The native libraries (~85 MB AAR, ~200 MB XCFramework) are too large for
 pub.dev. They are downloaded automatically on the first build from this
@@ -100,7 +114,10 @@ the foreground service type, and the permissions it needs (`INTERNET`,
 
 Recommended:
 
-1. **minSdk 24** (the Flutter default).
+1. **minSdk 24**: the Flutter default since 3.35. Apps created with older
+   Flutter versions set `minSdk = 24` in `android/app/build.gradle(.kts)`.
+   Both AGP 9 (built-in Kotlin) and AGP 8 with the Kotlin Android plugin
+   1.8.22+ are supported.
 2. **Notification icon**: add a monochrome vector drawable, e.g.
    `android/app/src/main/res/drawable/ic_vpn.xml`, and pass
    `SingBoxAndroidOptions(notificationIcon: 'ic_vpn')`.
@@ -126,27 +143,31 @@ so the host app needs an extra target. This requires a paid Apple Developer
 account (the Network Extension capability is not available to free personal
 teams), and VPN tunnels do not run in the iOS Simulator.
 
-1. **Add the extension target** with the bundled script (run it from your app
-   directory; `flutter build ios --config-only` creates the `.symlinks` it
-   lives in):
+1. **Add the extension target** with the plugin's setup tool (run it in your
+   app directory; no Ruby or CocoaPods needed):
    ```bash
    flutter build ios --config-only
-   ruby ios/.symlinks/plugins/sing_box/ios/scripts/add_packet_tunnel.rb
+   dart run sing_box:setup_ios
    ```
    It creates `ios/PacketTunnel/` (a provider that is just
    `class PacketTunnelProvider: SingBoxPacketTunnelProvider {}`, `Info.plist`,
    entitlements), adds the Network Extension and App Group entitlements to
-   Runner, embeds the extension *before* Flutter's *Thin Binary* phase (no
-   *"Cycle inside Runner"*), and adds the `SingBoxTunnel` pod for the
-   extension to `ios/Podfile` with static linkage - this works whether
-   Flutter links the plugin itself with Swift Package Manager or CocoaPods.
-   Re-running it is safe. Options: `--bundle-id`, `--app-group`, `--team`,
-   `--target`.
+   Runner and embeds the extension *before* Flutter's *Thin Binary* phase (no
+   *"Cycle inside Runner"*). The extension gets the plugin's `SingBoxTunnel`
+   library through Flutter's Swift package when Flutter links plugins with
+   Swift Package Manager (the default since Flutter 3.44: **no Podfile
+   needed**), or through `pod 'SingBoxTunnel'` in `ios/Podfile` with
+   CocoaPods. Re-running it is safe. Options: `--bundle-id`, `--app-group`,
+   `--team`, `--target`, `--project`.
 2. **Capabilities**: in the Apple Developer portal enable *Network
    Extensions* and *App Groups* (`group.<app bundle id>` by default) for both
    `<app bundle id>` and `<app bundle id>.PacketTunnel`, or let Xcode's
    automatic signing do it.
-3. Build as usual (`flutter build ios` / `flutter run`).
+3. **Deployment target 15.0**: older Flutter versions create apps for an
+   earlier iOS (Flutter 3.29: iOS 12.0); set *Minimum Deployments* of Runner
+   to 15.0 (or `IPHONEOS_DEPLOYMENT_TARGET = 15.0` in
+   `ios/Runner.xcodeproj/project.pbxproj`).
+4. Build as usual (`flutter build ios` / `flutter run`).
 
 The manual steps are described in [doc/ios.md](doc/ios.md#manual-setup).
 
@@ -291,10 +312,10 @@ singBox.watchConnectionStats().listen((s) {
 await singBox.waitForStatus(SingBoxConnectionStatus.connected);
 ```
 
-### Server profiles and subscriptions
+### Server profiles
 
 ```dart
-final imported = await singBox.importServerConfigs(subscriptionBody, subscriptionId: 'main');
+final imported = await singBox.importServerConfigs(linksOrSubscriptionBody);
 await singBox.setActiveServerConfig(imported.first.id);
 await singBox.connectToActiveServer();
 
@@ -306,6 +327,54 @@ final all = await singBox.getServerConfigs();
 
 final link = SingBoxShareLink.toLink(server.outbound!); // export
 ```
+
+### Subscriptions
+
+`addSubscription()` downloads a subscription URL, imports its servers as
+profiles (their `subscriptionId` is the subscription id) and stores the
+subscription with the metadata the provider sends in its response headers:
+
+```dart
+final sub = await singBox.addSubscription(
+  'https://example.com/sub/token',
+  name: 'My provider',              // optional: else profile-title or the host
+  headers: {'x-hwid': deviceId},    // optional extra request headers
+);
+print('${sub.name}: ${sub.serverCount} servers');
+print('traffic ${sub.used} / ${sub.total} bytes, expires ${sub.expire}');
+
+await singBox.updateSubscription(sub.id);               // download again
+await singBox.updateSubscriptions(onlyStale: true);     // e.g. on app resume
+await singBox.editSubscription(sub.copyWith(updateInterval: const Duration(hours: 6)));
+await singBox.removeSubscription(sub.id);               // and its servers
+
+singBox.watchSubscriptions().listen((subs) { … });
+```
+
+| `SingBoxSubscription` field | Source |
+| --- | --- |
+| `upload`, `download`, `total`, `expire` (and `used`, `remaining`, `isExpired`) | `subscription-userinfo` |
+| `name` | your `name`, else `profile-title` (plain or `base64:`), else the `content-disposition` file name, else the URL host |
+| `providerUpdateInterval` | `profile-update-interval` (hours); `updateInterval` overrides it, default 24 h |
+| `webPageUrl`, `supportUrl`, `announce` | `profile-web-page-url`, `support-url`, `announce` |
+| `lastUpdated`, `lastError`, `serverCount` | the last update |
+
+* **Formats**: share links (plain or base64), a sing-box configuration or
+  outbound list, SIP008 and Clash / mihomo YAML (see
+  [Supported subscription formats](#supported-subscription-formats)).
+* **User-Agent**: many providers choose the format by it. The default is
+  `sing-box/<core version>`; change it for all subscriptions with
+  `SingBox.subscriptionUserAgent` or per subscription with `userAgent`.
+* **Updates**: `initialize()` refreshes subscriptions with `autoUpdate`
+  that are older than their interval; call `updateSubscriptions(onlyStale:
+  true)` again when the app returns to the foreground. An update replaces
+  the subscription's servers; servers keep their id
+  (`<subscription id>/<server name>`) and `enabled` flag when the provider
+  keeps their names, so the active server stays selected. A running tunnel
+  is not reloaded.
+* **Errors**: a failed download or a body without supported servers throws
+  `SingBoxSubscriptionException` (with `statusCode` for HTTP errors); for
+  updates it is also stored in `lastError` and the old servers are kept.
 
 ### Groups, instant switching and latency
 
@@ -331,29 +400,48 @@ final ping = await singBox.pingCurrentServer();                 // SingBoxPingRe
 final group = await singBox.testGroup(SingBoxConfigBuilder.proxyTag);
 ```
 
-Latency is measured with an HTTP request through the proxy
-(`SingBoxConfigOptions.urlTestUrl`, default
-`https://www.gstatic.com/generate_204`), which reflects real proxy latency.
-`pingOutbound()` tests an outbound through its `urltest` group (the `auto`
-group of generated configs) so that this URL is used; outbounds outside such
-a group are tested by libbox against its built-in default URL.
+#### Latency (ping)
 
-To rank a whole list of profiles (for example before connecting) use
-`pingServers()`. It emits one result per profile as soon as it is known:
+Four ways to measure a server (`SingBoxPingMethod`):
+
+| Method | What is measured | Works for | Tunnel |
+| --- | --- | --- | --- |
+| `proxyHead` (default) | `HEAD` of `SingBoxConfigOptions.urlTestUrl` through the server, until the response headers arrive | every protocol, UDP based ones included | through it, or a temporary core while stopped |
+| `proxyGet` | the same with `GET` | every protocol | same |
+| `tcp` | TCP handshake with the server | TCP based protocols (not Hysteria, TUIC, WireGuard, QUIC transports) | bypasses it |
+| `icmp` | one ICMP echo | servers that answer ping | bypasses it |
 
 ```dart
+final current = await singBox.pingCurrentServer();                    // proxyHead
+final viaGet = await singBox.pingOutbound('Server B', method: SingBoxPingMethod.proxyGet);
 final servers = await singBox.getServerConfigs();
-singBox.pingServers(servers, concurrency: 8).listen((result) {
-  print('${result.serverId}: ${result.success ? '${result.ping} ms' : result.errorMessage}');
+singBox.pingServers(servers, method: SingBoxPingMethod.tcp, concurrency: 8).listen((r) {
+  print('${r.serverId}: ${r.success ? '${r.ping} ms' : r.errorMessage}');
 });
 ```
 
-While the VPN is stopped it measures the TCP handshake with each server
-(`SingBoxPingMethod.tcp`); UDP protocols (Hysteria, Hysteria 2, TUIC,
-WireGuard) cannot be measured that way. While the VPN is running the app's
-own traffic goes through the tunnel, so profiles that are part of the
-running configuration are measured with a URL test through the proxy
-(`SingBoxPingMethod.urlTest`) and the others are reported as failures.
+How it works:
+
+* **Connected**: generated and applied configurations contain probe routes:
+  a connection from the app to `198.51.100.1:20000+i`
+  (`SingBoxConfigOptions.probeAddress`, an unused TEST-NET address) goes
+  through outbound `i` to the host of `urlTestUrl`. The app sends the
+  request itself, so no local port is opened. Without probe routes (a
+  complete config of your own, or the app excluded from the tunnel)
+  sing-box's URL test of the outbound is used. `pingServers()` measures the
+  profiles of the running configuration and fails the others; connect with
+  `connectToServers()` to measure them all.
+* **Stopped**: `pingServers()` starts a temporary core in the app (no TUN,
+  inbounds on `127.0.0.1`, at most 64 profiles at a time), measures and
+  stops it. This also gives real latency for UDP based protocols.
+* **TCP / ICMP** are measured natively outside the tunnel; the server name is
+  resolved by the underlying network, not by the tunnel's DNS (FakeIP).
+  Android protects the sockets from the VPN; iOS measures in the Packet
+  Tunnel extension while the tunnel runs. ICMP numbers on emulators are not
+  meaningful (the emulator answers itself).
+
+Results carry `method`, `url` and the HTTP `statusCode` (proxy methods).
+`SingBoxPingMethod.urlTest` is a deprecated alias of `proxyHead`.
 
 ### Speed and NAT tests
 
@@ -389,8 +477,102 @@ await singBox.updateRoutingRules((r) => r.copyWith(
   bypassLan: true,
   bypassCountries: ['ru'], // geoip-ru + geosite-ru rule-sets go direct
   blockAds: true,          // geosite-category-ads-all
+  blockQuic: true,         // apps fall back to TCP
+  bittorrentDirect: true,  // torrents never use the VPN
 ));
+
+await singBox.setIpVersion(SingBoxIpVersion.ipv4); // IPv4 only
 ```
+
+**Routing mode** (`SingBoxRoutingRules.mode`) decides where traffic that no
+rule matches goes. The lists work in both modes:
+
+| Mode | Unmatched traffic | Typical use |
+| --- | --- | --- |
+| `SingBoxRoutingMode.proxyAll` (default) | through the proxy | "everything via VPN", optionally `bypassCountries: ['ru']` for "everything except Russian sites" |
+| `SingBoxRoutingMode.proxyListed` | directly, resolved by the direct DNS server | "only blocked sites via VPN" with `blockedInCountries` / `proxyDomains` / `proxySubnets` |
+
+```dart
+// Only sites blocked in Russia (and example.org) use the VPN.
+await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed);
+await singBox.updateRoutingRules(
+  (r) => r.copyWith(blockedInCountries: ['ru']),
+);
+await singBox.addProxyDomain('example.org');
+await singBox.addProxySubnet('203.0.113.0/24');
+```
+
+`blockedInCountries` supports `ru` (domains and IP ranges blocked in Russia
+from [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat))
+and `cn` (sites outside mainland China). `bypassCountries: ['ru']` also
+connects the sites that only work from inside Russia directly.
+
+Rules are evaluated in this order: blocked apps, domains and ads → QUIC /
+BitTorrent → Clash modes → custom rules → proxy lists → LAN → bypass lists →
+the mode. A proxied list wins over a bypassed one: a blocked site on a
+Russian IP address still uses the VPN when Russian sites are bypassed.
+
+**Custom rules** (`SingBoxRoutingRule`) are evaluated in list order before
+the presets. Destination conditions (domains, suffixes, keywords, regexes,
+IP CIDRs, rule-sets) are alternatives; ports, apps, network and protocols
+must match as well. Invalid entries are dropped, and a rule whose condition
+has no valid entry left is skipped rather than matching too much.
+
+```dart
+await singBox.setCustomRules([
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.direct,
+    domainSuffixes: ['corp.example.com'],
+    ipCidrs: ['10.20.0.0/16'],
+  ),
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.proxy,
+    ruleSets: ['geosite-youtube', 'https://example.com/my-list.srs'],
+  ),
+  const SingBoxRoutingRule(
+    action: SingBoxRuleAction.block,
+    ports: ['25', '6881-6889'],
+    network: SingBoxRuleNetwork.tcp,
+  ),
+]);
+
+final json = await singBox.exportRoutingRules(); // backup / share
+await singBox.importRoutingRules(json);
+```
+
+Rule-sets are SagerNet geosite / geoip tags (`geosite-youtube`, `geoip-us`,
+see `SingBoxRuleSets`) or `https://` URLs of binary (`.srs`) or source
+(`.json`) rule-sets. Protocol conditions (`quic`, `bittorrent`, `stun`, …)
+need sniffing (`SingBoxConfigOptions.sniff`, on by default).
+
+**Rule-set downloads.** sing-box aborts the start when it cannot download a
+remote rule-set the first time. So the plugin downloads the rule-sets
+itself into the working directory (trying jsDelivr mirrors when GitHub is
+unreachable), and generated configs read local files. If a rule-set cannot
+be downloaded, the rules that need it are left out and the VPN still
+starts. Outdated files (`SingBoxConfigOptions.ruleSetUpdateInterval`) are
+refreshed in the background on connect and on app start, and a running
+tunnel picks them up by itself.
+
+```dart
+for (final ruleSet in await singBox.getRuleSets()) {
+  print('${ruleSet.tag}: ${ruleSet.lastError ?? ruleSet.updatedAt}');
+}
+await singBox.updateRuleSets(force: true); // download again now
+singBox.manageRuleSets = false; // let sing-box download remote rule-sets
+```
+
+**IP version** (`SingBoxRoutingRules.ipVersion`):
+
+| Value | Effect |
+| --- | --- |
+| `SingBoxIpVersion.dual` (default) | IPv4 and IPv6; the preferred family is `SingBoxDnsOptions.strategy` (IPv4 first by default) |
+| `SingBoxIpVersion.ipv4` | Names resolve to IPv4 only (`ipv4_only`) and IPv6 connections that would go through the proxy are rejected, so apps fall back to IPv4 at once. The TUN keeps its IPv6 address, so IPv6 traffic does not leak outside the VPN. Use it when the server or the network has no working IPv6. |
+| `SingBoxIpVersion.ipv6` | Names resolve to IPv6 only (`ipv6_only`); sites without IPv6 cannot be opened by name, IPv4 addresses still work |
+
+For user supplied configurations `dual` changes nothing; the other values
+set `dns.strategy` and (IPv4 only) append the IPv6 reject rule after the
+config's own rules.
 
 ### Configuration options
 
@@ -405,6 +587,49 @@ SingBox.instance.configOptions = const SingBoxConfigOptions(
   enableClashModes: true,
 );
 ```
+
+#### Proxy-only mode (Android)
+
+`inboundMode: SingBoxInboundMode.proxyOnly` generates a configuration without
+a TUN: no VPN and no VPN permission, only the local proxy (`localProxy`,
+default `127.0.0.1:2080`) that apps use through their proxy settings. The app
+declares the `specialUse` foreground service for it - see
+[doc/android.md](doc/android.md#proxy-only-mode-no-vpn). iOS cannot run the
+core without the VPN and throws `SingBoxUnsupportedException`.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  inboundMode: SingBoxInboundMode.proxyOnly,
+  localProxy: SingBoxLocalProxy(port: 2080),
+);
+await singBox.connectToActiveServer(); // no VPN permission dialog
+```
+
+#### Local proxy and system proxy
+
+`localProxy` adds a local HTTP + SOCKS5 proxy (sing-box `mixed` inbound) next
+to the TUN; with `systemProxy: true` the VPN also announces it as the system
+HTTP proxy (Android 10+, iOS). Apps that honour the system proxy (browsers,
+most HTTP clients) then reach it directly instead of through the TUN, which
+saves a round of packet processing; all other traffic still uses the TUN.
+
+```dart
+SingBox.instance.configOptions = const SingBoxConfigOptions(
+  localProxy: SingBoxLocalProxy(
+    port: 2080,                   // 127.0.0.1:2080, HTTP and SOCKS5
+    systemProxy: true,            // TUN platform.http_proxy
+    bypassDomains: ['example.com'],
+  ),
+);
+
+// While connected: the "System proxy" switch of the official clients.
+final status = await singBox.getSystemProxyStatus(); // available / enabled
+await singBox.setSystemProxyEnabled(false); // remembered on the device
+```
+
+The proxy has no authentication, so every app on the device can use it while
+the VPN runs. Android applies `setSystemProxyEnabled()` by reloading the
+tunnel; iOS updates the tunnel's network settings in place.
 
 Use `SingBoxConfigBuilder` directly to generate configs without connecting:
 
@@ -440,11 +665,38 @@ await singBox.saveSettings(const SingBoxSettings(
   killSwitch: true,                  // iOS: includeAllNetworks
   startOnBoot: true,                 // Android
   quickSettingsTile: true,           // Android
+  allowBypass: false,                // Android: apps may bind to another network and leave the VPN
 ));
 await singBox.updateSetting(SingBoxSettings.keyKillSwitch, false);
 await singBox.openVpnSettings();     // Android: Always-on VPN / Block connections without VPN
 await singBox.requestAddQuickSettingsTile(); // Android 13+
 ```
+
+#### Memory limit (OOM killer)
+
+sing-box can watch its own memory and reset the network (close connections
+and free memory) before the system kills it. `oomKiller` and `memoryLimitMb`
+are applied when the tunnel starts - reconnect after changing them:
+
+```dart
+await singBox.updateSetting(
+  SingBoxSettings.keyOomKiller,
+  SingBoxOomKiller.reportOnly, // only write out-of-memory reports
+);
+await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 300);
+```
+
+| `SingBoxOomKiller` | Behaviour |
+| --- | --- |
+| `platformDefault` | iOS: `enabled` (the Network Extension is killed above ~50 MB). Android: `off`, like sing-box-for-android |
+| `off` | No monitoring, no Go memory limit |
+| `reportOnly` | Monitors and writes reports (`getCoreReports()`), never closes connections |
+| `enabled` | Monitors, resets the network at the limit and writes reports |
+
+`memoryLimitMb` (`0` = default) sets the limit; the Go garbage collector
+targets 80 % of it. Android without a limit reacts to low available system
+memory. iOS: the monitor of the extension always uses the system limit
+(50 MB), a different value only moves the garbage collector target.
 
 ### Error handling
 
@@ -460,6 +712,7 @@ Every failure is a `SingBoxException` with a `code`:
 | `SingBoxServiceNotRunningException` | The operation needs a running tunnel |
 | `SingBoxUnsupportedException` | Not available on this platform |
 | `SingBoxNotInitializedException` | `initialize()` was not called |
+| `SingBoxSubscriptionException` | A subscription could not be downloaded or had no supported servers |
 
 Runtime failures that stop the tunnel are reported in
 `SingBoxConnectionState.error`.
@@ -509,6 +762,76 @@ in-memory implementation.
 `ssr://` (ShadowsocksR), XHTTP and mKCP transports are not supported by
 sing-box; such links fail with a `FormatException` that says so.
 
+## Supported subscription formats
+
+`SingBoxShareLink.parseSubscription()`, `importServerConfigs()` and
+`addSubscription()` detect the format automatically:
+
+| Format | Notes |
+| --- | --- |
+| Share links | One per line, plain or base64 (standard or URL-safe, also per line) |
+| sing-box JSON | A complete configuration (its proxy outbounds and endpoints are taken) or an outbound array |
+| SIP008 | Shadowsocks `{"servers": [...]}` |
+| Clash / mihomo YAML | The `proxies` list; `proxy-groups`, `rules` and `dns` are ignored |
+
+Clash / mihomo proxy types and options:
+
+| `type` | Converted options |
+| --- | --- |
+| `ss` | ciphers incl. 2022, `plugin: obfs` / `v2ray-plugin` (websocket), `udp-over-tcp` |
+| `vmess` | `cipher`, `alterId`, `tls`, `servername`, `global-padding`, `authenticated-length`, `packet-encoding` |
+| `vless` | `flow: xtls-rprx-vision`, `tls`, `reality-opts`, `packet-encoding` |
+| `trojan` | `sni`, `alpn` |
+| `hysteria` | `auth-str`, `obfs`, `up` / `down`, `ports`, receive windows (protocol `udp` only) |
+| `hysteria2` | `password`, `ports` + `hop-interval`, `obfs: salamander`, `up` / `down` |
+| `tuic` | v5 `uuid` + `password`, `congestion-controller`, `udp-relay-mode`, `reduce-rtt`, `heartbeat-interval` |
+| `wireguard` | `ip`, `ipv6`, keys, `reserved`, `mtu`, `peers` |
+| `socks5`, `http` | credentials; `tls` for `http` |
+| `anytls` | `password`, idle session options |
+| `ssh` | `username`, `password`, `private-key`, `host-key` |
+
+Common options: `network` `ws` (`ws-opts`, early data, `v2ray-http-upgrade`),
+`grpc`, `h2`, `http` (HTTP obfuscation); `skip-cert-verify`, `alpn`,
+`client-fingerprint` (uTLS), `smux`, `tfo`. Proxies sing-box cannot express
+are skipped: `ssr`, `snell`, `mieru`, TUIC v4, XHTTP and mKCP transports,
+`shadow-tls` / `restls` plugins, VLESS encryption, AmneziaWG and
+`dialer-proxy` chains.
+
+## sing-box-lx core
+
+Instead of the official core an app can link
+[sing-box-lx](https://github.com/Leadaxe/sing-box-lx), a fork of the same
+sing-box version with client extras for current Xray and AmneziaWG servers:
+the XHTTP transport, AmneziaWG 2.0 / 3.x, MASQUE (Cloudflare WARP),
+TrustTunnel, the post-quantum VLESS `encryption` and REALITY key share,
+`chain` outbounds, round-robin balancing, DNS server groups and idle-suspend
+of WireGuard endpoints. The core is chosen when the app is built, in the
+app's `pubspec.yaml`:
+
+```yaml
+sing_box:
+  core: lx   # standard (default) or lx
+```
+
+The environment variable `SING_BOX_CORE` (or the Gradle property
+`singBox.core`) overrides it. iOS with Swift Package Manager (the default
+since Flutter 3.44) cannot read the app's `pubspec.yaml`: build with
+`SING_BOX_CORE=lx flutter build ios` (or start Xcode from a shell with that
+variable); CocoaPods builds read the `pubspec.yaml`. After switching the core
+on iOS run `flutter clean` and delete `~/Library/Developer/Xcode/DerivedData/
+Runner-*`, otherwise Xcode keeps the other core's precompiled module. At runtime `SingBox.instance.core` tells which
+core runs and `supports(SingBoxCoreFeature.xhttp)` checks a feature; members
+that need the lx core live in `SingBoxExtended.instance` (the same object as
+`SingBox.instance`) and throw a `SingBoxUnsupportedException` ("requires the
+sing-box-lx core") on the standard core.
+
+Status: the lx libbox is not published yet, build it with
+`scripts/build_libbox.sh android apple --core lx --install`. The plugin's
+whole Android end-to-end suite passes on both cores; on iOS the simulator
+checks (no tunnel there) pass with both cores, with SwiftPM and CocoaPods. A
+running lx tunnel on an iPhone is not tested yet: the Network Extension has
+a ~50 MB memory limit and the lx core is ~5 % larger.
+
 ## Building libbox yourself
 
 ```bash
@@ -520,7 +843,9 @@ SagerNet's `gomobile` and builds `build/libbox/libbox.aar` and
 `build/libbox/Libbox.xcframework(.zip)` with SHA-256 files. `--install` copies
 them into the plugin so local builds skip the download. Requirements: Go 1.25+,
 Android SDK + NDK, JDK 17/21, Xcode. Set `LIBBOX_TAGS` to change the compiled
-features.
+features. `--core lx` builds the sing-box-lx core (version from
+`LIBBOX_LX_VERSION`) into `build/libbox-lx/`; `--install` then puts it at
+`android/libs/libbox-lx.aar` and `ios/sing_box/Frameworks/lx/`.
 
 ### Using your own libbox build
 
@@ -546,7 +871,7 @@ features.
   *Thin Binary* in the Runner build phases.
 - **iOS: the extension is killed under load** - Network Extensions are limited
   to about 50 MB of memory. The bundled core is built for low memory use;
-  avoid huge rule-sets and keep `disableMemoryLimit` off.
+  avoid huge rule-sets and keep `oomKiller` at `platformDefault` or `enabled`.
 - **The first build is slow** - the native library is downloaded once and
   cached.
 
@@ -558,7 +883,9 @@ features.
   the notices (see [License](#license)).
 - **Google Play**: apps that use `VpnService` must have VPN as their core
   functionality and fill in the VPN declaration and the foreground service
-  declaration (`systemExempted`) in the Play Console.
+  declaration (`systemExempted`) in the Play Console. Apps that declare
+  `SingBoxProxyService` for the proxy-only mode also describe the
+  `specialUse` foreground service there.
 - **App Store**: VPN apps must be published by a developer enrolled as an
   organization (App Review Guideline 5.4) and need the Network Extension
   entitlement for both the app and the extension.

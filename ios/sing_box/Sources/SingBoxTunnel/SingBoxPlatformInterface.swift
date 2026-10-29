@@ -1,6 +1,5 @@
 import Foundation
 import Libbox
-import Network
 import NetworkExtension
 import os
 import UserNotifications
@@ -16,9 +15,9 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
 
     private unowned let tunnel: SingBoxPacketTunnelProvider
     private var networkSettings: NEPacketTunnelNetworkSettings?
-    private var pathMonitor: NWPathMonitor?
-    private var lastNetworkPath: String?
-    private let monitorQueue = DispatchQueue(label: "sing_box.path-monitor")
+    /// The core's default interface monitor; also tells `pingServer` which
+    /// physical interface to use.
+    let interfaceMonitor = SingBoxInterfaceMonitor()
 
     init(_ tunnel: SingBoxPacketTunnelProvider) {
         self.tunnel = tunnel
@@ -26,9 +25,7 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
 
     func reset() {
         networkSettings = nil
-        pathMonitor?.cancel()
-        pathMonitor = nil
-        lastNetworkPath = nil
+        interfaceMonitor.close()
     }
 
     private static func error(_ message: String) -> NSError {
@@ -50,6 +47,14 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
         guard let ret0_ else {
             throw Self.error("missing return pointer")
         }
+
+        // Route overrides of sing-box-for-apple, set with setServiceOptions.
+        let serviceOptions = tunnel.paths?.defaults.dictionary(forKey: SingBoxKeys.serviceOptions) ?? [:]
+        let excludeDefaultRoute = (serviceOptions["excludeDefaultRoute"] as? NSNumber)?.boolValue ?? false
+        let noDefaultRoute = (serviceOptions["noDefaultRoute"] as? NSNumber)?.boolValue ?? false
+        let excludeAPNsRoute = (serviceOptions["excludeAPNsRoute"] as? NSNumber)?.boolValue ?? false
+        // The system proxy switch (`setSystemProxyEnabled`), on by default.
+        let systemProxyEnabled = (tunnel.paths?.defaults.object(forKey: SingBoxKeys.systemProxyEnabled) as? NSNumber)?.boolValue ?? true
 
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         if options.getAutoRoute() {
@@ -82,13 +87,28 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
                 }
             }
             if ipv4Routes.isEmpty {
-                ipv4Routes.append(NEIPv4Route.default())
+                if noDefaultRoute {
+                    // 1.0.0.0/8, 2.0.0.0/7, … 128.0.0.0/1
+                    for shift in 0 ..< 8 {
+                        let first = 1 << shift
+                        ipv4Routes.append(NEIPv4Route(destinationAddress: "\(first).0.0.0", subnetMask: "\(256 - first).0.0.0"))
+                    }
+                } else {
+                    ipv4Routes.append(NEIPv4Route.default())
+                }
             }
             if let iterator = options.getInet4RouteExcludeAddress() {
                 while iterator.hasNext() {
                     guard let prefix = iterator.next() else { continue }
                     ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: prefix.address(), subnetMask: prefix.mask()))
                 }
+            }
+            if excludeDefaultRoute {
+                // Hides the VPN icon in the status bar (sing-box-for-apple).
+                ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: "0.0.0.0", subnetMask: "255.255.255.254"))
+            }
+            if excludeAPNsRoute {
+                ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: "17.0.0.0", subnetMask: "255.0.0.0"))
             }
             ipv4Settings.includedRoutes = ipv4Routes
             ipv4Settings.excludedRoutes = ipv4ExcludeRoutes
@@ -115,13 +135,24 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
                 }
             }
             if ipv6Routes.isEmpty {
-                ipv6Routes.append(NEIPv6Route.default())
+                if noDefaultRoute {
+                    // 100::/8, 200::/7, … 8000::/1
+                    for prefix in 1 ... 8 {
+                        let first = String(0x100 << (8 - prefix), radix: 16)
+                        ipv6Routes.append(NEIPv6Route(destinationAddress: "\(first)::", networkPrefixLength: NSNumber(value: prefix)))
+                    }
+                } else {
+                    ipv6Routes.append(NEIPv6Route.default())
+                }
             }
             if let iterator = options.getInet6RouteExcludeAddress() {
                 while iterator.hasNext() {
                     guard let prefix = iterator.next() else { continue }
                     ipv6ExcludeRoutes.append(NEIPv6Route(destinationAddress: prefix.address(), networkPrefixLength: NSNumber(value: prefix.prefix())))
                 }
+            }
+            if excludeDefaultRoute {
+                ipv6ExcludeRoutes.append(NEIPv6Route(destinationAddress: "::", networkPrefixLength: 127))
             }
             ipv6Settings.includedRoutes = ipv6Routes
             ipv6Settings.excludedRoutes = ipv6ExcludeRoutes
@@ -144,9 +175,12 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
             let proxyServer = NEProxyServer(address: options.getHTTPProxyServer(), port: Int(options.getHTTPProxyServerPort()))
             proxySettings.httpServer = proxyServer
             proxySettings.httpsServer = proxyServer
-            proxySettings.httpEnabled = true
-            proxySettings.httpsEnabled = true
-            let bypassDomains = options.getHTTPProxyBypassDomain()?.toArray() ?? []
+            proxySettings.httpEnabled = systemProxyEnabled
+            proxySettings.httpsEnabled = systemProxyEnabled
+            var bypassDomains = options.getHTTPProxyBypassDomain()?.toArray() ?? []
+            if excludeAPNsRoute, !bypassDomains.contains("push.apple.com") {
+                bypassDomains.append("push.apple.com")
+            }
             if !bypassDomains.isEmpty {
                 proxySettings.exceptionList = bypassDomains
             }
@@ -186,121 +220,15 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
         guard let listener else {
             return
         }
-        pathMonitor?.cancel()
-        let monitor = NWPathMonitor()
-        pathMonitor = monitor
-        lastNetworkPath = nil
-        let semaphore = DispatchSemaphore(value: 0)
-        var signaled = false
-        monitor.pathUpdateHandler = { [weak self] path in
-            self?.onPathUpdate(listener, path)
-            if !signaled {
-                signaled = true
-                semaphore.signal()
-            }
-        }
-        monitor.start(queue: monitorQueue)
-        // libbox expects the first default interface before returning.
-        _ = semaphore.wait(timeout: .now() + 5)
-    }
-
-    private func onPathUpdate(_ listener: LibboxInterfaceUpdateListenerProtocol, _ path: Network.NWPath) {
-        let description = describe(path)
-        listener.updateNetworkPath(description)
-        if description == lastNetworkPath {
-            return
-        }
-        lastNetworkPath = description
-        guard path.status != .unsatisfied, let defaultInterface = path.availableInterfaces.first else {
-            listener.updateDefaultInterface("", interfaceIndex: -1, isExpensive: false, isConstrained: false)
-            return
-        }
-        // libbox resets connections when the default interface changes
-        // (Wi-Fi <-> cellular).
-        listener.updateDefaultInterface(
-            defaultInterface.name,
-            interfaceIndex: Int32(defaultInterface.index),
-            isExpensive: path.isExpensive,
-            isConstrained: path.isConstrained
-        )
-    }
-
-    private func describe(_ path: Network.NWPath) -> String {
-        var components: [String] = []
-        switch path.status {
-        case .satisfied:
-            components.append("satisfied")
-        case .unsatisfied:
-            components.append("unsatisfied")
-        case .requiresConnection:
-            components.append("requiresConnection")
-        @unknown default:
-            components.append("unknown")
-        }
-        if !path.availableInterfaces.isEmpty {
-            components.append("interfaces=" + path.availableInterfaces.map { "\($0.name)#\($0.index)/\($0.type)" }.joined(separator: ","))
-        }
-        if !path.gateways.isEmpty {
-            components.append("gateways=" + path.gateways.map { "\($0)" }.sorted().joined(separator: ","))
-        }
-        if path.supportsIPv4 { components.append("ipv4") }
-        if path.supportsIPv6 { components.append("ipv6") }
-        if path.supportsDNS { components.append("dns") }
-        if path.isExpensive { components.append("expensive") }
-        if path.isConstrained { components.append("constrained") }
-        return components.joined(separator: " ")
+        interfaceMonitor.start(listener)
     }
 
     func closeDefaultInterfaceMonitor(_: LibboxInterfaceUpdateListenerProtocol?) throws {
-        pathMonitor?.cancel()
-        pathMonitor = nil
-        lastNetworkPath = nil
+        interfaceMonitor.close()
     }
 
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        guard let pathMonitor else {
-            throw Self.error("path monitor not started")
-        }
-        let path = pathMonitor.currentPath
-        if path.status == .unsatisfied {
-            return NetworkInterfaceIterator([])
-        }
-        var interfaces: [LibboxNetworkInterface] = []
-        for item in path.availableInterfaces {
-            let interface = LibboxNetworkInterface()
-            interface.name = item.name
-            interface.index = Int32(item.index)
-            switch item.type {
-            case .wifi:
-                interface.type = LibboxInterfaceTypeWIFI
-            case .cellular:
-                interface.type = LibboxInterfaceTypeCellular
-            case .wiredEthernet:
-                interface.type = LibboxInterfaceTypeEthernet
-            default:
-                interface.type = LibboxInterfaceTypeOther
-            }
-            interfaces.append(interface)
-        }
-        return NetworkInterfaceIterator(interfaces)
-    }
-
-    private final class NetworkInterfaceIterator: NSObject, LibboxNetworkInterfaceIteratorProtocol {
-        private var iterator: IndexingIterator<[LibboxNetworkInterface]>
-        private var current: LibboxNetworkInterface?
-
-        init(_ array: [LibboxNetworkInterface]) {
-            iterator = array.makeIterator()
-        }
-
-        func hasNext() -> Bool {
-            current = iterator.next()
-            return current != nil
-        }
-
-        func next() -> LibboxNetworkInterface? {
-            current
-        }
+        try interfaceMonitor.interfaces()
     }
 
     // MARK: - Environment
@@ -457,6 +385,8 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
     }
 
     func setSystemProxyEnabled(_ isEnabled: Bool) throws {
+        // Remembered for later sessions.
+        tunnel.paths?.defaults.set(isEnabled, forKey: SingBoxKeys.systemProxyEnabled)
         guard let networkSettings,
               let proxySettings = networkSettings.proxySettings,
               proxySettings.httpServer != nil,

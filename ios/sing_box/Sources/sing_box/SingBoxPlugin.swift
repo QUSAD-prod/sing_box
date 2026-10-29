@@ -34,6 +34,9 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         }
         eventChannels.removeAll()
         commandStreams.removeAll()
+        DispatchQueue.global(qos: .utility).async {
+            ProbeCore.shared.stop()
+        }
     }
 
     // MARK: - Event channels
@@ -155,7 +158,12 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         // Service control
         case "start":
             let config = try requireString(args, "config")
-            try await controller.start(config: config, disableMemoryLimit: args.bool("disableMemoryLimit") ?? false)
+            let legacyOff = args.bool("disableMemoryLimit") ?? false
+            try await controller.start(
+                config: config,
+                oomKiller: args.string("oomKiller") ?? (legacyOff ? SingBoxKeys.oomKillerOff : SingBoxKeys.oomKillerPlatformDefault),
+                memoryLimit: args.int64("memoryLimit") ?? 0
+            )
             return nil
         case "stop":
             try await controller.stop()
@@ -183,6 +191,34 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
             let tag = try requireString(args, "tag")
             try await command { try $0.urlTest(tag) }
             return nil
+
+        // Latency measurements
+        case "startProbe":
+            let config = try requireString(args, "config")
+            try await runInBackground { try ProbeCore.shared.start(config: config) }
+            return nil
+        case "stopProbe":
+            try await runInBackground { ProbeCore.shared.stop() }
+            return nil
+        case "pingServer":
+            let name = try requireString(args, "method")
+            let host = try requireString(args, "host")
+            let port = args.int("port")
+            let timeoutMs = args.int("timeoutMs") ?? 5000
+            let method: SingBoxNativePing.Method
+            do {
+                method = try SingBoxNativePing.method(name, port: port)
+            } catch {
+                throw PluginError.invalidArgument(error.localizedDescription)
+            }
+            // While the tunnel runs the app's sockets and DNS go through it.
+            if controller.isActive {
+                return await controller.ping(method: name, host: host, port: port, timeoutMs: timeoutMs)
+            }
+            return try await runInBackground {
+                SingBoxNativePing.ping(method, host: host, port: port, timeoutMs: timeoutMs)
+            }
+
         case "setClashMode":
             let mode = try requireString(args, "mode")
             try await command { try $0.setClashMode(mode) }
@@ -193,6 +229,15 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
             return nil
         case "closeAllConnections":
             try await command { try $0.closeConnections() }
+            return nil
+        case "getSystemProxyStatus":
+            return try await commandResult { client -> Any? in
+                let status = try client.getSystemProxyStatus()
+                return ["available": status.available, "enabled": status.enabled]
+            }
+        case "setSystemProxyEnabled":
+            let enabled = args.bool("enabled") ?? false
+            try await command { try $0.setSystemProxyEnabled(enabled) }
             return nil
         case "clearLogs":
             try await command { try $0.clearLogs() }
@@ -229,7 +274,9 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
         "requestNotificationPermission", "openVpnSettings",
         "start", "stop", "reload", "getStatus", "getStartedAt", "getLastConfig", "setServiceOptions",
         "selectOutbound", "urlTest", "setClashMode", "closeConnection", "closeAllConnections",
-        "clearLogs", "setGroupExpand", "storageRead", "storageWrite",
+        "getSystemProxyStatus", "setSystemProxyEnabled",
+        "clearLogs", "setGroupExpand", "startProbe", "stopProbe", "pingServer",
+        "storageRead", "storageWrite",
     ]
 
     private func requireString(_ args: [String: Any], _ key: String) throws -> String {
@@ -320,16 +367,24 @@ public class SingBoxPlugin: NSObject, FlutterPlugin {
 
     @MainActor
     private func command(_ work: @escaping (LibboxCommandClient) throws -> Void) async throws {
+        _ = try await commandResult { client -> Any? in
+            try work(client)
+            return nil
+        }
+    }
+
+    @MainActor
+    private func commandResult(_ work: @escaping (LibboxCommandClient) throws -> Any?) async throws -> Any? {
         guard controller?.isActive == true else {
             throw PluginError.serviceNotRunning()
         }
         do {
-            try await runInBackground {
+            return try await runInBackground {
                 guard let client = LibboxNewStandaloneCommandClient() else {
                     throw SingBoxError("cannot create command client")
                 }
                 defer { try? client.disconnect() }
-                try work(client)
+                return try work(client)
             }
         } catch {
             throw PluginError.commandFailed(error.localizedDescription)

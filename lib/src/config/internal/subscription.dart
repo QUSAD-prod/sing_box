@@ -4,6 +4,7 @@
 import 'dart:convert';
 
 import '../outbound.dart';
+import 'clash.dart';
 import 'json_utils.dart';
 import 'link_parser.dart';
 import 'uri_parts.dart';
@@ -14,6 +15,7 @@ List<SingBoxOutbound> parseSubscriptionContent(String content) {
   if (text.isEmpty) return [];
   final fromJson = _tryJson(text);
   if (fromJson != null) return _uniqueTags(fromJson);
+  if (isClashYaml(text)) return _uniqueTags(parseClashProxies(text));
   if (!text.contains('://')) {
     final decoded = tryDecodeBase64(text);
     if (decoded != null) {
@@ -144,7 +146,8 @@ void _sip008(List<dynamic> servers, List<SingBoxOutbound> result) {
           plugin == 'simple-obfs' ||
           plugin == 'v2ray-plugin') ...{
         'plugin': plugin == 'simple-obfs' ? 'obfs-local' : plugin,
-        'plugin_opts': ?readString(server['plugin_opts']),
+        if (readString(server['plugin_opts']) case final opts?)
+          'plugin_opts': opts,
       },
     };
     if (plugin != null && json['plugin'] == null) continue;

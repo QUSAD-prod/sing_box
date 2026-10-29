@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/src/config/config.dart';
 
@@ -167,6 +169,7 @@ void main() {
     test('only curated countries get geosite lists', () {
       expect(SingBoxRuleSets.countryRuleSets('ru'), [
         'geosite-category-ru',
+        'geosite-ru-available-only-inside',
         'geoip-ru',
       ]);
       expect(SingBoxRuleSets.countryRuleSets('cn'), ['geosite-cn', 'geoip-cn']);
@@ -176,6 +179,51 @@ void main() {
       ]);
       expect(SingBoxRuleSets.countryRuleSets('de'), ['geoip-de']);
       expect(SingBoxRuleSets.countryRuleSets('nowhere'), isEmpty);
+    });
+
+    test('blocked resource lists per country', () {
+      expect(SingBoxRuleSets.blockedRuleSets(' RU '), [
+        'geosite-ru-blocked',
+        'geoip-ru-blocked',
+      ]);
+      expect(SingBoxRuleSets.blockedRuleSets('cn'), [
+        'geosite-geolocation-!cn',
+      ]);
+      expect(SingBoxRuleSets.blockedRuleSets('de'), isEmpty);
+      expect(SingBoxRuleSets.isSupportedBlockedCountry('ru'), isTrue);
+      expect(SingBoxRuleSets.isSupportedBlockedCountry('ir'), isFalse);
+      // Third-party lists keep their URL whatever the SagerNet templates.
+      expect(
+        SingBoxRuleSets.url(
+          'geoip-ru-blocked',
+          geoipUrl: 'https://m.example/{tag}.srs',
+        ),
+        'https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked.srs',
+      );
+      for (final tags in SingBoxRuleSets.blockedCountryTags.values) {
+        for (final tag in tags) {
+          expect(SingBoxRuleSets.url(tag), endsWith('/$tag.srs'));
+        }
+      }
+    });
+
+    test('GitHub rule-sets have jsDelivr mirrors', () {
+      expect(SingBoxRuleSets.mirrors(SingBoxRuleSets.url('geoip-ru')), [
+        'https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs',
+        'https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-ru.srs',
+      ]);
+      expect(
+        SingBoxRuleSets.mirrors(SingBoxRuleSets.url('geoip-ru-blocked')).first,
+        'https://cdn.jsdelivr.net/gh/runetfreedom/russia-v2ray-rules-dat@release/sing-box/rule-set-geoip/geoip-ru-blocked.srs',
+      );
+      expect(
+        SingBoxRuleSets.mirrors('https://example.com/a/b/c/d.srs'),
+        isEmpty,
+      );
+      expect(
+        SingBoxRuleSets.mirrors('https://raw.githubusercontent.com/a/b'),
+        isEmpty,
+      );
     });
 
     test('remote rule-set objects', () {
@@ -264,8 +312,27 @@ void main() {
         ruleSetUpdateInterval: Duration(hours: 3),
         geoipRuleSetUrl: 'https://m.example/ip/{tag}.srs',
         geositeRuleSetUrl: 'https://m.example/site/{tag}.srs',
+        probeAddress: '',
+        localProxy: SingBoxLocalProxy(
+          listen: '0.0.0.0',
+          port: 7890,
+          systemProxy: true,
+          bypassDomains: ['example.com'],
+          matchDomains: ['example.org'],
+        ),
+        inboundMode: SingBoxInboundMode.proxyOnly,
       );
       expect(SingBoxConfigOptions.fromMap(options.toMap()), options);
+      expect(
+        SingBoxConfigOptions.fromMap(
+          jsonDecode(jsonEncode(options.toMap())) as Map,
+        ),
+        options,
+      );
+      expect(
+        SingBoxLocalProxy.fromMap(const {'port': 70000, 'listen': ''}),
+        const SingBoxLocalProxy(),
+      );
       expect(
         SingBoxConfigOptions.fromMap(options.toMap()).hashCode,
         options.hashCode,
@@ -290,8 +357,11 @@ void main() {
 
     test('SingBoxRoutingRules round trips through maps', () {
       const rules = SingBoxRoutingRules(
+        mode: SingBoxRoutingMode.proxyListed,
         bypassApps: ['a.b'],
         proxyApps: ['c.d'],
+        proxyDomains: ['y.com'],
+        proxySubnets: ['192.0.2.0/24'],
         bypassDomains: ['x.com'],
         bypassSubnets: ['10.0.0.0/8'],
         blockedApps: ['e.f'],
@@ -299,9 +369,63 @@ void main() {
         dnsServers: ['1.1.1.1'],
         bypassLan: false,
         bypassCountries: ['ru'],
+        blockedInCountries: ['ru'],
         blockAds: true,
+        blockQuic: true,
+        bittorrentDirect: true,
+        customRules: [
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.block,
+            domains: ['z.com'],
+          ),
+        ],
+        ipVersion: SingBoxIpVersion.ipv4,
       );
       expect(SingBoxRoutingRules.fromMap(rules.toMap()), rules);
+      expect(
+        SingBoxRoutingRules.fromMap(
+          jsonDecode(jsonEncode(rules.toMap())) as Map,
+        ),
+        rules,
+      );
+      expect(rules.toMap()['ipVersion'], 'ipv4');
+      expect(rules.toMap()['mode'], 'proxyListed');
+      expect(rules.copyWith(ipVersion: SingBoxIpVersion.dual), isNot(rules));
+      expect(rules.copyWith(mode: SingBoxRoutingMode.proxyAll), isNot(rules));
+      expect(rules.copyWith(proxyDomains: const []), isNot(rules));
+      expect(rules.copyWith(blockedInCountries: const []), isNot(rules));
+      expect(rules.copyWith(blockQuic: false), isNot(rules));
+      expect(rules.copyWith(bittorrentDirect: false), isNot(rules));
+      expect(rules.copyWith(customRules: const []), isNot(rules));
+      // Custom rules without a valid action are dropped.
+      expect(
+        SingBoxRoutingRules.fromMap({
+          'customRules': [
+            {
+              'action': 'teleport',
+              'domains': ['x.com'],
+            },
+            'not a map',
+            {
+              'action': 'direct',
+              'domains': ['x.com'],
+            },
+          ],
+        }).customRules,
+        const [
+          SingBoxRoutingRule(
+            action: SingBoxRuleAction.direct,
+            domains: ['x.com'],
+          ),
+        ],
+      );
+      // 1.0 maps without the new keys keep their meaning.
+      expect(
+        SingBoxRoutingRules.fromMap(const {
+          'bypassCountries': ['ru'],
+        }),
+        const SingBoxRoutingRules(bypassCountries: ['ru']),
+      );
       expect(
         SingBoxRoutingRules.fromMap(rules.toMap()).hashCode,
         rules.hashCode,
@@ -313,6 +437,76 @@ void main() {
       (rules.toMap()['bypassApps'] as List).add('mutated');
       expect(rules.bypassApps, ['a.b']);
     });
+  });
+
+  test('SingBoxRoutingRule round trips through maps', () {
+    const rule = SingBoxRoutingRule(
+      action: SingBoxRuleAction.proxy,
+      name: 'Streaming',
+      enabled: false,
+      domains: ['a.com'],
+      domainSuffixes: ['b.com'],
+      domainKeywords: ['c'],
+      domainRegexes: [r'^d\.com$'],
+      ipCidrs: ['192.0.2.0/24'],
+      ports: ['443', '1000-2000'],
+      packages: ['e.f'],
+      ruleSets: ['geosite-youtube'],
+      network: SingBoxRuleNetwork.udp,
+      protocols: ['quic'],
+    );
+    expect(SingBoxRoutingRule.tryFromMap(rule.toMap()), rule);
+    expect(
+      SingBoxRoutingRule.tryFromMap(rule.toMap())!.hashCode,
+      rule.hashCode,
+    );
+    expect(rule.toMap()['action'], 'proxy');
+    expect(rule.toMap()['network'], 'udp');
+    // Defaults are not written.
+    expect(const SingBoxRoutingRule(action: SingBoxRuleAction.direct).toMap(), {
+      'action': 'direct',
+    });
+    expect(
+      SingBoxRoutingRule.tryFromMap(const {
+        'domains': ['x'],
+      }),
+      isNull,
+    );
+    expect(
+      SingBoxRoutingRule.tryFromMap(const {
+        'action': 'BLOCK',
+        'ports': [25, '465', true],
+        'network': 'sctp',
+      }),
+      const SingBoxRoutingRule(
+        action: SingBoxRuleAction.block,
+        ports: ['25', '465'],
+      ),
+    );
+    expect(rule.copyWith(clearNetwork: true).network, isNull);
+    expect(rule.copyWith(enabled: true), isNot(rule));
+    expect(rule.copyWith(), rule);
+  });
+
+  test('SingBoxRoutingMode.fromName', () {
+    expect(
+      SingBoxRoutingMode.fromName('proxylisted'),
+      SingBoxRoutingMode.proxyListed,
+    );
+    expect(
+      SingBoxRoutingMode.fromName('proxyAll'),
+      SingBoxRoutingMode.proxyAll,
+    );
+    expect(SingBoxRoutingMode.fromName(null), SingBoxRoutingMode.proxyAll);
+    expect(SingBoxRoutingMode.fromName('direct'), SingBoxRoutingMode.proxyAll);
+  });
+
+  test('SingBoxIpVersion.fromName', () {
+    expect(SingBoxIpVersion.fromName('IPv4'), SingBoxIpVersion.ipv4);
+    expect(SingBoxIpVersion.fromName('ipv6'), SingBoxIpVersion.ipv6);
+    expect(SingBoxIpVersion.fromName('dual'), SingBoxIpVersion.dual);
+    expect(SingBoxIpVersion.fromName(null), SingBoxIpVersion.dual);
+    expect(SingBoxIpVersion.fromName('both'), SingBoxIpVersion.dual);
   });
 
   group('SingBoxOutbound', () {

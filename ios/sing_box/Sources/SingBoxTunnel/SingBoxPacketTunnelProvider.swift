@@ -106,8 +106,18 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override open func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
+        let message = (try? JSONSerialization.jsonObject(with: messageData) as? [String: Any]) ?? [:]
+        let command = message[SingBoxKeys.messageCommand] as? String
+        if command == SingBoxKeys.messagePing {
+            // Measurements take up to their timeout and run concurrently:
+            // not on the serial queue that reloads use.
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                let result = ping(message)
+                completionHandler?(try? JSONSerialization.data(withJSONObject: result))
+            }
+            return
+        }
         queue.async { [self] in
-            let command = (try? JSONSerialization.jsonObject(with: messageData) as? [String: Any])?[SingBoxKeys.messageCommand] as? String
             switch command {
             case SingBoxKeys.messageReload:
                 do {
@@ -119,6 +129,27 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
             default:
                 completionHandler?(Data("unknown message".utf8))
             }
+        }
+    }
+
+    /// `pingServer` sent by the app: measured on the physical interface, so
+    /// it bypasses the tunnel and its DNS.
+    private func ping(_ message: [String: Any]) -> [String: Any] {
+        let name = message["method"] as? String ?? ""
+        let host = message["host"] as? String ?? ""
+        let port = (message["port"] as? NSNumber)?.intValue
+        let timeoutMs = (message["timeoutMs"] as? NSNumber)?.intValue ?? 5000
+        do {
+            let method = try SingBoxNativePing.method(name, port: port)
+            return SingBoxNativePing.ping(
+                method,
+                host: host,
+                port: port,
+                timeoutMs: timeoutMs,
+                interfaceIndex: platformInterface.interfaceMonitor.defaultInterfaceIndex
+            )
+        } catch {
+            return ["success": false, "error": error.localizedDescription]
         }
     }
 
@@ -147,8 +178,15 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
         let providerConfiguration = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration
         let logMaxLines = providerConfiguration?[SingBoxKeys.providerLogMaxLines] as? Int ?? SingBoxKeys.defaultLogMaxLines
         let debug = providerConfiguration?[SingBoxKeys.providerDebug] as? Bool ?? false
-        let disableMemoryLimit = (options?[SingBoxKeys.startOptionDisableMemoryLimit] as? NSNumber)?.boolValue
+        // On-demand and system starts have no options: use the last start's values.
+        let legacyOff = (options?[SingBoxKeys.startOptionDisableMemoryLimit] as? NSNumber)?.boolValue
             ?? paths.defaults.bool(forKey: SingBoxKeys.disableMemoryLimit)
+        let oomKiller = options?[SingBoxKeys.startOptionOomKiller] as? String
+            ?? paths.defaults.string(forKey: SingBoxKeys.oomKiller)
+            ?? (legacyOff ? SingBoxKeys.oomKillerOff : SingBoxKeys.oomKillerPlatformDefault)
+        let memoryLimit = (options?[SingBoxKeys.startOptionMemoryLimit] as? NSNumber)?.int64Value
+            ?? (paths.defaults.object(forKey: SingBoxKeys.memoryLimit) as? NSNumber)?.int64Value
+            ?? 0
 
         // The OOM killer / memory limit keeps the extension below the
         // Network Extension memory limit (like sing-box-for-apple).
@@ -157,9 +195,15 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
             logMaxLines: logMaxLines,
             debug: debug,
             crashReportSource: "NetworkExtension",
-            oomKillerEnabled: !disableMemoryLimit,
+            oomKillerEnabled: oomKiller != SingBoxKeys.oomKillerOff,
+            oomKillerReportOnly: oomKiller == SingBoxKeys.oomKillerReportOnly,
+            oomMemoryLimit: memoryLimit,
+            platformMetadata: networkExtensionMetadata(),
             force: true
         )
+        // Files the memory pressure recorded by the previous session as an
+        // OOM report (`<working>/oom_reports`), like sing-box-for-apple.
+        LibboxPromoteOOMDraft()
 
         var error: NSError?
         let server = LibboxNewCommandServer(platformInterface, platformInterface, &error)
@@ -186,6 +230,23 @@ open class SingBoxPacketTunnelProvider: NEPacketTunnelProvider {
         }
         screenStateObserver = ScreenStateObserver(commandServer: server)
         writeMessage("(packet-tunnel) started", level: 4)
+    }
+
+    private func networkExtensionMetadata() -> [String: Any] {
+        let proto = protocolConfiguration
+        var options: [String: Any] = [
+            "includeAllNetworks": proto.includeAllNetworks,
+            "excludeLocalNetworks": proto.excludeLocalNetworks,
+            "enforceRoutes": proto.enforceRoutes,
+        ]
+        if #available(iOS 16.4, *) {
+            options["excludeAPNs"] = proto.excludeAPNs
+            options["excludeCellularServices"] = proto.excludeCellularServices
+        }
+        if #available(iOS 17.4, *) {
+            options["excludeDeviceCommunication"] = proto.excludeDeviceCommunication
+        }
+        return ["networkExtension": options]
     }
 
     /// Re-reads the configuration file and reloads the running service.

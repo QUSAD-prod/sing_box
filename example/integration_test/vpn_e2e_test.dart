@@ -16,11 +16,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sing_box/sing_box.dart';
 
 const host = String.fromEnvironment('E2E_HOST', defaultValue: '10.0.2.2');
+
+/// The core the example app links (`SING_BOX_CORE=lx` when building).
+const core = String.fromEnvironment('E2E_CORE', defaultValue: 'standard');
 const uuid = 'b831381d-6324-4d53-ad4f-8cda48b30811';
 const probeUrl = 'http://203.0.113.80:18080/probe.txt';
 
@@ -32,10 +36,17 @@ const vlessLink =
 
 final singBox = SingBox.instance;
 
+/// The local proxy of the configuration (`SingBoxLocalProxy` defaults).
+const localProxy = '127.0.0.1:${SingBoxLocalProxy.defaultPort}';
+
+/// Fetches the probe directly (through the TUN while it runs) or through the
+/// HTTP [proxy] (`host:port`).
 Future<String> fetchProbe({
   Duration timeout = const Duration(seconds: 10),
+  String? proxy,
 }) async {
   final client = HttpClient()..connectionTimeout = timeout;
+  if (proxy != null) client.findProxy = (_) => 'PROXY $proxy';
   try {
     final request = await client.getUrl(Uri.parse(probeUrl)).timeout(timeout);
     final response = await request.close().timeout(timeout);
@@ -50,6 +61,20 @@ Future<T> firstWhere<T>(
   bool Function(T) test, {
   Duration timeout = const Duration(seconds: 15),
 }) => stream.firstWhere(test).timeout(timeout);
+
+/// Polls the system proxy status until it is available with [enabled]
+/// (Android reloads the tunnel to apply a change).
+Future<SingBoxSystemProxyStatus> systemProxyStatus({
+  required bool enabled,
+}) async {
+  var status = SingBoxSystemProxyStatus.unavailable;
+  for (var i = 0; i < 30; i++) {
+    status = await singBox.getSystemProxyStatus();
+    if (status.available && status.enabled == enabled) break;
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+  }
+  return status;
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -78,6 +103,7 @@ void main() {
 
   testWidgets('information and validation', (tester) async {
     expect(await singBox.getSingBoxVersion(), contains('1.14'));
+    expect(singBox.core, SingBoxCore.values.byName(core));
     expect(await singBox.getPlatformVersion(), startsWith('Android'));
     expect(await singBox.hasVpnPermission(), isTrue);
     expect(
@@ -90,11 +116,15 @@ void main() {
     );
   });
 
-  testWidgets('TCP ping of profiles without the tunnel', (tester) async {
+  testWidgets('latency of profiles without the tunnel', (tester) async {
     final servers = [
       SingBoxServerConfig.fromOutbound(
         SingBoxShareLink.parse(ssLink).json,
         id: 'ss',
+      ),
+      SingBoxServerConfig.fromOutbound(
+        SingBoxShareLink.parse(vlessLink).json,
+        id: 'vless',
       ),
       SingBoxServerConfig.fromOutbound({
         'type': 'trojan',
@@ -104,13 +134,49 @@ void main() {
         'password': 'x',
       }, id: 'closed'),
     ];
-    final results = {
-      for (final r in await singBox.pingServers(servers).toList())
+    Future<Map<String?, SingBoxPingResult>> measure(
+      SingBoxPingMethod method,
+    ) async => {
+      for (final r
+          in await singBox.pingServers(servers, method: method).toList())
         r.serverId: r,
     };
-    expect(results['ss']!.success, isTrue, reason: '${results['ss']}');
-    expect(results['ss']!.method, SingBoxPingMethod.tcp);
-    expect(results['closed']!.success, isFalse);
+
+    // HTTP through each server, by a probe core in the app: probe.txt is only
+    // reachable through the e2e servers.
+    for (final method in [
+      SingBoxPingMethod.proxyHead,
+      SingBoxPingMethod.proxyGet,
+    ]) {
+      final results = await measure(method);
+      for (final id in ['ss', 'vless']) {
+        expect(results[id]!.success, isTrue, reason: '${results[id]}');
+        expect(results[id]!.method, method);
+        expect(results[id]!.statusCode, 200);
+        expect(results[id]!.url, probeUrl);
+      }
+      expect(results['closed']!.success, isFalse);
+    }
+
+    final tcp = await measure(SingBoxPingMethod.tcp);
+    expect(tcp['ss']!.success, isTrue, reason: '${tcp['ss']}');
+    expect(tcp['ss']!.method, SingBoxPingMethod.tcp);
+    expect(tcp['closed']!.success, isFalse);
+
+    // Unprivileged ICMP sockets work (the emulator network may not forward
+    // ICMP to the host, so only the device's own address is required).
+    final loopback = await singBox.ping(
+      SingBoxServerConfig.fromOutbound({
+        'type': 'socks',
+        'tag': 'local',
+        'server': '127.0.0.1',
+        'server_port': 1,
+      }, id: 'local'),
+      method: SingBoxPingMethod.icmp,
+    );
+    expect(loopback.success, isTrue, reason: '$loopback');
+    final icmp = await measure(SingBoxPingMethod.icmp);
+    debugPrint('ICMP to $host: ${icmp['ss']}');
   });
 
   testWidgets('connects and carries traffic through the proxy', (tester) async {
@@ -154,8 +220,29 @@ void main() {
     );
     expect(proxy.items.map((i) => i.tag), ['auto', 'E2E SS', 'E2E VLESS']);
 
+    // Through the probe route of the running tunnel (no local port).
     final ping = await singBox.pingOutbound('E2E SS');
     expect(ping.success, isTrue, reason: '$ping');
+    expect(ping.statusCode, 200, reason: '$ping');
+    final get = await singBox.pingOutbound(
+      'E2E VLESS',
+      method: SingBoxPingMethod.proxyGet,
+    );
+    expect(get.success, isTrue, reason: '$get');
+    expect(get.method, SingBoxPingMethod.proxyGet);
+    final running = await singBox.pingServers([
+      SingBoxServerConfig.fromOutbound(
+        SingBoxShareLink.parse(ssLink).json,
+        id: 'ss',
+      ),
+    ]).toList();
+    expect(running.single.success, isTrue, reason: '$running');
+    // TCP bypasses the tunnel (protected socket, underlying network).
+    final tcp = await singBox.pingOutbound(
+      'E2E SS',
+      method: SingBoxPingMethod.tcp,
+    );
+    expect(tcp.success, isTrue, reason: '$tcp');
     final group = await singBox.testGroup(SingBoxConfigBuilder.autoTag);
     expect(group, isNotNull);
 
@@ -257,9 +344,11 @@ void main() {
   });
 
   testWidgets('downloads rule-sets on the first start', (tester) async {
+    // Iran has no third-party lists with fixed URLs: both rule-sets come from
+    // the local server (integration_test/server/rules).
     await singBox.connect(
       ssLink,
-      rules: const SingBoxRoutingRules(bypassCountries: ['ru']),
+      rules: const SingBoxRoutingRules(bypassCountries: ['ir']),
       options: const SingBoxConfigOptions(
         urlTestUrl: probeUrl,
         geoipRuleSetUrl: 'http://$host:18080/{tag}.srs',
@@ -267,32 +356,155 @@ void main() {
       ),
     );
     expect(singBox.isConnected, isTrue);
+    final ruleSets = {for (final s in await singBox.getRuleSets()) s.tag: s};
+    for (final tag in ['geosite-category-ir', 'geoip-ir']) {
+      expect(ruleSets[tag]?.isAvailable, isTrue, reason: '${ruleSets[tag]}');
+    }
     expect(await fetchProbe(), 'sing-box-e2e-ok');
     await singBox.disconnect();
     await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
   });
 
-  testWidgets('reports the core error when the start fails', (tester) async {
-    // The initial rule-set download fails, which aborts the start.
-    await expectLater(
-      singBox.connect(
-        ssLink,
-        rules: const SingBoxRoutingRules(bypassCountries: ['ru']),
-        options: const SingBoxConfigOptions(
-          geoipRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
-          geositeRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
-        ),
-      ),
-      throwsA(
-        isA<SingBoxStartException>().having(
-          (e) => e.message,
-          'message',
-          contains('rule-set'),
-        ),
+  testWidgets('starts without the rules of unreachable rule-sets', (
+    tester,
+  ) async {
+    // The plugin downloads rule-sets itself: a failed download leaves its
+    // rules out instead of aborting the start (sing-box would abort).
+    await singBox.connect(
+      ssLink,
+      rules: const SingBoxRoutingRules(bypassCountries: ['de']),
+      options: const SingBoxConfigOptions(
+        urlTestUrl: probeUrl,
+        geoipRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
+        geositeRuleSetUrl: 'http://127.0.0.1:1/{tag}.srs',
       ),
     );
+    expect(singBox.isConnected, isTrue);
+    expect(singBox.state.error, isNull);
+    final geoip = (await singBox.getRuleSets()).firstWhere(
+      (s) => s.tag == 'geoip-de',
+    );
+    expect(geoip.isAvailable, isFalse);
+    expect(geoip.lastError, isNotNull);
+    expect(await fetchProbe(), 'sing-box-e2e-ok');
+    await singBox.disconnect();
     await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
-    expect(singBox.state.error, contains('rule-set'));
+  });
+
+  testWidgets('proxy-only mode serves the local proxy without a VPN', (
+    tester,
+  ) async {
+    const proxyOnly = SingBoxConfigOptions(
+      urlTestUrl: probeUrl,
+      inboundMode: SingBoxInboundMode.proxyOnly,
+    );
+    await singBox.connect(ssLink, options: proxyOnly);
+    expect(singBox.isConnected, isTrue);
+    expect(
+      await singBox.getConnectionStatus(),
+      SingBoxConnectionStatus.connected,
+    );
+    // No TUN: only requests sent to the local proxy reach the server.
+    await expectLater(
+      fetchProbe(timeout: const Duration(seconds: 3)),
+      throwsA(anything),
+    );
+    expect(await fetchProbe(proxy: localProxy), 'sing-box-e2e-ok');
+    expect(
+      await singBox.getSystemProxyStatus(),
+      SingBoxSystemProxyStatus.unavailable,
+    );
+
+    // Switching modes restarts in the other Android service.
+    await singBox.connect(ssLink);
+    expect(singBox.isConnected, isTrue);
+    expect(await fetchProbe(), 'sing-box-e2e-ok');
+    await singBox.connect(vlessLink, options: proxyOnly);
+    expect(singBox.isConnected, isTrue);
+    expect(await fetchProbe(proxy: localProxy), 'sing-box-e2e-ok');
+    await expectLater(
+      fetchProbe(timeout: const Duration(seconds: 3)),
+      throwsA(anything),
+    );
+
+    await singBox.disconnect();
+    await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
+    await expectLater(
+      fetchProbe(proxy: localProxy, timeout: const Duration(seconds: 3)),
+      throwsA(anything),
+    );
+  }, skip: !Platform.isAndroid);
+
+  testWidgets('local proxy next to the TUN and the system proxy switch', (
+    tester,
+  ) async {
+    await singBox.connect(
+      ssLink,
+      options: const SingBoxConfigOptions(
+        urlTestUrl: probeUrl,
+        localProxy: SingBoxLocalProxy(systemProxy: true),
+      ),
+    );
+    try {
+      expect(await fetchProbe(), 'sing-box-e2e-ok');
+      expect(await fetchProbe(proxy: localProxy), 'sing-box-e2e-ok');
+      expect(
+        await systemProxyStatus(enabled: true),
+        const SingBoxSystemProxyStatus(available: true, enabled: true),
+      );
+
+      await singBox.setSystemProxyEnabled(false);
+      expect(
+        await systemProxyStatus(enabled: false),
+        const SingBoxSystemProxyStatus(available: true, enabled: false),
+      );
+      expect(singBox.isConnected, isTrue);
+      expect(await fetchProbe(), 'sing-box-e2e-ok');
+    } finally {
+      // The switch is remembered on the device.
+      if (singBox.isConnected) await singBox.setSystemProxyEnabled(true);
+    }
+    expect(
+      await systemProxyStatus(enabled: true),
+      const SingBoxSystemProxyStatus(available: true, enabled: true),
+    );
+    expect(await fetchProbe(), 'sing-box-e2e-ok');
+
+    await singBox.disconnect();
+    await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
+    expect(
+      await singBox.getSystemProxyStatus(),
+      SingBoxSystemProxyStatus.unavailable,
+    );
+  });
+
+  testWidgets('starts with allowBypass and the memory monitor', (tester) async {
+    final saved = await singBox.getSettings();
+    try {
+      for (final oomKiller in [
+        SingBoxOomKiller.enabled,
+        SingBoxOomKiller.reportOnly,
+      ]) {
+        expect(
+          await singBox.saveSettings(
+            saved.copyWith(
+              allowBypass: true,
+              oomKiller: oomKiller,
+              memoryLimitMb: 256,
+            ),
+          ),
+          isTrue,
+        );
+        // Engine options are applied when the tunnel starts.
+        await singBox.connect(ssLink);
+        expect(singBox.isConnected, isTrue, reason: '$oomKiller');
+        expect(await fetchProbe(), 'sing-box-e2e-ok', reason: '$oomKiller');
+        await singBox.disconnect();
+        await singBox.waitForStatus(SingBoxConnectionStatus.disconnected);
+      }
+    } finally {
+      await singBox.saveSettings(saved);
+    }
   });
 
   testWidgets('rapid toggles end in the last requested state', (tester) async {

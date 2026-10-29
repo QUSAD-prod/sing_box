@@ -16,11 +16,45 @@ import 'src/models/log_entry.dart';
 import 'src/models/network_quality.dart';
 import 'src/models/outbound_group.dart';
 import 'src/models/runtime_info.dart';
+import 'src/models/settings.dart';
 import 'src/models/sing_box_notification.dart';
 import 'src/models/stun_result.dart';
+import 'src/models/system_proxy_status.dart';
 import 'src/options.dart';
 
 export 'src/models/runtime_info.dart';
+
+/// Result of [SingBoxPlatform.pingServer].
+class SingBoxNativePingResult {
+  /// Creates a result.
+  const SingBoxNativePingResult({
+    required this.success,
+    this.ping = 0,
+    this.address,
+    this.error,
+  });
+
+  /// Parses the map of the `pingServer` method.
+  factory SingBoxNativePingResult.fromMap(Map<dynamic, dynamic> map) =>
+      SingBoxNativePingResult(
+        success: map['success'] == true,
+        ping: (map['ping'] as num?)?.toInt() ?? 0,
+        address: map['address'] as String?,
+        error: map['error'] as String?,
+      );
+
+  /// Whether the server answered.
+  final bool success;
+
+  /// Latency in milliseconds.
+  final int ping;
+
+  /// The IP address that was measured.
+  final String? address;
+
+  /// Why the measurement failed.
+  final String? error;
+}
 
 /// The interface that platform implementations of `sing_box` must extend.
 ///
@@ -129,7 +163,16 @@ abstract class SingBoxPlatform extends PlatformInterface {
   // ---------------------------------------------------------------------------
 
   /// Starts the tunnel with a complete sing-box [config].
-  Future<void> start(String config, {bool disableMemoryLimit = false}) {
+  ///
+  /// [oomKiller] and [memoryLimit] (bytes, `0` = platform default) configure
+  /// the libbox memory monitor; [disableMemoryLimit] is the pre-1.1.0 form of
+  /// `oomKiller: SingBoxOomKiller.off`.
+  Future<void> start(
+    String config, {
+    bool disableMemoryLimit = false,
+    SingBoxOomKiller oomKiller = SingBoxOomKiller.platformDefault,
+    int memoryLimit = 0,
+  }) {
     throw UnimplementedError('start() has not been implemented.');
   }
 
@@ -177,6 +220,28 @@ abstract class SingBoxPlatform extends PlatformInterface {
     throw UnimplementedError('urlTest() has not been implemented.');
   }
 
+  /// Starts (or replaces) the probe core, a libbox service without TUN in the
+  /// app process that runs [config] for latency tests.
+  Future<void> startProbe(String config) {
+    throw UnimplementedError('startProbe() has not been implemented.');
+  }
+
+  /// Stops the probe core started by [startProbe].
+  Future<void> stopProbe() {
+    throw UnimplementedError('stopProbe() has not been implemented.');
+  }
+
+  /// Measures the TCP handshake (`method: 'tcp'`, needs [port]) or ICMP echo
+  /// (`method: 'icmp'`) latency to [host] outside the tunnel.
+  Future<SingBoxNativePingResult> pingServer({
+    required String method,
+    required String host,
+    int? port,
+    required Duration timeout,
+  }) {
+    throw UnimplementedError('pingServer() has not been implemented.');
+  }
+
   /// Switches the clash mode.
   Future<void> setClashMode(String mode) {
     throw UnimplementedError('setClashMode() has not been implemented.');
@@ -190,6 +255,20 @@ abstract class SingBoxPlatform extends PlatformInterface {
   /// Closes all connections.
   Future<void> closeAllConnections() {
     throw UnimplementedError('closeAllConnections() has not been implemented.');
+  }
+
+  /// State of the system HTTP proxy of the running tunnel.
+  Future<SingBoxSystemProxyStatus> getSystemProxyStatus() {
+    throw UnimplementedError(
+      'getSystemProxyStatus() has not been implemented.',
+    );
+  }
+
+  /// Turns the system HTTP proxy of the running tunnel on or off.
+  Future<void> setSystemProxyEnabled(bool enabled) {
+    throw UnimplementedError(
+      'setSystemProxyEnabled() has not been implemented.',
+    );
   }
 
   /// Clears the log buffer of the core.

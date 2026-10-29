@@ -23,8 +23,8 @@ details of the Android implementation.
 | | |
 | --- | --- |
 | minSdk | 24 |
-| compileSdk | 36 or newer |
-| Android Gradle Plugin | 9.x (built-in Kotlin) |
+| compileSdk | 35 or newer |
+| Android Gradle Plugin | 9.x (built-in Kotlin), or 8.7+ with the Kotlin Android plugin 1.8.22+ (applied by the plugin when built-in Kotlin is off) |
 | JDK for the build | 17 or 21 |
 
 The plugin declares everything it needs in its own manifest:
@@ -40,6 +40,51 @@ The plugin declares everything it needs in its own manifest:
 
 It does **not** declare location or package visibility permissions; add them
 yourself when you need the features below.
+
+## Proxy-only mode (no VPN)
+
+A configuration **without a TUN inbound** runs without the VPN: no VPN
+permission, no VPN key icon, and the core only serves its local proxy
+inbounds. Generate one with
+`SingBoxConfigOptions(inboundMode: SingBoxInboundMode.proxyOnly)` (a `mixed`
+HTTP + SOCKS5 inbound on `127.0.0.1:2080`, see `localProxy`) or connect with
+a complete configuration without `tun`. Apps then use the proxy through their
+own settings (Wi-Fi proxy, browser or app settings).
+
+It runs in `SingBoxProxyService`, a foreground service of the `specialUse`
+type (like the ProxyService of sing-box-for-android). The plugin does **not**
+declare it, so apps that only use the VPN need no `specialUse` declaration on
+Google Play. To use the mode, declare it in your app's
+`android/app/src/main/AndroidManifest.xml` (compileSdk 34+):
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <application>
+        <service
+            android:name="com.qusadprod.sing_box.service.SingBoxProxyService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="proxy" />
+        </service>
+    </application>
+</manifest>
+```
+
+Without it `connect()` throws a `SingBoxUnsupportedException`. Google Play
+asks for a description of the `specialUse` foreground service.
+
+* The notification, the Quick Settings tile, `startOnBoot`, the streams and
+  the commands work as with the VPN.
+* Not available without the VPN: per-app routing, bypassed subnets
+  (`route_exclude_address`), Always-on VPN, `allowBypass`, the system proxy
+  and the latency probe routes (latency tests use sing-box's URL test, TCP and
+  ICMP pings work as usual).
+* Switching between a VPN and a proxy-only configuration restarts the core
+  (`connect()` does it; a `reload` cannot switch).
+* The proxy has no authentication: every app on the device can use it.
 
 ## Per-app routing and package visibility
 
@@ -168,6 +213,24 @@ and mobile data as metered.
 tunnel while it is connected. While it is stopped they test the direct
 connection (the outbound tag is ignored).
 
+## Latency tests and the start
+
+* `connect()` reports `connected` once Android routes the app itself
+  through the VPN (`establish()` returns earlier; a connection opened in
+  between would leave through the underlying network). The service waits at
+  most 3 s and not at all when the app is excluded from the tunnel.
+* While the VPN is stopped, `pingServers()` with a proxy method starts a
+  second libbox service in the app process (no TUN, inbounds on
+  `127.0.0.1`); its sockets are protected from a running VPN.
+* `tcp` / `icmp` use `android.system.Os` sockets: the name is resolved on
+  the underlying network and the sockets are protected while the VPN runs.
+  ICMP uses unprivileged ping sockets (`SOCK_DGRAM`); on the emulator the
+  emulator itself answers, so the numbers are not meaningful there.
+* Rules with `wifi_ssid` / `wifi_bssid` need the location permission
+  (`ACCESS_BACKGROUND_LOCATION` on Android 10+, which the plugin does not
+  declare); without it the core log shows a warning and these rules do not
+  match.
+
 ## App size
 
 libbox adds about 60 MB per ABI (stored uncompressed so it can be memory
@@ -184,6 +247,18 @@ android {
     }
 }
 ```
+
+## sing-box-lx core
+
+`sing_box: core: lx` in the app's `pubspec.yaml` (next to the app's
+`android/` directory), the environment variable `SING_BOX_CORE=lx` or the
+Gradle property `singBox.core=lx` link the sing-box-lx libbox (README
+"sing-box-lx core"). Gradle then reads the `lx.*` keys of
+`android/libbox.properties`, uses `android/libs/libbox-lx.aar` as the local
+copy and compiles `src/core-lx/kotlin` instead of `src/core-standard/kotlin`:
+the lx libbox adds members to its interfaces (`CommandClientHandler
+.writeDNSQuery`), so the classes implementing them get a per-core base class
+there. The lx AAR is ~4 MB larger than the standard one.
 
 ## ProGuard / R8
 

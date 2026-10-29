@@ -145,13 +145,94 @@ void main() {
     expect(speed.uploadMbps, closeTo(10, 0.001));
   });
 
+  test('memory monitor settings', () {
+    const defaults = SingBoxSettings();
+    expect(defaults.oomKiller, SingBoxOomKiller.platformDefault);
+    expect(defaults.memoryLimitMb, 0);
+    expect(defaults.effectiveOomKiller, SingBoxOomKiller.platformDefault);
+
+    final changed = defaults
+        .withValue(SingBoxSettings.keyOomKiller, SingBoxOomKiller.reportOnly)
+        .withValue(SingBoxSettings.keyMemoryLimitMb, 300);
+    expect(changed.oomKiller, SingBoxOomKiller.reportOnly);
+    expect(changed.memoryLimitMb, 300);
+    expect(changed.toMap()[SingBoxSettings.keyOomKiller], 'reportOnly');
+    expect(SingBoxSettings.fromMap(changed.toMap()), changed);
+    expect(
+      defaults.withValue(SingBoxSettings.keyOomKiller, 'enabled').oomKiller,
+      SingBoxOomKiller.enabled,
+    );
+    expect(
+      changed.copyWith(memoryLimitMb: 0),
+      defaults.copyWith(oomKiller: SingBoxOomKiller.reportOnly),
+    );
+
+    for (final (key, value) in [
+      (SingBoxSettings.keyOomKiller, 'sometimes'),
+      (SingBoxSettings.keyOomKiller, true),
+      (SingBoxSettings.keyMemoryLimitMb, -1),
+      (SingBoxSettings.keyMemoryLimitMb, '300'),
+      (SingBoxSettings.keyKillSwitch, 1),
+    ]) {
+      expect(() => defaults.withValue(key, value), throwsArgumentError);
+    }
+
+    // Stored values of an unknown mode or a wrong type fall back to defaults.
+    expect(
+      SingBoxSettings.fromMap({
+        SingBoxSettings.keyOomKiller: 'later',
+        SingBoxSettings.keyMemoryLimitMb: -5,
+      }),
+      defaults,
+    );
+
+    // The deprecated switch still turns the monitor off.
+    expect(
+      SingBoxSettings.fromMap({
+        SingBoxSettings.keyDisableMemoryLimit: true,
+        SingBoxSettings.keyOomKiller: 'enabled',
+      }).effectiveOomKiller,
+      SingBoxOomKiller.off,
+    );
+  });
+
   test('settings round trip and map to service options', () {
-    const settings = SingBoxSettings(killSwitch: true, startOnBoot: true);
+    const settings = SingBoxSettings(
+      killSwitch: true,
+      startOnBoot: true,
+      allowBypass: true,
+    );
     expect(SingBoxSettings.fromMap(settings.toMap()), settings);
     final options = settings.toServiceOptions();
     expect(options.includeAllNetworks, isTrue);
     expect(options.startOnBoot, isTrue);
+    expect(options.toMap()['allowBypass'], isTrue);
+    expect(const SingBoxServiceOptions().toMap()['allowBypass'], isFalse);
     expect(() => settings.withValue('nope', true), throwsArgumentError);
+
+    // The iOS options of sing-box-for-apple reach the native side.
+    var all = const SingBoxSettings();
+    for (final key in [
+      SingBoxSettings.keyEnforceRoutes,
+      SingBoxSettings.keyExcludeCellularServices,
+      SingBoxSettings.keyExcludeDeviceCommunication,
+      SingBoxSettings.keyExcludeDefaultRoute,
+      SingBoxSettings.keyNoDefaultRoute,
+      SingBoxSettings.keyExcludeApnsRoute,
+    ]) {
+      all = all.withValue(key, true);
+    }
+    expect(SingBoxSettings.fromMap(all.toMap()), all);
+    expect(all.copyWith(noDefaultRoute: false), isNot(all));
+    expect(all.toServiceOptions().toMap(), {
+      ...const SingBoxServiceOptions().toMap(),
+      'enforceRoutes': true,
+      'excludeCellularServices': true,
+      'excludeDeviceCommunication': true,
+      'excludeDefaultRoute': true,
+      'noDefaultRoute': true,
+      'excludeAPNsRoute': true,
+    });
   });
 
   test('server config detects complete configs', () {
@@ -248,16 +329,27 @@ void main() {
       address: 'a.com',
       tag: 't',
       serverId: 's',
-      method: SingBoxPingMethod.tcp,
+      method: SingBoxPingMethod.proxyGet,
+      url: 'https://example.com/',
+      statusCode: 204,
     );
     final copy = SingBoxPingResult.fromMap(result.toMap());
     expect(copy.toMap(), result.toMap());
     expect(copy.forServer('x').serverId, 'x');
+    expect(copy.forServer('x').statusCode, 204);
     expect(
       SingBoxPingResult.fromMap(const {}).method,
-      SingBoxPingMethod.urlTest,
+      SingBoxPingMethod.proxyHead,
     );
-    expect(result.toString(), contains('12ms tcp'));
+    // Results stored by 1.0 keep working.
+    expect(
+      SingBoxPingResult.fromMap(const {'method': 'urlTest'}).method,
+      SingBoxPingMethod.proxyHead,
+    );
+    expect(SingBoxPingMethod.fromName('icmp'), SingBoxPingMethod.icmp);
+    expect(SingBoxPingMethod.proxyGet.isProxy, isTrue);
+    expect(SingBoxPingMethod.tcp.isProxy, isFalse);
+    expect(result.toString(), contains('12ms proxyGet'));
   });
 
   test('exceptions map platform codes', () {
@@ -267,5 +359,24 @@ void main() {
       ),
       isA<SingBoxUnsupportedException>(),
     );
+  });
+
+  group('SingBoxCore', () {
+    test('is read from the libbox version', () {
+      expect(SingBoxCore.fromVersion('1.14.4'), SingBoxCore.standard);
+      expect(SingBoxCore.fromVersion(''), SingBoxCore.standard);
+      expect(SingBoxCore.fromVersion('1.14.4-lx.25'), SingBoxCore.lx);
+      expect(
+        const SingBoxRuntimeInfo(singBoxVersion: '1.14.4-lx.25').core,
+        SingBoxCore.lx,
+      );
+    });
+
+    test('only lx has the lx features', () {
+      for (final feature in SingBoxCoreFeature.values) {
+        expect(SingBoxCore.standard.supports(feature), isFalse);
+        expect(SingBoxCore.lx.supports(feature), isTrue);
+      }
+    });
   });
 }

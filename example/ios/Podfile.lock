@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - SingBoxTunnel (0.1.0)
+  - SingBoxTunnel (1.1.0)
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
@@ -14,7 +14,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
-  SingBoxTunnel: e48c61215e12c116882d6fc6b7e8a54a42ddc754
+  SingBoxTunnel: 8c779aae26325eb27e4cec3b2ce92193ab25db72
 
 PODFILE CHECKSUM: eda4e778181882ef5268c5e58abf7cfabaee8dbc
 

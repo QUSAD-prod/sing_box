@@ -86,4 +86,8 @@ extension Dictionary where Key == String, Value == Any {
     func int(_ key: String) -> Int? {
         (self[key] as? NSNumber)?.intValue
     }
+
+    func int64(_ key: String) -> Int64? {
+        (self[key] as? NSNumber)?.int64Value
+    }
 }

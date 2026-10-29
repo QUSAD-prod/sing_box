@@ -18,6 +18,7 @@ class _HomePageState extends State<HomePage> {
   final _singBox = SingBox.instance;
   SingBoxServerConfig? _active;
   SingBoxPingResult? _ping;
+  SingBoxPingMethod _pingMethod = SingBoxPingMethod.proxyHead;
   SingBoxNetworkQuality? _quality;
   bool _busy = false;
   StreamSubscription<SingBoxNetworkQuality>? _qualitySub;
@@ -71,7 +72,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _measurePing() async {
     setState(() => _ping = null);
-    final ping = await _singBox.pingCurrentServer();
+    final ping = await _singBox.pingCurrentServer(method: _pingMethod);
     if (mounted) setState(() => _ping = ping);
   }
 
@@ -118,7 +119,7 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     ListTile(
                       leading: const Icon(Icons.timer_outlined),
-                      title: const Text('Latency (URL test)'),
+                      title: Text('Latency (${_pingMethod.name})'),
                       subtitle: Text(
                         _ping == null
                             ? 'Tap to measure'
@@ -126,9 +127,34 @@ class _HomePageState extends State<HomePage> {
                             ? '${_ping!.ping} ms via ${_ping!.tag}'
                             : _ping!.errorMessage ?? 'Failed',
                       ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.refresh),
-                        onPressed: _measurePing,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          PopupMenuButton<SingBoxPingMethod>(
+                            tooltip: 'Method',
+                            initialValue: _pingMethod,
+                            onSelected: (method) {
+                              setState(() => _pingMethod = method);
+                              _measurePing();
+                            },
+                            itemBuilder: (context) => [
+                              for (final method in const [
+                                SingBoxPingMethod.proxyHead,
+                                SingBoxPingMethod.proxyGet,
+                                SingBoxPingMethod.tcp,
+                                SingBoxPingMethod.icmp,
+                              ])
+                                PopupMenuItem(
+                                  value: method,
+                                  child: Text(method.name),
+                                ),
+                            ],
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh),
+                            onPressed: _measurePing,
+                          ),
+                        ],
                       ),
                     ),
                     const Divider(height: 1),

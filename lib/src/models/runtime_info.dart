@@ -1,4 +1,5 @@
 import 'connection_status.dart';
+import 'core.dart';
 
 /// Information returned by the native side after initialization.
 class SingBoxRuntimeInfo {
@@ -18,8 +19,12 @@ class SingBoxRuntimeInfo {
     );
   }
 
-  /// Version of the bundled sing-box core, e.g. `1.14.4`.
+  /// Version of the bundled sing-box core, e.g. `1.14.4` (sing-box-lx:
+  /// `1.14.4-lx.25`).
   final String singBoxVersion;
+
+  /// The core linked into the app, from [singBoxVersion].
+  SingBoxCore get core => SingBoxCore.fromVersion(singBoxVersion);
 
   /// Tunnel status at initialization time.
   final SingBoxConnectionStatus status;

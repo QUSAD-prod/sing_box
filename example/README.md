@@ -6,8 +6,8 @@ plugin. It exercises most of the API:
 | Page | What it demonstrates |
 | --- | --- |
 | **sing-box VPN** | connect / disconnect, live status with error reasons, traffic speed and totals, latency of the current server, network quality speed test |
-| **Servers** | importing share links and subscriptions, server profiles, connecting to all servers at once, groups with URL test and instant switching |
-| **Routing** | bypass / blocked / proxy-only apps, domains and subnets, bypass LAN and countries, ad blocking, custom DNS |
+| **Servers** | subscriptions by URL (traffic, expiry, update), importing share links, Clash YAML and JSON, server profiles, connecting to all servers at once, groups with URL test and instant switching |
+| **Routing** | IP version (IPv4 + IPv6, IPv4 only, IPv6 only), bypass / blocked / proxy-only apps, domains and subnets, bypass LAN and countries, ad blocking, custom DNS |
 | **Logs** | the live core log buffer |
 | **Tools** | permissions, settings (auto connect, kill switch, start on boot), Always-on VPN settings, Quick Settings tile, clash mode, active connections, STUN NAT test, the running config |
 

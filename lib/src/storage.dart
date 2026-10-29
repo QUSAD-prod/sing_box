@@ -27,6 +27,9 @@ class SingBoxStorage {
   /// Key of the last connect input (used to re-apply rules while connected).
   static const keyLastInput = 'sing_box.last_input';
 
+  /// Key of the subscription list (JSON array of `SingBoxSubscription` maps).
+  static const keySubscriptions = 'sing_box.subscriptions';
+
   /// Reads a raw string.
   Future<String?> readString(String key) => _platform().storageRead(key);
 

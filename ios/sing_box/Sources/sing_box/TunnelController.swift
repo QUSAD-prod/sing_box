@@ -303,6 +303,9 @@ final class TunnelController {
         var includeAllNetworks = false
         var excludeLocalNetworks = true
         var excludeAPNs = true
+        var enforceRoutes = false
+        var excludeCellularServices = false
+        var excludeDeviceCommunication = false
 
         init() {}
 
@@ -311,6 +314,9 @@ final class TunnelController {
             includeAllNetworks = map.bool("includeAllNetworks") ?? false
             excludeLocalNetworks = map.bool("excludeLocalNetworks") ?? true
             excludeAPNs = map.bool("excludeAPNs") ?? true
+            enforceRoutes = map.bool("enforceRoutes") ?? false
+            excludeCellularServices = map.bool("excludeCellularServices") ?? false
+            excludeDeviceCommunication = map.bool("excludeDeviceCommunication") ?? false
         }
     }
 
@@ -354,15 +360,20 @@ final class TunnelController {
         if let proto = manager.protocolConfiguration {
             proto.includeAllNetworks = options.includeAllNetworks
             proto.excludeLocalNetworks = options.excludeLocalNetworks
+            proto.enforceRoutes = options.enforceRoutes
             if #available(iOS 16.4, *) {
                 proto.excludeAPNs = options.excludeAPNs
+                proto.excludeCellularServices = options.excludeCellularServices
+            }
+            if #available(iOS 17.4, *) {
+                proto.excludeDeviceCommunication = options.excludeDeviceCommunication
             }
         }
     }
 
     // MARK: - Control
 
-    func start(config: String, disableMemoryLimit: Bool) async throws {
+    func start(config: String, oomKiller: String, memoryLimit: Int64) async throws {
         do {
             try await runInBackground { try SingBoxLibbox.checkConfig(config) }
         } catch {
@@ -373,7 +384,9 @@ final class TunnelController {
         } catch {
             throw PluginError.internalError("Writing the configuration failed: \(error.localizedDescription)")
         }
-        paths.defaults.set(disableMemoryLimit, forKey: SingBoxKeys.disableMemoryLimit)
+        paths.defaults.set(oomKiller, forKey: SingBoxKeys.oomKiller)
+        paths.defaults.set(NSNumber(value: memoryLimit), forKey: SingBoxKeys.memoryLimit)
+        paths.defaults.removeObject(forKey: SingBoxKeys.disableMemoryLimit)
         if !paths.isAppGroupContainer {
             Self.logger.error("starting without an app group container: the extension will not find the configuration")
         }
@@ -418,7 +431,8 @@ final class TunnelController {
         paths.writeLastError(nil)
         do {
             try manager.connection.startVPNTunnel(options: [
-                SingBoxKeys.startOptionDisableMemoryLimit: NSNumber(value: disableMemoryLimit),
+                SingBoxKeys.startOptionOomKiller: oomKiller as NSString,
+                SingBoxKeys.startOptionMemoryLimit: NSNumber(value: memoryLimit),
             ])
         } catch {
             let nsError = error as NSError
@@ -498,11 +512,43 @@ final class TunnelController {
 
     /// Asks the extension to re-read the configuration file and reload.
     private func sendReload() async throws {
+        let response = try await sendMessage([SingBoxKeys.messageCommand: SingBoxKeys.messageReload])
+        if let response, !response.isEmpty {
+            throw SingBoxError(String(data: response, encoding: .utf8) ?? "reload failed")
+        }
+        onServiceRestarted?()
+    }
+
+    /// `pingServer` in the extension, whose sockets bypass the tunnel. A
+    /// failure to reach the extension is a failed measurement.
+    func ping(method: String, host: String, port: Int?, timeoutMs: Int) async -> [String: Any] {
+        var message: [String: Any] = [
+            SingBoxKeys.messageCommand: SingBoxKeys.messagePing,
+            "method": method,
+            "host": host,
+            "timeoutMs": timeoutMs,
+        ]
+        message["port"] = port
+        do {
+            let response = try await sendMessage(message)
+            if let response,
+               let result = try? JSONSerialization.jsonObject(with: response) as? [String: Any]
+            {
+                return result
+            }
+            let text = response.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            return ["success": false, "error": "The tunnel did not measure: \(text.isEmpty ? "no reply" : text)"]
+        } catch {
+            return ["success": false, "error": "The tunnel did not measure: \(error.localizedDescription)"]
+        }
+    }
+
+    private func sendMessage(_ object: [String: Any]) async throws -> Data? {
         guard let session = manager?.connection as? NETunnelProviderSession else {
             throw PluginError.serviceNotRunning()
         }
-        let message = try JSONSerialization.data(withJSONObject: [SingBoxKeys.messageCommand: SingBoxKeys.messageReload])
-        let response: Data? = try await withCheckedThrowingContinuation { continuation in
+        let message = try JSONSerialization.data(withJSONObject: object)
+        return try await withCheckedThrowingContinuation { continuation in
             do {
                 try session.sendProviderMessage(message) { response in
                     continuation.resume(returning: response)
@@ -511,9 +557,5 @@ final class TunnelController {
                 continuation.resume(throwing: error)
             }
         }
-        if let response, !response.isEmpty {
-            throw SingBoxError(String(data: response, encoding: .utf8) ?? "reload failed")
-        }
-        onServiceRestarted?()
     }
 }

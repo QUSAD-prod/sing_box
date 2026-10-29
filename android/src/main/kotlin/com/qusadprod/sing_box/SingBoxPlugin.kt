@@ -33,6 +33,8 @@ import com.qusadprod.sing_box.plugin.OutboundsStreamHandler
 import com.qusadprod.sing_box.plugin.StatsStreamHandler
 import com.qusadprod.sing_box.plugin.StatusStreamHandler
 import com.qusadprod.sing_box.plugin.StunStreamHandler
+import com.qusadprod.sing_box.service.NativePing
+import com.qusadprod.sing_box.service.ProbeCore
 import com.qusadprod.sing_box.service.ServiceNotification
 import com.qusadprod.sing_box.service.SingBoxTileService
 import com.qusadprod.sing_box.service.SingBoxVpnService
@@ -105,6 +107,7 @@ class SingBoxPlugin :
         for (eventChannel in eventChannels) eventChannel.setStreamHandler(null)
         eventChannels.clear()
         scope.cancel()
+        Thread { ProbeCore.stop() }.start()
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -168,7 +171,16 @@ class SingBoxPlugin :
             }
             "requestAddQuickSettingsTile" -> requestAddQuickSettingsTile(call.argument<String>("label"), result)
             "start" -> respond(result) {
-                start(call.requireString("config"), call.argument<Boolean>("disableMemoryLimit") ?: false)
+                start(
+                    call.requireString("config"),
+                    oomKiller = call.argument<String>("oomKiller")
+                        ?: if (call.argument<Boolean>("disableMemoryLimit") == true) {
+                            ServiceSettings.OOM_KILLER_OFF
+                        } else {
+                            ServiceSettings.OOM_KILLER_PLATFORM_DEFAULT
+                        },
+                    memoryLimit = call.argument<Number>("memoryLimit")?.toLong() ?: 0L,
+                )
                 null
             }
             "stop" -> respond(result) {
@@ -190,9 +202,32 @@ class SingBoxPlugin :
                 it.selectOutbound(call.requireString("groupTag"), call.requireString("outboundTag"))
             }
             "urlTest" -> command(result) { it.urlTest(call.requireString("tag")) }
+            "startProbe" -> respond(result) {
+                val config = call.requireString("config")
+                io { ProbeCore.start(context, config) }
+                null
+            }
+            "stopProbe" -> respond(result) {
+                io { ProbeCore.stop() }
+                null
+            }
+            "pingServer" -> respond(result) {
+                val method = call.requireString("method")
+                val host = call.requireString("host")
+                val port = call.argument<Number>("port")?.toInt()
+                val timeoutMs = call.argument<Number>("timeoutMs")?.toInt() ?: 5000
+                io { NativePing.ping(method, host, port, timeoutMs) }
+            }
             "setClashMode" -> command(result) { it.setClashMode(call.requireString("mode")) }
             "closeConnection" -> command(result) { it.closeConnection(call.requireString("id")) }
             "closeAllConnections" -> command(result) { it.closeConnections() }
+            "getSystemProxyStatus" -> commandResult(result) {
+                val status = it.systemProxyStatus
+                mapOf("available" to status.available, "enabled" to status.enabled)
+            }
+            "setSystemProxyEnabled" -> command(result) {
+                it.setSystemProxyEnabled(call.argument<Boolean>("enabled") ?: false)
+            }
             "clearLogs" -> command(result) { it.clearLogs() }
             "setGroupExpand" -> command(result) {
                 it.setGroupExpand(call.requireString("groupTag"), call.argument<Boolean>("expand") ?: false)
@@ -271,6 +306,21 @@ class SingBoxPlugin :
     // ---------------------------------------------------------------------------------------
 
     private fun hasVpnPermission(): Boolean = runCatching { VpnService.prepare(context) == null }.getOrDefault(false)
+
+    /** A valid [config] without a TUN inbound (call after [checkConfig]). */
+    private suspend fun isProxyOnly(config: String): Boolean = io {
+        try {
+            !Libbox.hasTunInbound(config)
+        } catch (e: Exception) {
+            throw SingBoxError(SingBoxError.INVALID_CONFIG, e.libboxMessage)
+        }
+    }
+
+    private fun proxyServiceMissing() = SingBoxError(
+        SingBoxError.UNSUPPORTED,
+        "android: the configuration has no TUN inbound (proxy-only mode), but the app does not declare " +
+            "com.qusadprod.sing_box.service.SingBoxProxyService in its AndroidManifest.xml (see doc/android.md)",
+    )
 
     private fun requestVpnPermission(result: MethodChannel.Result) {
         val intent = try {
@@ -397,15 +447,29 @@ class SingBoxPlugin :
     // Service control
     // ---------------------------------------------------------------------------------------
 
-    private suspend fun start(config: String, disableMemoryLimit: Boolean) {
+    private suspend fun start(config: String, oomKiller: String, memoryLimit: Long) {
         checkConfig(config)
-        if (!hasVpnPermission()) throw SingBoxError.permissionDenied()
+        // Without a TUN inbound the config runs in proxy-only mode (SingBoxProxyService).
+        val proxyMode = isProxyOnly(config)
+        if (proxyMode) {
+            if (!SingBoxVpnService.isProxyServiceDeclared(context)) throw proxyServiceMissing()
+        } else if (!hasVpnPermission()) {
+            throw SingBoxError.permissionDenied()
+        }
         val settings = ServiceSettings(context)
+        val service = SingBoxVpnService.instance
+        if (ServiceState.isRunning && service != null && service.proxyMode != proxyMode) {
+            throw SingBoxError(
+                SingBoxError.START_FAILED,
+                "android: stop the service before switching between VPN and proxy-only mode",
+            )
+        }
         io {
-            settings.disableMemoryLimit = disableMemoryLimit
+            settings.oomKiller = oomKiller
+            settings.memoryLimit = memoryLimit
+            settings.proxyMode = proxyMode
             Paths.writeLastConfig(context, config)
         }
-        val service = SingBoxVpnService.instance
         when (ServiceState.status) {
             ServiceStatus.Started, ServiceStatus.Starting -> {
                 // Already running: reload with the new last config. A start that has not
@@ -446,16 +510,24 @@ class SingBoxPlugin :
 
     private suspend fun reload(config: String?) {
         if (!ServiceState.isRunning) throw SingBoxError.notRunning()
+        val service = SingBoxVpnService.instance ?: throw SingBoxError.notRunning()
         if (config != null) {
             checkConfig(config)
+            if (isProxyOnly(config) != service.proxyMode) {
+                throw SingBoxError(
+                    SingBoxError.START_FAILED,
+                    "android: a reload cannot switch between VPN and proxy-only mode, stop and start instead",
+                )
+            }
             io { Paths.writeLastConfig(context, config) }
         }
-        (SingBoxVpnService.instance ?: throw SingBoxError.notRunning()).reload()
+        service.reload()
     }
 
     private fun setServiceOptions(options: Map<*, *>) {
         val settings = ServiceSettings(context)
         (options["startOnBoot"] as? Boolean)?.let { settings.startOnBoot = it }
+        (options["allowBypass"] as? Boolean)?.let { settings.allowBypass = it }
         (options["quickSettingsTile"] as? Boolean)?.let {
             settings.quickSettingsTile = it
             SingBoxTileService.setEnabled(context, it)
@@ -466,7 +538,13 @@ class SingBoxPlugin :
     // Command client operations
     // ---------------------------------------------------------------------------------------
 
-    private fun command(result: MethodChannel.Result, block: (CommandClient) -> Unit) = respond(result) {
+    private fun command(result: MethodChannel.Result, block: (CommandClient) -> Unit) =
+        commandResult(result) {
+            block(it)
+            null
+        }
+
+    private fun commandResult(result: MethodChannel.Result, block: (CommandClient) -> Any?) = respond(result) {
         if (!ServiceState.isRunning) throw SingBoxError.notRunning()
         io {
             try {
@@ -476,7 +554,6 @@ class SingBoxPlugin :
                 throw SingBoxError(SingBoxError.COMMAND_FAILED, e.libboxMessage)
             }
         }
-        null
     }
 
     private companion object {

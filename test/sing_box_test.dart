@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sing_box/sing_box.dart';
 import 'package:sing_box/sing_box_platform_interface.dart';
@@ -41,6 +41,24 @@ void main() {
       expect(singBox.isInitialized, isTrue);
       expect(singBox.runtimeInfo?.singBoxVersion, '1.14.4');
       expect(await singBox.getSingBoxVersion(), '1.14.4');
+      expect(singBox.core, SingBoxCore.standard);
+      expect(singBox.supports(SingBoxCoreFeature.xhttp), isFalse);
+    });
+
+    test('reports the sing-box-lx core', () async {
+      expect(singBox.core, SingBoxCore.standard);
+      platform.coreVersion = '1.14.4-lx.25';
+      await singBox.initialize();
+      expect(singBox.core, SingBoxCore.lx);
+      expect(singBox.runtimeInfo?.core, SingBoxCore.lx);
+      for (final feature in SingBoxCoreFeature.values) {
+        expect(singBox.supports(feature), isTrue, reason: feature.name);
+      }
+    });
+
+    test('SingBoxExtended is the same object as SingBox.instance', () {
+      expect(SingBox.instance, isA<SingBoxExtended>());
+      expect(identical(SingBoxExtended.instance, SingBox.instance), isTrue);
     });
 
     test('applies stored service options', () async {
@@ -93,6 +111,54 @@ void main() {
       );
       final tags = _outboundsOf(platform.started.single).map((o) => o['tag']);
       expect(tags, containsAll([SingBoxConfigBuilder.proxyTag, 'my-ss']));
+    });
+
+    test('proxy-only configs need no VPN permission', () async {
+      platform
+        ..vpnPermission = false
+        ..grantOnRequest = false;
+      singBox.configOptions = const SingBoxConfigOptions(
+        inboundMode: SingBoxInboundMode.proxyOnly,
+      );
+      addTearDown(() => singBox.configOptions = const SingBoxConfigOptions());
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.calls, isNot(contains('requestVpnPermission')));
+      final inbounds =
+          (_decode(platform.started.single)['inbounds'] as List)
+              .cast<Map<dynamic, dynamic>>();
+      expect(inbounds.map((i) => i['type']), ['mixed']);
+    });
+
+    test('switching between VPN and proxy-only restarts', () async {
+      await singBox.connect(jsonEncode(_ssOutbound));
+      singBox.configOptions = const SingBoxConfigOptions(
+        inboundMode: SingBoxInboundMode.proxyOnly,
+      );
+      addTearDown(() => singBox.configOptions = const SingBoxConfigOptions());
+      platform.calls.clear();
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.calls.where((c) => c == 'stop' || c == 'start'), [
+        'stop',
+        'start',
+      ]);
+      expect(platform.calls, isNot(contains('reload')));
+      expect(singBox.isConnected, isTrue);
+    });
+
+    test('iOS rejects proxy-only configs', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final config = jsonEncode({
+        'inbounds': [
+          {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': 2080},
+        ],
+        'outbounds': [_ssOutbound],
+      });
+      await expectLater(
+        singBox.connect(config, applyRules: false),
+        throwsA(isA<SingBoxUnsupportedException>()),
+      );
+      expect(platform.started, isEmpty);
     });
 
     test('parses share links', () async {
@@ -463,39 +529,164 @@ void main() {
       ...extra,
     }, id: id);
 
-    test('measures TCP latency while disconnected', () async {
-      final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(listener.close);
-      listener.listen((socket) => socket.destroy());
-      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final closedPort = closed.port;
-      await closed.close();
+    tearDown(() => platform.closeProbes());
 
-      final results = await singBox.pingServers([
-        profile('open', 'vless', '127.0.0.1', listener.port),
-        profile('closed', 'trojan', '127.0.0.1', closedPort),
-        profile('udp', 'hysteria2', '127.0.0.1', listener.port),
-        profile('quic', 'vless', '127.0.0.1', listener.port, {
+    test('measures TCP and ICMP natively', () async {
+      platform.onPingServer =
+          (method, host, port) =>
+              host == 'down.example'
+                  ? const SingBoxNativePingResult(
+                    success: false,
+                    error: 'No reply',
+                  )
+                  : const SingBoxNativePingResult(success: true, ping: 31);
+      final servers = [
+        profile('open', 'vless', 'up.example', 443),
+        profile('down', 'trojan', 'down.example', 443),
+        profile('udp', 'hysteria2', 'up.example', 443),
+        profile('quic', 'vless', 'up.example', 443, {
           'transport': {'type': 'quic'},
         }),
         profile('empty', 'vless', '', 0),
-      ], concurrency: 2).toList();
-
-      final byId = {for (final r in results) r.serverId!: r};
+      ];
+      final tcp = {
+        for (final r
+            in await singBox
+                .pingServers(
+                  servers,
+                  method: SingBoxPingMethod.tcp,
+                  concurrency: 2,
+                )
+                .toList())
+          r.serverId!: r,
+      };
       expect(
-        byId.keys,
-        unorderedEquals(['open', 'closed', 'udp', 'quic', 'empty']),
+        tcp.keys,
+        unorderedEquals(['open', 'down', 'udp', 'quic', 'empty']),
       );
-      expect(byId['open']!.success, isTrue);
-      expect(byId['open']!.method, SingBoxPingMethod.tcp);
-      expect(byId['open']!.address, '127.0.0.1');
-      expect(byId['closed']!.success, isFalse);
-      expect(byId['udp']!.errorMessage, contains('UDP'));
-      expect(byId['quic']!.errorMessage, contains('UDP'));
-      expect(byId['empty']!.errorMessage, 'The server has no address');
+      expect(tcp['open']!.success, isTrue);
+      expect(tcp['open']!.ping, 31);
+      expect(tcp['open']!.method, SingBoxPingMethod.tcp);
+      expect(tcp['open']!.address, 'up.example');
+      expect(tcp['down']!.errorMessage, 'No reply');
+      expect(tcp['udp']!.errorMessage, contains('UDP'));
+      expect(tcp['quic']!.errorMessage, contains('UDP'));
+      expect(tcp['empty']!.errorMessage, 'The server has no address');
+      expect(platform.calls, contains('pingServer:tcp:up.example:443'));
+
+      // ICMP works for UDP protocols and needs no port.
+      final icmp = await singBox.ping(
+        servers[2],
+        method: SingBoxPingMethod.icmp,
+      );
+      expect(icmp.success, isTrue);
+      expect(icmp.method, SingBoxPingMethod.icmp);
+      expect(platform.calls.last, 'pingServer:icmp:up.example:');
+      expect(platform.calls.where((c) => c.startsWith('startProbe')), isEmpty);
     });
 
-    test('uses URL tests for servers of the running config', () async {
+    test('proxy methods use a probe core while disconnected', () async {
+      singBox.configOptions = const SingBoxConfigOptions(
+        urlTestUrl: 'http://probe.test/generate_204',
+      );
+      platform.failingProbes = {'bad'};
+      final servers = [
+        profile('good', 'shadowsocks', '203.0.113.1', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+        profile('bad', 'shadowsocks', '203.0.113.2', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+        SingBoxServerConfig.fromFullConfig(
+          '{"outbounds": [{"type": "direct", "tag": "d"}]}',
+          id: 'full',
+          name: 'Full',
+        ),
+      ];
+      final results = {
+        for (final r in await singBox.pingServers(servers).toList())
+          r.serverId!: r,
+      };
+      expect(results['good']!.success, isTrue);
+      expect(results['good']!.method, SingBoxPingMethod.proxyHead);
+      expect(results['good']!.statusCode, 204);
+      expect(results['good']!.url, 'http://probe.test/generate_204');
+      expect(results['good']!.address, '203.0.113.1');
+      expect(results['bad']!.success, isFalse);
+      expect(results['full']!.errorMessage, contains('complete configuration'));
+      expect(platform.calls.where((c) => c == 'startProbe'), hasLength(1));
+      expect(platform.calls.last, 'stopProbe');
+      final probe = jsonDecode(platform.probeConfigs.single) as Map;
+      expect((probe['inbounds'] as List).length, 2);
+      expect(probe.containsKey('experimental'), isFalse);
+
+      final get = await singBox.ping(
+        servers[0],
+        method: SingBoxPingMethod.proxyGet,
+      );
+      expect(get.method, SingBoxPingMethod.proxyGet);
+      expect(get.success, isTrue);
+    });
+
+    test('a probe core that does not start fails every server', () async {
+      platform.probeStartError = 'boom';
+      final result = await singBox.ping(
+        profile('s', 'shadowsocks', '203.0.113.1', 8388, {
+          'method': 'aes-128-gcm',
+          'password': 'x',
+        }),
+      );
+      expect(result.success, isFalse);
+      expect(result.errorMessage, contains('boom'));
+    });
+
+    test('connected: measured through the probe routes', () async {
+      singBox.configOptions = const SingBoxConfigOptions(
+        urlTestUrl: 'http://probe.test/generate_204',
+        // Served on loopback by the fake tunnel.
+        probeAddress: '127.0.0.1',
+      );
+      platform.serveProbeRoutes = true;
+      final ss = SingBoxServerConfig.fromOutbound(
+        Map<String, dynamic>.from(_ssOutbound),
+        id: 'running',
+      );
+      await singBox.connectToServers([ss]);
+      final results =
+          await singBox.pingServers([
+            ss,
+            profile('other', 'vless', 'other.example.com', 443),
+          ]).toList();
+      final byId = {for (final r in results) r.serverId!: r};
+      expect(byId['running']!.success, isTrue);
+      expect(byId['running']!.tag, 'my-ss');
+      expect(byId['running']!.statusCode, 204);
+      expect(
+        byId['other']!.errorMessage,
+        'Not part of the running configuration',
+      );
+      final direct = await singBox.pingOutbound(
+        'my-ss',
+        method: SingBoxPingMethod.proxyGet,
+      );
+      expect(direct.method, SingBoxPingMethod.proxyGet);
+      expect(direct.address, '203.0.113.10');
+      expect(direct.success, isTrue);
+      // No sing-box URL test and no probe core were needed.
+      expect(platform.calls.where((c) => c.startsWith('urlTest')), isEmpty);
+      expect(platform.calls.where((c) => c == 'startProbe'), isEmpty);
+
+      final tcp = await singBox.pingOutbound(
+        'my-ss',
+        method: SingBoxPingMethod.tcp,
+      );
+      expect(tcp.success, isTrue);
+      expect(platform.calls.last, 'pingServer:tcp:203.0.113.10:8388');
+    });
+
+    test('without probe routes the URL test of sing-box is used', () async {
       platform.lastConfig = jsonEncode({
         'outbounds': [_ssOutbound],
       });
@@ -513,22 +704,24 @@ void main() {
           ]);
         });
       };
-      final results = await singBox.pingServers([
-        SingBoxServerConfig.fromOutbound(
-          Map<String, dynamic>.from(_ssOutbound),
-          id: 'running',
-        ),
-        profile('other', 'vless', 'other.example.com', 443),
-      ]).toList();
-      final byId = {for (final r in results) r.serverId!: r};
-      expect(byId['running']!.success, isTrue);
-      expect(byId['running']!.ping, 42);
-      expect(byId['running']!.tag, 'my-ss');
-      expect(byId['running']!.method, SingBoxPingMethod.urlTest);
-      expect(
-        byId['other']!.errorMessage,
-        'Not part of the running configuration',
-      );
+      final results =
+          await singBox.pingServers([
+            SingBoxServerConfig.fromOutbound(
+              Map<String, dynamic>.from(_ssOutbound),
+              id: 'running',
+            ),
+          ]).toList();
+      expect(results.single.success, isTrue);
+      expect(results.single.ping, 42);
+      expect(results.single.tag, 'my-ss');
+      expect(results.single.method, SingBoxPingMethod.proxyHead);
+    });
+
+    test('proxy methods fail while the VPN changes state', () async {
+      platform.emitState(SingBoxConnectionStatus.connecting);
+      await pumpEventQueue();
+      final result = await singBox.ping(profile('s', 'vless', 'a.example', 1));
+      expect(result.errorMessage, 'The VPN is starting or stopping');
     });
 
     test('validates the concurrency', () {
@@ -620,15 +813,16 @@ void main() {
     });
 
     test('pingOutbound reports failures', () async {
-      platform.onUrlTest = (tag) => Timer.run(
-        () => platform.outbounds.add([
-          SingBoxOutboundItem(
-            tag: tag,
-            type: 'shadowsocks',
-            urlTestTime: DateTime.now(),
-          ),
-        ]),
-      );
+      platform.onUrlTest =
+          (tag) => Timer.run(
+            () => platform.outbounds.add([
+              SingBoxOutboundItem(
+                tag: tag,
+                type: 'shadowsocks',
+                urlTestTime: DateTime.now(),
+              ),
+            ]),
+          );
       final result = await singBox.pingOutbound('my-ss');
       expect(result.success, isFalse);
     });
@@ -709,6 +903,88 @@ void main() {
       ]);
       expect(await singBox.removeDnsServer('8.8.8.8'), isTrue);
     });
+
+    test('IP version is persisted and reaches the generated config', () async {
+      expect(await singBox.getIpVersion(), SingBoxIpVersion.dual);
+      expect(await singBox.setIpVersion(SingBoxIpVersion.ipv4), isTrue);
+      expect(await singBox.setIpVersion(SingBoxIpVersion.ipv4), isFalse);
+      expect(await singBox.getIpVersion(), SingBoxIpVersion.ipv4);
+      final config =
+          jsonDecode(await singBox.buildConfig(jsonEncode(_ssOutbound)))
+              as Map<String, dynamic>;
+      expect((config['dns'] as Map)['strategy'], 'ipv4_only');
+    });
+
+    test('routing mode and proxy lists reach the generated config', () async {
+      expect(await singBox.getRoutingMode(), SingBoxRoutingMode.proxyAll);
+      expect(
+        await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed),
+        isTrue,
+      );
+      expect(
+        await singBox.setRoutingMode(SingBoxRoutingMode.proxyListed),
+        isFalse,
+      );
+      expect(await singBox.addProxyDomain('https://Example.ORG/x'), isTrue);
+      expect(await singBox.addProxyDomain('example.org'), isFalse);
+      expect(await singBox.addProxyDomain('not a domain'), isFalse);
+      expect(await singBox.getProxyDomains(), ['example.org']);
+      expect(await singBox.addProxySubnet('203.0.113.9'), isTrue);
+      expect(await singBox.addProxySubnet('10.0.0.0/33'), isFalse);
+      expect(await singBox.getProxySubnets(), ['203.0.113.9/32']);
+
+      final config =
+          jsonDecode(await singBox.buildConfig(jsonEncode(_ssOutbound)))
+              as Map<String, dynamic>;
+      final route = config['route'] as Map;
+      expect(route['final'], 'direct');
+      expect(
+        route['rules'],
+        contains(
+          equals({
+            'domain_suffix': ['example.org'],
+            'action': 'route',
+            'outbound': 'proxy',
+          }),
+        ),
+      );
+
+      expect(await singBox.removeProxyDomain('EXAMPLE.org'), isTrue);
+      expect(await singBox.removeProxyDomain('example.org'), isFalse);
+      expect(await singBox.removeProxySubnet('203.0.113.9'), isTrue);
+      expect(await singBox.getProxyDomains(), isEmpty);
+      expect(await singBox.getProxySubnets(), isEmpty);
+    });
+
+    test('custom rules, export and import', () async {
+      const rule = SingBoxRoutingRule(
+        action: SingBoxRuleAction.block,
+        domainSuffixes: ['spam.example'],
+      );
+      expect(await singBox.setCustomRules([rule]), isTrue);
+      expect(await singBox.setCustomRules([rule]), isFalse);
+      expect(await singBox.getCustomRules(), [rule]);
+      await singBox.updateRoutingRules((r) => r.copyWith(blockQuic: true));
+
+      final exported = await singBox.exportRoutingRules();
+      expect(jsonDecode(exported), (await singBox.getRoutingRules()).toMap());
+
+      await singBox.saveRoutingRules(const SingBoxRoutingRules());
+      final imported = await singBox.importRoutingRules(exported);
+      expect(imported.customRules, [rule]);
+      expect(imported.blockQuic, isTrue);
+      expect(await singBox.getRoutingRules(), imported);
+
+      await expectLater(
+        singBox.importRoutingRules('[1]'),
+        throwsA(isA<SingBoxConfigException>()),
+      );
+      await expectLater(
+        singBox.importRoutingRules('{'),
+        throwsA(isA<SingBoxConfigException>()),
+      );
+      expect(await singBox.getRoutingRules(), imported);
+    });
   });
 
   group('settings and server profiles', () {
@@ -726,6 +1002,52 @@ void main() {
         await singBox.updateSetting(SingBoxSettings.keyKillSwitch, 'yes'),
         isFalse,
       );
+    });
+
+    test('system proxy status and switch', () async {
+      expect(
+        await singBox.getSystemProxyStatus(),
+        SingBoxSystemProxyStatus.unavailable,
+      );
+      // Not connected: the platform is not asked.
+      expect(platform.calls, isNot(contains('getSystemProxyStatus')));
+      await singBox.connect(jsonEncode(_ssOutbound));
+      platform.systemProxyStatus = const SingBoxSystemProxyStatus(
+        available: true,
+        enabled: true,
+      );
+      await singBox.setSystemProxyEnabled(false);
+      expect(platform.calls, contains('setSystemProxyEnabled:false'));
+      expect(
+        await singBox.getSystemProxyStatus(),
+        const SingBoxSystemProxyStatus(available: true, enabled: false),
+      );
+    });
+
+    test('memory monitor settings reach start', () async {
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.platformDefault);
+      expect(platform.startMemoryLimit, 0);
+      await singBox.disconnect();
+
+      expect(
+        await singBox.updateSetting(
+          SingBoxSettings.keyOomKiller,
+          SingBoxOomKiller.enabled,
+        ),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, 200),
+        isTrue,
+      );
+      expect(
+        await singBox.updateSetting(SingBoxSettings.keyMemoryLimitMb, -1),
+        isFalse,
+      );
+      await singBox.connect(jsonEncode(_ssOutbound));
+      expect(platform.startOomKiller, SingBoxOomKiller.enabled);
+      expect(platform.startMemoryLimit, 200 * 1024 * 1024);
     });
 
     test('server profile CRUD and active selection', () async {

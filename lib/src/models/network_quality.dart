@@ -65,9 +65,10 @@ class SingBoxNetworkQuality {
     final isFinal = map['type'] == 'result';
     final latency = read('idleLatencyMs');
     return SingBoxNetworkQuality(
-      phase: isFinal
-          ? SingBoxNetworkQualityPhase.done
-          : SingBoxNetworkQualityPhase.fromValue(read('phase')),
+      phase:
+          isFinal
+              ? SingBoxNetworkQualityPhase.done
+              : SingBoxNetworkQualityPhase.fromValue(read('phase')),
       downloadCapacity: read('downloadCapacity'),
       uploadCapacity: read('uploadCapacity'),
       downloadRpm: read('downloadRPM'),

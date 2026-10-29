@@ -35,15 +35,29 @@ of the iOS implementation.
 ## Scripted setup
 
 ```bash
-flutter build ios --config-only     # creates ios/.symlinks
-ruby ios/.symlinks/plugins/sing_box/ios/scripts/add_packet_tunnel.rb \
+flutter build ios --config-only     # lets Flutter generate its Swift package / Podfile
+dart run sing_box:setup_ios \
   [--bundle-id com.example.app.PacketTunnel] [--app-group group.com.example.app] [--team ABCDE12345]
 ```
 
-The script needs the `xcodeproj` gem, which ships with CocoaPods (Homebrew
-installs are found automatically). It is idempotent; re-run it after
-changing the ids. See the [README](../README.md#ios-setup) for what it
-changes.
+Pure Dart, no Ruby gems. It edits `Runner.xcodeproj` the way Xcode would
+and is idempotent; re-run it after changing the ids. The `SingBoxTunnel`
+library is linked to the extension
+
+* with **Swift Package Manager** (Flutter's generated package depends on
+  sing_box): as a product of `FlutterGeneratedPluginSwiftPackage`, which
+  Xcode resolves through the package graph. The reference does not contain
+  the plugin's version or path, so it survives plugin upgrades. No Podfile,
+  no CocoaPods;
+* with **CocoaPods**: `pod 'SingBoxTunnel'` (static) for the extension in
+  `ios/Podfile`. A project that already has this pod keeps it (linking the
+  library twice would duplicate symbols); to switch such a project to Swift
+  Package Manager remove the extension's block from the Podfile and run the
+  tool again.
+
+Before the first `flutter build` neither exists and the tool asks to build
+once and run it again. `ios/scripts/add_packet_tunnel.rb` from 1.0.0 is now
+a wrapper around this command.
 
 ## Manual setup
 
@@ -61,25 +75,29 @@ changes.
    ```
 4. **Info.plist** of the extension: add `SingBoxAppGroup` = your App Group
    (used when iOS starts the tunnel without the app, e.g. On Demand).
-5. **Link the library** to the extension. Add to `ios/Podfile` and run
-   `pod install`:
-   ```ruby
-   target 'PacketTunnel' do
-     use_frameworks! :linkage => :static
-     pod 'SingBoxTunnel', :path => '.symlinks/plugins/sing_box/ios'
-   end
-   ```
-   This works whether the app links the plugin with Swift Package Manager
-   (Flutter's default) or CocoaPods. Linking the `SingBoxTunnel` Swift
-   package product directly is not recommended: Flutter references the
-   plugin package under a folder-dependent identity
-   (`ios/Flutter/ephemeral/Packages/.packages/<plugin folder>`), and a second
-   reference to the same package under another path conflicts.
+5. **Link the library** to the extension.
+   * Swift Package Manager: in the extension target's *Frameworks and
+     Libraries* add the `SingBoxTunnel` product. Xcode lists only products of
+     packages referenced by the project, so add it in
+     `project.pbxproj` as an `XCSwiftPackageProductDependency` with
+     `productName = SingBoxTunnel` whose `package` is the existing
+     `FlutterGeneratedPluginSwiftPackage` reference (the setup tool does
+     this). Do not add a second package reference to
+     `ios/Flutter/ephemeral/Packages/.packages/<plugin folder>`: that folder
+     name contains the plugin version from the pub cache and changes on
+     every upgrade.
+   * CocoaPods: add to `ios/Podfile` and run `pod install`:
+     ```ruby
+     target 'PacketTunnel' do
+       use_frameworks! :linkage => :static
+       pod 'SingBoxTunnel', :path => '.symlinks/plugins/sing_box/ios'
+     end
+     ```
 6. **Build phases** of Runner: *Embed Foundation Extensions* must come
    before Flutter's *Thin Binary* script, otherwise Xcode reports
    *"Cycle inside Runner; building could produce unreliable results"*.
 7. **Versions**: keep `CFBundleShortVersionString`/`CFBundleVersion` of the
-   extension equal to the app's (App Store requirement); the script uses
+   extension equal to the app's (App Store requirement); the setup tool uses
    `$(FLUTTER_BUILD_NAME)`/`$(FLUTTER_BUILD_NUMBER)` from
    `Flutter/Generated.xcconfig`.
 
@@ -104,17 +122,88 @@ await SingBox.instance.initialize(const SingBoxOptions(
 | `killSwitch` / `includeAllNetworks` | `protocolConfiguration.includeAllNetworks` (iOS 14+): all traffic must use the tunnel. Off by default - it also captures traffic that usually bypasses VPNs and breaks AirDrop/CarPlay while connected |
 | `excludeLocalNetworks` | Local network traffic bypasses the tunnel (default on, so LAN printers and casting keep working with the kill switch) |
 | `excludeAPNs` | Push notifications bypass the tunnel (iOS 16.4+, default on) |
+| `enforceRoutes` | Without the kill switch: iOS scopes the tunnel's routes to the VPN even for apps that bind to an interface |
+| `excludeCellularServices` | Wi-Fi Calling, MMS, SMS and Visual Voicemail bypass the tunnel with the kill switch (iOS 16.4+) |
+| `excludeDeviceCommunication` | Communication with paired devices bypasses the tunnel with the kill switch (iOS 17.4+) |
+| `excludeDefaultRoute` | Hides the VPN icon (`0.0.0.0/31`, `::/127` excluded), as "Hide VPN Icon" in sing-box-for-apple |
+| `noDefaultRoute` | Routes the address space in ranges instead of a default route (sing-box-for-apple's "No Default Route", helps HomeKit) |
+| `excludeApnsRoute` | Push notifications bypass the tunnel on every iOS version (`17.0.0.0/8` excluded, `push.apple.com` bypasses the system proxy) |
+
+The last three are applied by the extension when the tunnel starts or
+reloads. Native crash reports (PLCrashReporter in sing-box-for-apple) are not
+included; Go crashes and memory pressure are reported, see
+`SingBox.getCoreReports()`.
 
 Nothing is forced: flutter_vless enabled the kill switch unconditionally,
 which broke local networking for many users.
+
+## Proxy-only mode is not available
+
+On iOS the core can only run inside the Packet Tunnel extension, and the
+system starts that extension only as a VPN; the app itself is suspended in
+the background, so it cannot host a proxy server either. `connect()` with a
+configuration without a TUN inbound
+(`SingBoxInboundMode.proxyOnly`) throws a `SingBoxUnsupportedException`.
+To offer a local proxy, keep the TUN and add `SingBoxConfigOptions.localProxy`
+(with `systemProxy: true` it becomes the tunnel's HTTP proxy through
+`NEProxySettings`).
 
 ## Memory
 
 The extension is limited to about 50 MB. libbox for iOS is built with
 `with_low_memory` and the libbox OOM killer is enabled in the extension
-(`SingBoxSettings.disableMemoryLimit` turns it off - only for debugging).
+(`SingBoxSettings.oomKiller`: `platformDefault` = `enabled`; `reportOnly`
+only records out-of-memory reports, `off` disables it - only for debugging).
+Under a Network Extension the monitor always uses the system limit (50 MB);
+`SingBoxSettings.memoryLimitMb` only moves the Go garbage collector target
+(80 % of it).
 Keep configurations lean: large remote rule-sets, many outbounds or big
 connection counts raise the memory use.
+
+## sing-box-lx core
+
+The sing-box-lx core (README "sing-box-lx core") is chosen when the app is
+built:
+
+- Swift Package Manager: `SING_BOX_CORE=lx` in the environment of the build
+  (`flutter build ios`, `xcodebuild`, Xcode started from such a shell).
+  SwiftPM resolves the plugin's symlink in `ios/Flutter/ephemeral/Packages/
+  .packages/`, so `Package.swift` sees the plugin directory and cannot find
+  the app's `pubspec.yaml`.
+- CocoaPods: `SING_BOX_CORE`, else `sing_box: core:` of the `pubspec.yaml`
+  next to the directory of the app's Podfile (`ios/libbox.rb`). Run
+  `pod install` again after changing it.
+
+The lx framework comes from `libboxLxVersion` / `libboxLxChecksum` of
+`Package.swift` (local copy: `ios/sing_box/Frameworks/lx/`). The lx libbox
+adds `writeDNSQuery` to `LibboxCommandClientHandlerProtocol`; the plugin
+target compiles `Sources/sing_box/Core/<core>` with a per-core base class of
+its handler. Switching the core needs a clean build (`flutter clean` and
+`~/Library/Developer/Xcode/DerivedData/Runner-*`): both frameworks are the
+module `Libbox`, and Xcode otherwise reuses the other core's precompiled
+module ("has been modified since the module file ... was built").
+
+The lx framework is ~5 % larger than the standard one (226 MB vs 214 MB
+unpacked, both architectures). On the simulator the app's memory with a
+running probe core is the same for both cores (~105 MB footprint); a
+running lx tunnel in the extension (50 MB limit) has not been measured on a
+device yet.
+
+## Latency tests
+
+* Connected: the app's request to the probe address (`198.51.100.1`,
+  `SingBoxConfigOptions.probeAddress`) enters the tunnel and is routed
+  through the measured outbound. The TUN's neighbour address (`172.19.0.2`)
+  cannot be used: sing-box treats every TCP connection to it as DNS.
+* Stopped: the proxy methods start a temporary libbox service in the app
+  process (no TUN, never started command server, inbounds on `127.0.0.1`).
+* `tcp` / `icmp`: measured in the app while the tunnel is down; while it is
+  up the plugin sends them to the extension (`sendProviderMessage`), which
+  resolves the name with `DNSServiceGetAddrInfo` on the physical interface
+  and binds the sockets to it (`IP_BOUND_IF`), so neither the tunnel nor its
+  DNS (FakeIP) is involved. ICMP uses unprivileged `SOCK_DGRAM` sockets.
+  The simulator has no tunnel: only the disconnected paths can be tested
+  there.
 
 ## Speed and NAT tests
 

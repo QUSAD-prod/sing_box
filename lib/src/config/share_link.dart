@@ -85,11 +85,17 @@ abstract final class SingBoxShareLink {
   ///   WireGuard outbounds are converted to endpoints);
   /// * a JSON array of outbound objects (or of share link strings) and a
   ///   single outbound object;
-  /// * a SIP008 Shadowsocks JSON document (`{"servers": [...]}`).
+  /// * a SIP008 Shadowsocks JSON document (`{"servers": [...]}`);
+  /// * a Clash / mihomo YAML configuration: its `proxies` (ss with obfs /
+  ///   v2ray-plugin, vmess, vless with REALITY and Vision, trojan, hysteria,
+  ///   hysteria2, tuic v5, wireguard, socks5, http, anytls, ssh; ws, grpc,
+  ///   h2, http and HTTPUpgrade transports, `smux`) are converted;
+  ///   `proxy-groups`, `rules` and `dns` are ignored.
   ///
-  /// Invalid lines and unsupported entries are skipped. Duplicate tags get
+  /// Invalid lines and unsupported entries (for example ShadowsocksR,
+  /// Snell, XHTTP or `dialer-proxy` chains) are skipped. Duplicate tags get
   /// a ` (2)`, ` (3)`, … suffix. Returns an empty list when nothing usable
-  /// is found. Clash YAML subscriptions are not supported.
+  /// is found.
   static List<SingBoxOutbound> parseSubscription(String content) =>
       parseSubscriptionContent(content);
 

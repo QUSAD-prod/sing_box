@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sing_box/sing_box.dart';
 
+import 'format.dart';
 import 'ui.dart';
 
-/// Server profiles (import, select, connect) and live outbound groups.
+/// Subscriptions, server profiles (import, select, connect) and live
+/// outbound groups.
 class ServersPage extends StatefulWidget {
   const ServersPage({super.key});
 
@@ -17,7 +20,10 @@ class ServersPage extends StatefulWidget {
 class _ServersPageState extends State<ServersPage> {
   final _singBox = SingBox.instance;
   List<SingBoxServerConfig> _servers = const [];
+  List<SingBoxSubscription> _subscriptions = const [];
   String? _activeId;
+  final _pings = <String, SingBoxPingResult>{};
+  StreamSubscription<SingBoxPingResult>? _pingSub;
 
   @override
   void initState() {
@@ -25,20 +31,134 @@ class _ServersPageState extends State<ServersPage> {
     _reload();
   }
 
+  @override
+  void dispose() {
+    _pingSub?.cancel();
+    super.dispose();
+  }
+
+  /// Measures every profile with [method]; results appear as they arrive.
+  void _measureAll(SingBoxPingMethod method) {
+    _pingSub?.cancel();
+    setState(_pings.clear);
+    _pingSub = _singBox.pingServers(_servers, method: method).listen((r) {
+      if (mounted) setState(() => _pings[r.serverId!] = r);
+    });
+  }
+
+  String _pingText(String id) {
+    final r = _pings[id];
+    if (r == null) return '';
+    return r.success
+        ? ' · ${r.ping} ms (${r.method.name})'
+        : ' · ${r.errorMessage ?? 'failed'}';
+  }
+
   Future<void> _reload() async {
     final servers = await _singBox.getServerConfigs();
+    final subscriptions = await _singBox.getSubscriptions();
     final active = await _singBox.getActiveServerConfig();
     if (!mounted) return;
     setState(() {
       _servers = servers;
+      _subscriptions = subscriptions;
       _activeId = active?.id;
     });
+  }
+
+  Future<void> _selectFirstIfNone() async {
+    if (await _singBox.getActiveServerConfig() != null) return;
+    final servers = await _singBox.getServerConfigs();
+    if (servers.isNotEmpty) {
+      await _singBox.setActiveServerConfig(servers.first.id);
+    }
+  }
+
+  /// An http(s) URL with a path is a subscription; `http://user:pass@host:port`
+  /// without one is an HTTP proxy share link.
+  static bool _isSubscriptionUrl(String text) {
+    if (text.contains('\n')) return false;
+    final uri = Uri.tryParse(text);
+    return uri != null &&
+        (uri.isScheme('http') || uri.isScheme('https')) &&
+        uri.path.length > 1;
+  }
+
+  Future<void> _addSubscription([String? url]) async {
+    url ??= await promptText(
+      context,
+      title: 'Subscription URL',
+      hint: 'https://example.com/sub/…',
+    );
+    if (url == null || url.trim().isEmpty) return;
+    try {
+      final subscription = await _singBox.addSubscription(url.trim());
+      if (mounted) {
+        showMessage(
+          context,
+          'Added ${subscription.name}: '
+          '${subscription.serverCount} server(s)',
+        );
+      }
+      await _selectFirstIfNone();
+    } on SingBoxSubscriptionException catch (e) {
+      if (mounted) showMessage(context, 'Failed: ${e.message}', error: true);
+    }
+    await _reload();
+  }
+
+  Future<void> _updateSubscription(SingBoxSubscription subscription) async {
+    try {
+      final updated = await _singBox.updateSubscription(subscription.id);
+      if (mounted) {
+        showMessage(
+          context,
+          '${updated.name}: ${updated.serverCount} server(s)',
+        );
+      }
+    } on SingBoxSubscriptionException catch (e) {
+      if (mounted) showMessage(context, 'Failed: ${e.message}', error: true);
+    }
+    await _reload();
+  }
+
+  Future<void> _updateAllSubscriptions() async {
+    final updated = await _singBox.updateSubscriptions();
+    if (mounted) {
+      showMessage(
+        context,
+        'Updated ${updated.length} of ${_subscriptions.length} subscription(s)',
+        error: updated.length < _subscriptions.length,
+      );
+    }
+    await _reload();
+  }
+
+  static String _subscriptionInfo(SingBoxSubscription subscription) {
+    final used = subscription.used;
+    final total = subscription.total;
+    final expire = subscription.expire;
+    return [
+      '${subscription.serverCount} server(s)',
+      if (used != null)
+        total != null && total > 0
+            ? '${formatBytes(used)} of ${formatBytes(total)}'
+            : '${formatBytes(used)} used',
+      if (expire != null)
+        '${subscription.isExpired ? 'expired' : 'until'} '
+            '${expire.toLocal().toString().split(' ').first}',
+      if (subscription.lastError != null) 'error: ${subscription.lastError}',
+    ].join(' · ');
   }
 
   Future<void> _import(String content) async {
     if (content.trim().isEmpty) return;
     try {
       final trimmed = content.trim();
+      if (_isSubscriptionUrl(trimmed)) {
+        await _addSubscription(trimmed);
+        return;
+      }
       if (trimmed.startsWith('{')) {
         final decoded = jsonDecode(trimmed) as Map<String, dynamic>;
         final isFull = decoded.containsKey('outbounds');
@@ -69,11 +189,7 @@ class _ServersPageState extends State<ServersPage> {
           );
         }
       }
-      if (_activeId == null && (await _singBox.getServerConfigs()).isNotEmpty) {
-        await _singBox.setActiveServerConfig(
-          (await _singBox.getServerConfigs()).first.id,
-        );
-      }
+      await _selectFirstIfNone();
     } on Object catch (e) {
       if (mounted) showMessage(context, 'Import failed: $e', error: true);
     }
@@ -89,7 +205,7 @@ class _ServersPageState extends State<ServersPage> {
     final text = await promptText(
       context,
       title: 'Share links, subscription or JSON',
-      hint: 'vless://… / ss://… / {"type": "trojan", …}',
+      hint: 'vless://… / Clash YAML / {"type": "trojan", …}',
       maxLines: 6,
     );
     if (text != null) await _import(text);
@@ -164,6 +280,46 @@ class _ServersPageState extends State<ServersPage> {
           padding: const EdgeInsets.only(bottom: 96),
           children: [
             SectionHeader(
+              'Subscriptions',
+              trailing: Wrap(
+                children: [
+                  IconButton(
+                    tooltip: 'Add a subscription URL',
+                    icon: const Icon(Icons.add_link),
+                    onPressed: _addSubscription,
+                  ),
+                  IconButton(
+                    tooltip: 'Update all subscriptions',
+                    icon: const Icon(Icons.sync),
+                    onPressed: _subscriptions.isEmpty
+                        ? null
+                        : _updateAllSubscriptions,
+                  ),
+                ],
+              ),
+            ),
+            for (final subscription in _subscriptions)
+              ListTile(
+                leading: const Icon(Icons.rss_feed),
+                title: Text(subscription.name),
+                subtitle: Text(_subscriptionInfo(subscription)),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (action) async {
+                    switch (action) {
+                      case 'update':
+                        await _updateSubscription(subscription);
+                      case 'delete':
+                        await _singBox.removeSubscription(subscription.id);
+                        await _reload();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'update', child: Text('Update')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
+                ),
+              ),
+            SectionHeader(
               'Profiles',
               trailing: Wrap(
                 children: [
@@ -171,6 +327,30 @@ class _ServersPageState extends State<ServersPage> {
                     tooltip: 'Paste links or JSON',
                     icon: const Icon(Icons.add),
                     onPressed: _importManually,
+                  ),
+                  PopupMenuButton<SingBoxPingMethod>(
+                    tooltip: 'Measure latency',
+                    icon: const Icon(Icons.network_ping),
+                    enabled: _servers.isNotEmpty,
+                    onSelected: _measureAll,
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.proxyHead,
+                        child: Text('HTTP HEAD through the proxy'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.proxyGet,
+                        child: Text('HTTP GET through the proxy'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.tcp,
+                        child: Text('TCP handshake'),
+                      ),
+                      PopupMenuItem(
+                        value: SingBoxPingMethod.icmp,
+                        child: Text('ICMP echo'),
+                      ),
+                    ],
                   ),
                   IconButton(
                     tooltip: 'Connect with all servers (selector + urltest)',
@@ -185,8 +365,8 @@ class _ServersPageState extends State<ServersPage> {
                 padding: EdgeInsets.all(24),
                 child: Text(
                   'No servers yet. Copy a share link (vless://, vmess://, '
-                  'trojan://, ss://, hysteria2://, tuic://…) or a subscription '
-                  'and tap "Import from clipboard".',
+                  'trojan://, ss://, hysteria2://, tuic://…), a subscription '
+                  'URL or a Clash YAML and tap "Import from clipboard".',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -203,7 +383,8 @@ class _ServersPageState extends State<ServersPage> {
                       leading: Radio<String>(value: server.id),
                       title: Text(server.name),
                       subtitle: Text(
-                        '${server.protocol} · ${server.server}:${server.port}',
+                        '${server.protocol} · ${server.server}:${server.port}'
+                        '${_pingText(server.id)}',
                       ),
                       onTap: () => _showDetails(server),
                       trailing: PopupMenuButton<String>(

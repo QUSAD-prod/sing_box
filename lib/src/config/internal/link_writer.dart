@@ -97,9 +97,10 @@ Map<String, String?> _tlsParams(Map<String, dynamic>? tls) {
     'security': isReality ? 'reality' : 'tls',
     'sni': readString(tls['server_name']),
     'alpn': _join(tls['alpn']),
-    'fp': utls != null && readBool(utls['enabled']) == true
-        ? readString(utls['fingerprint']) ?? 'chrome'
-        : null,
+    'fp':
+        utls != null && readBool(utls['enabled']) == true
+            ? readString(utls['fingerprint']) ?? 'chrome'
+            : null,
     'pbk': isReality ? readString(reality['public_key']) : null,
     'sid': isReality ? readString(reality['short_id']) : null,
     'allowInsecure': readBool(tls['insecure']) == true ? '1' : null,
@@ -123,9 +124,10 @@ Map<String, String?> _transportParams(
       }
       return {
         'type': 'ws',
-        'host': headers == null
-            ? null
-            : readString(headers['Host'] ?? headers['host']),
+        'host':
+            headers == null
+                ? null
+                : readString(headers['Host'] ?? headers['host']),
         'path': path,
       };
     case 'grpc':
@@ -169,9 +171,8 @@ String _vless(Map<String, dynamic> o) {
     'flow': readString(o['flow']),
     ..._tlsParams(tls),
     ..._transportParams(_map(o['transport']), hasTls: hasTls),
-    'packetEncoding': encoding is String
-        ? (encoding.isEmpty ? 'none' : encoding)
-        : null,
+    'packetEncoding':
+        encoding is String ? (encoding.isEmpty ? 'none' : encoding) : null,
   };
   return 'vless://${percentEncode(uuid)}@${_authority(o, 443)}'
       '${_query(params)}${_fragment(o)}';
@@ -212,9 +213,10 @@ String _vmess(Map<String, dynamic> o) {
     'tls': hasTls ? 'tls' : '',
     'sni': hasTls ? readString(tls['server_name']) ?? '' : '',
     'alpn': hasTls ? _join(tls['alpn']) ?? '' : '',
-    'fp': utls != null && readBool(utls['enabled']) == true
-        ? readString(utls['fingerprint']) ?? ''
-        : '',
+    'fp':
+        utls != null && readBool(utls['enabled']) == true
+            ? readString(utls['fingerprint']) ?? ''
+            : '',
   };
   if (hasTls && readBool(tls['insecure']) == true) json['allowInsecure'] = true;
   return 'vmess://${encodeBase64(jsonEncode(json))}';
@@ -223,14 +225,16 @@ String _vmess(Map<String, dynamic> o) {
 String _shadowsocks(Map<String, dynamic> o) {
   final method = readString(o['method']) ?? 'none';
   final password = o['password'] is String ? o['password'] as String : '';
-  final userInfo = method.startsWith('2022-')
-      ? '${percentEncode(method)}:${percentEncode(password)}'
-      : encodeBase64UrlNoPadding('$method:$password');
+  final userInfo =
+      method.startsWith('2022-')
+          ? '${percentEncode(method)}:${percentEncode(password)}'
+          : encodeBase64UrlNoPadding('$method:$password');
   final plugin = readString(o['plugin']);
   final opts = readString(o['plugin_opts']);
-  final query = plugin == null
-      ? ''
-      : '/?plugin=${percentEncode(opts == null ? plugin : '$plugin;$opts')}';
+  final query =
+      plugin == null
+          ? ''
+          : '/?plugin=${percentEncode(opts == null ? plugin : '$plugin;$opts')}';
   final uot = readBool(o['udp_over_tcp']) == true || o['udp_over_tcp'] is Map;
   final uotQuery = uot ? '${query.isEmpty ? '/?' : '&'}uot=1' : '';
   return 'ss://$userInfo@${_authority(o, 8388)}$query$uotQuery${_fragment(o)}';
@@ -307,9 +311,8 @@ String _tuic(Map<String, dynamic> o) {
     'sni': readString(tls['server_name']),
     'allow_insecure': readBool(tls['insecure']) == true ? '1' : null,
     'disable_sni': readBool(tls['disable_sni']) == true ? '1' : null,
-    'zero_rtt_handshake': readBool(o['zero_rtt_handshake']) == true
-        ? '1'
-        : null,
+    'zero_rtt_handshake':
+        readBool(o['zero_rtt_handshake']) == true ? '1' : null,
   };
   return 'tuic://${percentEncode(uuid)}:${percentEncode(password)}@'
       '${_authority(o, 443)}${_query(params)}${_fragment(o)}';
@@ -332,9 +335,10 @@ String _socks(Map<String, dynamic> o) {
   };
   final username = readString(o['username']);
   final password = o['password'] is String ? o['password'] as String : '';
-  final auth = username == null && password.isEmpty
-      ? ''
-      : '${encodeBase64UrlNoPadding('${username ?? ''}:$password')}@';
+  final auth =
+      username == null && password.isEmpty
+          ? ''
+          : '${encodeBase64UrlNoPadding('${username ?? ''}:$password')}@';
   return '$scheme://$auth${_authority(o, 1080)}${_fragment(o)}';
 }
 
@@ -343,9 +347,10 @@ String _http(Map<String, dynamic> o) {
   final secure = tls != null && readBool(tls['enabled']) == true;
   final params = <String, String?>{
     if (secure) ...{
-      'sni': readString(tls['server_name']) == readString(o['server'])
-          ? null
-          : readString(tls['server_name']),
+      'sni':
+          readString(tls['server_name']) == readString(o['server'])
+              ? null
+              : readString(tls['server_name']),
       'insecure': readBool(tls['insecure']) == true ? '1' : null,
     },
   };
@@ -372,15 +377,16 @@ String _anytls(Map<String, dynamic> o) {
 
 String _wireguard(Map<String, dynamic> o) {
   final peers = o['peers'];
-  final peer = peers is List && peers.isNotEmpty && peers.first is Map
-      ? asJsonMap(peers.first)!
-      : <String, dynamic>{
-          'address': o['server'],
-          'port': o['server_port'],
-          'public_key': o['peer_public_key'],
-          'pre_shared_key': o['pre_shared_key'],
-          'reserved': o['reserved'],
-        };
+  final peer =
+      peers is List && peers.isNotEmpty && peers.first is Map
+          ? asJsonMap(peers.first)!
+          : <String, dynamic>{
+            'address': o['server'],
+            'port': o['server_port'],
+            'public_key': o['peer_public_key'],
+            'pre_shared_key': o['pre_shared_key'],
+            'reserved': o['reserved'],
+          };
   final host = readString(peer['address']);
   if (host == null) {
     throw ArgumentError.value(o, 'outbound', 'WireGuard peer has no address');
