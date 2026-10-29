@@ -152,6 +152,30 @@ void main() {
     expect(options.includeAllNetworks, isTrue);
     expect(options.startOnBoot, isTrue);
     expect(() => settings.withValue('nope', true), throwsArgumentError);
+
+    // The iOS options of sing-box-for-apple reach the native side.
+    var all = const SingBoxSettings();
+    for (final key in [
+      SingBoxSettings.keyEnforceRoutes,
+      SingBoxSettings.keyExcludeCellularServices,
+      SingBoxSettings.keyExcludeDeviceCommunication,
+      SingBoxSettings.keyExcludeDefaultRoute,
+      SingBoxSettings.keyNoDefaultRoute,
+      SingBoxSettings.keyExcludeApnsRoute,
+    ]) {
+      all = all.withValue(key, true);
+    }
+    expect(SingBoxSettings.fromMap(all.toMap()), all);
+    expect(all.copyWith(noDefaultRoute: false), isNot(all));
+    expect(all.toServiceOptions().toMap(), {
+      ...const SingBoxServiceOptions().toMap(),
+      'enforceRoutes': true,
+      'excludeCellularServices': true,
+      'excludeDeviceCommunication': true,
+      'excludeDefaultRoute': true,
+      'noDefaultRoute': true,
+      'excludeAPNsRoute': true,
+    });
   });
 
   test('server config detects complete configs', () {

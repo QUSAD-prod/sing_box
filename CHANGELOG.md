@@ -39,6 +39,25 @@
   `SingBoxRuleSetStatus`, `SingBox.manageRuleSets`;
   `SingBoxConfigBuilder.ruleSetUrls()` and the `ruleSetPaths` parameter of
   `build()` / `apply()`; `SingBoxRuleSets.mirrors()`.
+- Crash and out-of-memory reports of the core: `getCoreReports()`,
+  `deleteCoreReport()`, `deleteCoreReports()`, `SingBoxCoreReport`. Memory
+  pressure recorded before the core was killed is filed when the tunnel
+  starts again (like sing-box-for-android/-apple); reports carry the device
+  model and OS (and on iOS the Network Extension options).
+- iOS options of sing-box-for-apple in `SingBoxSettings` /
+  `SingBoxServiceOptions`: `enforceRoutes`, `excludeCellularServices`
+  (16.4+), `excludeDeviceCommunication` (17.4+), `excludeDefaultRoute`
+  ("hide VPN icon"), `noDefaultRoute` (routes in ranges instead of a default
+  route) and `excludeApnsRoute`.
+
+### Fixed
+- Android: `connect()` reported `connected` before Android routed the app
+  through the VPN, so the app's first connection right after it went around
+  the tunnel (reset or hang). The service now waits until the VPN is the
+  app's default network (at most 3 s; not when the app is excluded).
+- Android: a configuration with `wifi_ssid` / `wifi_bssid` rules but without
+  the location permission now logs a warning in the core log instead of
+  silently never matching.
 
 ### Changed
 - `bypassCountries: ['ru']` also connects the sites that only work from

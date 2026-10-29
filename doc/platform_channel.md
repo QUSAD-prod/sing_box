@@ -152,6 +152,12 @@ Behaviour:
 | `includeAllNetworks` | bool | iOS 14+ | `protocolConfiguration.includeAllNetworks` (kill switch) |
 | `excludeLocalNetworks` | bool | iOS 14+ | `protocolConfiguration.excludeLocalNetworks` |
 | `excludeAPNs` | bool | iOS 16.4+ | `excludeAPNs` (push notifications bypass the tunnel) |
+| `enforceRoutes` | bool | iOS 14+ | `protocolConfiguration.enforceRoutes` |
+| `excludeCellularServices` | bool | iOS 16.4+ | `excludeCellularServices` (Wi-Fi Calling, MMS, SMS, Visual Voicemail bypass the tunnel) |
+| `excludeDeviceCommunication` | bool | iOS 17.4+ | `excludeDeviceCommunication` |
+| `excludeDefaultRoute` | bool | iOS | The extension adds `0.0.0.0/31` and `::/127` to the excluded routes (hides the VPN icon). Read by the extension in `openTun`: applies on the next start or reload |
+| `noDefaultRoute` | bool | iOS | Without `route_address`, the extension routes `1.0.0.0/8` … `128.0.0.0/1` and `100::/8` … `8000::/1` instead of default routes. Next start or reload |
+| `excludeAPNsRoute` | bool | iOS | The extension excludes `17.0.0.0/8` and adds `push.apple.com` to the system proxy bypass list. Next start or reload |
 | `quickSettingsTile` | bool | Android | Enables the plugin's Quick Settings `TileService` component (declared disabled in the manifest, toggled with `PackageManager.setComponentEnabledSetting`). The tile starts the VPN with the last config / stops it, reflects the live status, and opens the app (PendingIntent overload of `startActivityAndCollapse` on API 34+) when the VPN permission is missing |
 
 #### `requestAddQuickSettingsTile`
@@ -192,7 +198,7 @@ they must bypass the tunnel.
 | --- | --- | --- |
 | `startProbe` | `{config: String}` | `null`. Starts (or replaces) the probe core: a second libbox service (`CommandServer` without `Start()`, so no command socket) in the app process, running a config without TUN (`direct` inbounds on `127.0.0.1`). Android: its sockets are protected with `VpnService.protect` while the VPN service runs. Throws `INVALID_CONFIG` / `START_FAILED` |
 | `stopProbe` | – | `null`. Stops the probe core; no-op without one |
-| `pingServer` | `{method: "tcp" \| "icmp", host: String, port: int?, timeoutMs: int}` | Map `{success: bool, ping: int (ms), address: String? (IP used), error: String?}`. Measured outside the tunnel: the host is resolved by the underlying network (not the tunnel or FakeIP). Android protects the sockets while the VPN service runs; iOS runs the measurement in the extension (`sendProviderMessage`, `{"type": "ping", ...}`) while the tunnel is connected, in the app otherwise. `tcp`: time of the TCP handshake with `host:port`. `icmp`: round trip of one echo request (unprivileged ICMP datagram socket; ICMPv6 for IPv6). A failed measurement is a result with `success: false`, not an error |
+| `pingServer` | `{method: "tcp" \| "icmp", host: String, port: int?, timeoutMs: int}` | Map `{success: bool, ping: int (ms), address: String? (IP used), error: String?}`. Measured outside the tunnel: the host is resolved by the underlying network (not the tunnel or FakeIP). Android protects the sockets while the VPN service runs; iOS runs the measurement in the extension (`sendProviderMessage` with `{"command": "ping", "method", "host", "port", "timeoutMs"}`, the reply is the JSON result map; the extension binds the sockets and the DNS query to the physical interface) while the tunnel is connected, in the app otherwise. `tcp`: time of the TCP handshake with `host:port`. `icmp`: round trip of one echo request (unprivileged ICMP datagram socket; ICMPv6 for IPv6). A failed measurement is a result with `success: false`, not an error |
 
 ### Key/value storage
 
@@ -395,6 +401,18 @@ the service is stopped). Arguments
 { "type": "result", "externalAddr": "1.2.3.4:5678", "latencyMs": 40,
   "natMapping": 1, "natFiltering": 1, "natTypeSupported": true }
 ```
+
+## Crash and out-of-memory reports
+
+libbox writes them below the working directory: `crash_reports/<time>/`
+(`go.log` with the Go crash output, archived by `Libbox.setup` of the next
+process of the same `crashReportSource`) and `oom_reports/<time>/`. Before
+creating the tunnel's command server both platforms call
+`Libbox.promoteOOMDraft()` (iOS: in the extension), which files the memory
+pressure recorded by the previous session. `SetupOptions.platformMetadata`
+carries the OS and device model (iOS extension: also the Network Extension
+options). The Dart side reads the directories itself
+(`SingBox.getCoreReports()`).
 
 ## Files and directories
 

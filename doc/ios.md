@@ -104,6 +104,17 @@ await SingBox.instance.initialize(const SingBoxOptions(
 | `killSwitch` / `includeAllNetworks` | `protocolConfiguration.includeAllNetworks` (iOS 14+): all traffic must use the tunnel. Off by default - it also captures traffic that usually bypasses VPNs and breaks AirDrop/CarPlay while connected |
 | `excludeLocalNetworks` | Local network traffic bypasses the tunnel (default on, so LAN printers and casting keep working with the kill switch) |
 | `excludeAPNs` | Push notifications bypass the tunnel (iOS 16.4+, default on) |
+| `enforceRoutes` | Without the kill switch: iOS scopes the tunnel's routes to the VPN even for apps that bind to an interface |
+| `excludeCellularServices` | Wi-Fi Calling, MMS, SMS and Visual Voicemail bypass the tunnel with the kill switch (iOS 16.4+) |
+| `excludeDeviceCommunication` | Communication with paired devices bypasses the tunnel with the kill switch (iOS 17.4+) |
+| `excludeDefaultRoute` | Hides the VPN icon (`0.0.0.0/31`, `::/127` excluded), as "Hide VPN Icon" in sing-box-for-apple |
+| `noDefaultRoute` | Routes the address space in ranges instead of a default route (sing-box-for-apple's "No Default Route", helps HomeKit) |
+| `excludeApnsRoute` | Push notifications bypass the tunnel on every iOS version (`17.0.0.0/8` excluded, `push.apple.com` bypasses the system proxy) |
+
+The last three are applied by the extension when the tunnel starts or
+reloads. Native crash reports (PLCrashReporter in sing-box-for-apple) are not
+included; Go crashes and memory pressure are reported, see
+`SingBox.getCoreReports()`.
 
 Nothing is forced: flutter_vless enabled the kill switch unconditionally,
 which broke local networking for many users.

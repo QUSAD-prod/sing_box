@@ -48,6 +48,12 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
             throw Self.error("missing return pointer")
         }
 
+        // Route overrides of sing-box-for-apple, set with setServiceOptions.
+        let serviceOptions = tunnel.paths?.defaults.dictionary(forKey: SingBoxKeys.serviceOptions) ?? [:]
+        let excludeDefaultRoute = (serviceOptions["excludeDefaultRoute"] as? NSNumber)?.boolValue ?? false
+        let noDefaultRoute = (serviceOptions["noDefaultRoute"] as? NSNumber)?.boolValue ?? false
+        let excludeAPNsRoute = (serviceOptions["excludeAPNsRoute"] as? NSNumber)?.boolValue ?? false
+
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         if options.getAutoRoute() {
             settings.mtu = NSNumber(value: options.getMTU())
@@ -79,13 +85,28 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
                 }
             }
             if ipv4Routes.isEmpty {
-                ipv4Routes.append(NEIPv4Route.default())
+                if noDefaultRoute {
+                    // 1.0.0.0/8, 2.0.0.0/7, … 128.0.0.0/1
+                    for shift in 0 ..< 8 {
+                        let first = 1 << shift
+                        ipv4Routes.append(NEIPv4Route(destinationAddress: "\(first).0.0.0", subnetMask: "\(256 - first).0.0.0"))
+                    }
+                } else {
+                    ipv4Routes.append(NEIPv4Route.default())
+                }
             }
             if let iterator = options.getInet4RouteExcludeAddress() {
                 while iterator.hasNext() {
                     guard let prefix = iterator.next() else { continue }
                     ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: prefix.address(), subnetMask: prefix.mask()))
                 }
+            }
+            if excludeDefaultRoute {
+                // Hides the VPN icon in the status bar (sing-box-for-apple).
+                ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: "0.0.0.0", subnetMask: "255.255.255.254"))
+            }
+            if excludeAPNsRoute {
+                ipv4ExcludeRoutes.append(NEIPv4Route(destinationAddress: "17.0.0.0", subnetMask: "255.0.0.0"))
             }
             ipv4Settings.includedRoutes = ipv4Routes
             ipv4Settings.excludedRoutes = ipv4ExcludeRoutes
@@ -112,13 +133,24 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
                 }
             }
             if ipv6Routes.isEmpty {
-                ipv6Routes.append(NEIPv6Route.default())
+                if noDefaultRoute {
+                    // 100::/8, 200::/7, … 8000::/1
+                    for prefix in 1 ... 8 {
+                        let first = String(0x100 << (8 - prefix), radix: 16)
+                        ipv6Routes.append(NEIPv6Route(destinationAddress: "\(first)::", networkPrefixLength: NSNumber(value: prefix)))
+                    }
+                } else {
+                    ipv6Routes.append(NEIPv6Route.default())
+                }
             }
             if let iterator = options.getInet6RouteExcludeAddress() {
                 while iterator.hasNext() {
                     guard let prefix = iterator.next() else { continue }
                     ipv6ExcludeRoutes.append(NEIPv6Route(destinationAddress: prefix.address(), networkPrefixLength: NSNumber(value: prefix.prefix())))
                 }
+            }
+            if excludeDefaultRoute {
+                ipv6ExcludeRoutes.append(NEIPv6Route(destinationAddress: "::", networkPrefixLength: 127))
             }
             ipv6Settings.includedRoutes = ipv6Routes
             ipv6Settings.excludedRoutes = ipv6ExcludeRoutes
@@ -143,7 +175,10 @@ final class SingBoxPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol,
             proxySettings.httpsServer = proxyServer
             proxySettings.httpEnabled = true
             proxySettings.httpsEnabled = true
-            let bypassDomains = options.getHTTPProxyBypassDomain()?.toArray() ?? []
+            var bypassDomains = options.getHTTPProxyBypassDomain()?.toArray() ?? []
+            if excludeAPNsRoute, !bypassDomains.contains("push.apple.com") {
+                bypassDomains.append("push.apple.com")
+            }
             if !bypassDomains.isEmpty {
                 proxySettings.exceptionList = bypassDomains
             }

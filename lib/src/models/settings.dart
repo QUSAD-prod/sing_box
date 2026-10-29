@@ -19,6 +19,12 @@ class SingBoxSettings {
     this.excludeApns = true,
     this.disableMemoryLimit = false,
     this.quickSettingsTile = false,
+    this.enforceRoutes = false,
+    this.excludeCellularServices = false,
+    this.excludeDeviceCommunication = false,
+    this.excludeDefaultRoute = false,
+    this.noDefaultRoute = false,
+    this.excludeApnsRoute = false,
   });
 
   /// Setting key for [autoConnectOnStart], used by `SingBox.updateSetting()`.
@@ -45,6 +51,24 @@ class SingBoxSettings {
   /// Setting key for [quickSettingsTile].
   static const keyQuickSettingsTile = 'quickSettingsTile';
 
+  /// Setting key for [enforceRoutes].
+  static const keyEnforceRoutes = 'enforceRoutes';
+
+  /// Setting key for [excludeCellularServices].
+  static const keyExcludeCellularServices = 'excludeCellularServices';
+
+  /// Setting key for [excludeDeviceCommunication].
+  static const keyExcludeDeviceCommunication = 'excludeDeviceCommunication';
+
+  /// Setting key for [excludeDefaultRoute].
+  static const keyExcludeDefaultRoute = 'excludeDefaultRoute';
+
+  /// Setting key for [noDefaultRoute].
+  static const keyNoDefaultRoute = 'noDefaultRoute';
+
+  /// Setting key for [excludeApnsRoute].
+  static const keyExcludeApnsRoute = 'excludeApnsRoute';
+
   /// All valid setting keys.
   static const keys = [
     keyQuickSettingsTile,
@@ -55,6 +79,12 @@ class SingBoxSettings {
     keyExcludeLocalNetworks,
     keyExcludeApns,
     keyDisableMemoryLimit,
+    keyEnforceRoutes,
+    keyExcludeCellularServices,
+    keyExcludeDeviceCommunication,
+    keyExcludeDefaultRoute,
+    keyNoDefaultRoute,
+    keyExcludeApnsRoute,
   ];
 
   /// Connect to the active server automatically when
@@ -91,6 +121,36 @@ class SingBoxSettings {
   /// Android: show the plugin's Quick Settings tile (VPN toggle).
   final bool quickSettingsTile;
 
+  /// iOS 14+: `protocolConfiguration.enforceRoutes` - without [killSwitch] the
+  /// system scopes the tunnel's routes to the VPN and the excluded routes to
+  /// the primary interface, overriding the routing of apps that bind to an
+  /// interface. With [excludeLocalNetworks] LAN traffic stays outside.
+  final bool enforceRoutes;
+
+  /// iOS 16.4+: Wi-Fi Calling, MMS, SMS and Visual Voicemail bypass the
+  /// tunnel when [killSwitch] is on.
+  final bool excludeCellularServices;
+
+  /// iOS 17.4+: `protocolConfiguration.excludeDeviceCommunication` -
+  /// communication with paired devices bypasses the tunnel when [killSwitch]
+  /// is on.
+  final bool excludeDeviceCommunication;
+
+  /// iOS: adds `0.0.0.0/31` and `::/127` to the excluded routes, which hides
+  /// the VPN icon in the status bar (sing-box-for-apple's "Hide VPN Icon").
+  final bool excludeDefaultRoute;
+
+  /// iOS: route the address space in ranges (`1.0.0.0/8` … `128.0.0.0/1`)
+  /// instead of a default route unless the configuration sets
+  /// `route_address` (sing-box-for-apple's "No Default Route"; fixes HomeKit
+  /// and some other system features).
+  final bool noDefaultRoute;
+
+  /// iOS: keep Apple push notifications outside the tunnel on every iOS
+  /// version by excluding `17.0.0.0/8` and bypassing `push.apple.com` in the
+  /// system HTTP proxy (unlike [excludeApns] it works without [killSwitch]).
+  final bool excludeApnsRoute;
+
   /// Creates settings from a map (for deserialization). Unknown keys are
   /// ignored.
   factory SingBoxSettings.fromMap(Map<dynamic, dynamic> map) {
@@ -108,6 +168,12 @@ class SingBoxSettings {
       excludeApns: read(keyExcludeApns, true),
       disableMemoryLimit: read(keyDisableMemoryLimit, false),
       quickSettingsTile: read(keyQuickSettingsTile, false),
+      enforceRoutes: read(keyEnforceRoutes, false),
+      excludeCellularServices: read(keyExcludeCellularServices, false),
+      excludeDeviceCommunication: read(keyExcludeDeviceCommunication, false),
+      excludeDefaultRoute: read(keyExcludeDefaultRoute, false),
+      noDefaultRoute: read(keyNoDefaultRoute, false),
+      excludeApnsRoute: read(keyExcludeApnsRoute, false),
     );
   }
 
@@ -121,6 +187,12 @@ class SingBoxSettings {
     keyExcludeApns: excludeApns,
     keyDisableMemoryLimit: disableMemoryLimit,
     keyQuickSettingsTile: quickSettingsTile,
+    keyEnforceRoutes: enforceRoutes,
+    keyExcludeCellularServices: excludeCellularServices,
+    keyExcludeDeviceCommunication: excludeDeviceCommunication,
+    keyExcludeDefaultRoute: excludeDefaultRoute,
+    keyNoDefaultRoute: noDefaultRoute,
+    keyExcludeApnsRoute: excludeApnsRoute,
   };
 
   /// Returns a copy with [key] set to [value].
@@ -144,6 +216,12 @@ class SingBoxSettings {
     excludeLocalNetworks: excludeLocalNetworks,
     excludeApns: excludeApns,
     quickSettingsTile: quickSettingsTile,
+    enforceRoutes: enforceRoutes,
+    excludeCellularServices: excludeCellularServices,
+    excludeDeviceCommunication: excludeDeviceCommunication,
+    excludeDefaultRoute: excludeDefaultRoute,
+    noDefaultRoute: noDefaultRoute,
+    excludeApnsRoute: excludeApnsRoute,
   );
 
   /// Creates a copy with modified fields.
@@ -156,6 +234,12 @@ class SingBoxSettings {
     bool? excludeApns,
     bool? disableMemoryLimit,
     bool? quickSettingsTile,
+    bool? enforceRoutes,
+    bool? excludeCellularServices,
+    bool? excludeDeviceCommunication,
+    bool? excludeDefaultRoute,
+    bool? noDefaultRoute,
+    bool? excludeApnsRoute,
   }) {
     return SingBoxSettings(
       autoConnectOnStart: autoConnectOnStart ?? this.autoConnectOnStart,
@@ -167,6 +251,14 @@ class SingBoxSettings {
       excludeApns: excludeApns ?? this.excludeApns,
       disableMemoryLimit: disableMemoryLimit ?? this.disableMemoryLimit,
       quickSettingsTile: quickSettingsTile ?? this.quickSettingsTile,
+      enforceRoutes: enforceRoutes ?? this.enforceRoutes,
+      excludeCellularServices:
+          excludeCellularServices ?? this.excludeCellularServices,
+      excludeDeviceCommunication:
+          excludeDeviceCommunication ?? this.excludeDeviceCommunication,
+      excludeDefaultRoute: excludeDefaultRoute ?? this.excludeDefaultRoute,
+      noDefaultRoute: noDefaultRoute ?? this.noDefaultRoute,
+      excludeApnsRoute: excludeApnsRoute ?? this.excludeApnsRoute,
     );
   }
 
@@ -180,7 +272,13 @@ class SingBoxSettings {
       other.excludeLocalNetworks == excludeLocalNetworks &&
       other.excludeApns == excludeApns &&
       other.disableMemoryLimit == disableMemoryLimit &&
-      other.quickSettingsTile == quickSettingsTile;
+      other.quickSettingsTile == quickSettingsTile &&
+      other.enforceRoutes == enforceRoutes &&
+      other.excludeCellularServices == excludeCellularServices &&
+      other.excludeDeviceCommunication == excludeDeviceCommunication &&
+      other.excludeDefaultRoute == excludeDefaultRoute &&
+      other.noDefaultRoute == noDefaultRoute &&
+      other.excludeApnsRoute == excludeApnsRoute;
 
   @override
   int get hashCode => Object.hash(
@@ -192,6 +290,12 @@ class SingBoxSettings {
     excludeApns,
     disableMemoryLimit,
     quickSettingsTile,
+    enforceRoutes,
+    excludeCellularServices,
+    excludeDeviceCommunication,
+    excludeDefaultRoute,
+    noDefaultRoute,
+    excludeApnsRoute,
   );
 
   @override

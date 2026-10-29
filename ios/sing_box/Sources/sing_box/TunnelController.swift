@@ -303,6 +303,9 @@ final class TunnelController {
         var includeAllNetworks = false
         var excludeLocalNetworks = true
         var excludeAPNs = true
+        var enforceRoutes = false
+        var excludeCellularServices = false
+        var excludeDeviceCommunication = false
 
         init() {}
 
@@ -311,6 +314,9 @@ final class TunnelController {
             includeAllNetworks = map.bool("includeAllNetworks") ?? false
             excludeLocalNetworks = map.bool("excludeLocalNetworks") ?? true
             excludeAPNs = map.bool("excludeAPNs") ?? true
+            enforceRoutes = map.bool("enforceRoutes") ?? false
+            excludeCellularServices = map.bool("excludeCellularServices") ?? false
+            excludeDeviceCommunication = map.bool("excludeDeviceCommunication") ?? false
         }
     }
 
@@ -354,8 +360,13 @@ final class TunnelController {
         if let proto = manager.protocolConfiguration {
             proto.includeAllNetworks = options.includeAllNetworks
             proto.excludeLocalNetworks = options.excludeLocalNetworks
+            proto.enforceRoutes = options.enforceRoutes
             if #available(iOS 16.4, *) {
                 proto.excludeAPNs = options.excludeAPNs
+                proto.excludeCellularServices = options.excludeCellularServices
+            }
+            if #available(iOS 17.4, *) {
+                proto.excludeDeviceCommunication = options.excludeDeviceCommunication
             }
         }
     }
